@@ -198,8 +198,12 @@ def main() -> int:
                             "USERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
                             "PROCESSOR_ARCHITECTURE", "OS", "PATHEXT", "COMSPEC"}}
     env.update(PATH=path, LOCALAPPDATA=str(appdata))
-    check("Python is not reachable on the app's PATH",
-          shutil.which("python", path=path) is None and shutil.which("py", path=path) is None)
+    found_python = shutil.which("python", path=path)
+    found_py = shutil.which("py", path=path)
+    print(f"diagnostic: app PATH = {path}")
+    print(f"diagnostic: shutil.which('python', path=<app PATH>) -> {found_python}")
+    print(f"diagnostic: shutil.which('py', path=<app PATH>) -> {found_py}")
+    check("Python is not reachable on the app's PATH", found_python is None and found_py is None)
     check("no PYTHON* variables in the app's environment", not any(k.upper().startswith("PYTHON") for k in env))
 
     data = appdata / "MySQLDBAValidator"
