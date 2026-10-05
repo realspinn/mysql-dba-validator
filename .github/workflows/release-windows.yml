@@ -29,7 +29,7 @@ jobs:
       - name: Tag matches backend/version.py
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          $version = python -c "import re,pathlib; print(re.search(r'APP_VERSION = \"(.+?)\"', pathlib.Path('backend/version.py').read_text()).group(1))"
+          $version = python -c "import sys; sys.path.insert(0, 'backend'); import version; print(version.APP_VERSION)"
           if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} does not match APP_VERSION $version" }
 
       - name: Test suite
