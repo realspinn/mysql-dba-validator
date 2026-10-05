@@ -138,7 +138,7 @@ def collect_statement_evidence(
     if statement_type not in {"SELECT", "UPDATE", "DELETE"}:
         return DatabaseEvidence(
             available=False,
-            error=f"unsupported_statement_type: {statement_type}. Only SELECT, UPDATE, and DELETE are supported in V2 Phase 1.",
+            error=f"unsupported_statement_type: {statement_type}. EXPLAIN evidence is collected only for SELECT, UPDATE, and DELETE statements.",
         )
 
     if not fact.tables:
