@@ -19,6 +19,9 @@ TLS. See [Verification status](#verification-status).
 
 No Python, pip or virtual environment is needed.
 
+> **Status:** no downloadable release has been published yet. Until the
+> Releases page lists one, run from source (see [Development](#development)).
+
 1. Open the repository's **Releases** page and download
    `MySQL-DBA-Validator-v<version>-windows-x64.zip`. Download the matching
    `.sha256` file too.
