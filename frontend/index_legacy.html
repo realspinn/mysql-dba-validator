@@ -1,0 +1,2013 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>MySQL DBA Validator</title>
+	<style>
+		:root {
+			--ink: #17231f;
+			--muted: #68756f;
+			--line: #d9dfd9;
+			--paper: #f4f5ef;
+			--surface: #fffefa;
+			--mint: #d8eee3;
+			--teal: #176b63;
+			--teal-dark: #104c48;
+			--coral: #d85d45;
+			--amber: #b57b16;
+			--green: #2f7957;
+			--mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+			--sans: "Avenir Next", Avenir, "Trebuchet MS", sans-serif
+		}
+
+		* {
+			box-sizing: border-box
+		}
+
+		body {
+			margin: 0;
+			color: var(--ink);
+			background: var(--paper);
+			font-family: var(--sans);
+			min-height: 100vh
+		}
+
+		body:before {
+			content: "";
+			position: fixed;
+			inset: 0;
+			pointer-events: none;
+			opacity: .35;
+			background-image: linear-gradient(rgba(23, 35, 31, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(23, 35, 31, .035) 1px, transparent 1px);
+			background-size: 32px 32px
+		}
+
+		header,
+		main {
+			position: relative;
+			z-index: 1
+		}
+
+		header {
+			border-bottom: 1px solid var(--line);
+			padding: 28px clamp(20px, 5vw, 76px) 24px;
+			background: rgba(255, 254, 250, .78)
+		}
+
+		.masthead {
+			max-width: 1440px;
+			margin: auto;
+			display: flex;
+			justify-content: space-between;
+			gap: 24px;
+			align-items: end
+		}
+
+		.eyebrow,
+		.kicker,
+		.section-label {
+			color: var(--teal);
+			font-size: 11px;
+			font-weight: 800;
+			letter-spacing: .14em;
+			text-transform: uppercase
+		}
+
+		h1 {
+			margin: 8px 0 4px;
+			font-size: clamp(28px, 4vw, 52px);
+			line-height: 1;
+			letter-spacing: 0;
+			font-weight: 800
+		}
+
+		.lede {
+			margin: 0;
+			color: var(--muted);
+			font-size: 15px
+		}
+
+		.context-chip {
+			border: 1px solid var(--line);
+			background: var(--surface);
+			padding: 11px 14px;
+			min-width: 190px
+		}
+
+		.context-chip strong {
+			display: block;
+			margin-top: 4px;
+			font-size: 14px
+		}
+
+		main {
+			max-width: 1440px;
+			margin: 0 auto;
+			padding: 30px clamp(20px, 5vw, 76px) 70px
+		}
+
+		.workspace {
+			display: grid;
+			grid-template-columns: minmax(300px, .82fr) minmax(0, 1.5fr);
+			gap: 22px;
+			align-items: start
+		}
+
+		.stack {
+			display: grid;
+			gap: 22px
+		}
+
+		.panel {
+			border: 1px solid var(--line);
+			background: rgba(255, 254, 250, .92);
+			padding: 22px;
+			box-shadow: 0 12px 30px rgba(23, 35, 31, .045)
+		}
+
+		.panel-title {
+			display: flex;
+			justify-content: space-between;
+			gap: 14px;
+			align-items: start;
+			margin-bottom: 20px
+		}
+
+		h2 {
+			margin: 5px 0 0;
+			font-size: 21px;
+			letter-spacing: 0
+		}
+
+		.panel-note {
+			color: var(--muted);
+			font-size: 12px;
+			line-height: 1.45;
+			max-width: 280px;
+			text-align: right
+		}
+
+		.fields {
+			display: grid;
+			grid-template-columns: 1.6fr .7fr;
+			gap: 14px
+		}
+
+		.connection-modes {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px 18px;
+			margin-bottom: 18px
+		}
+
+		.connection-modes label {
+			display: flex;
+			align-items: center;
+			gap: 7px;
+			color: var(--ink)
+		}
+
+		.company-setup {
+			border-left: 3px solid var(--amber);
+			background: #fff8e8;
+			padding: 14px;
+			color: var(--ink);
+			line-height: 1.5
+		}
+
+		.field {
+			display: grid;
+			gap: 7px
+		}
+
+		.field.full {
+			grid-column: 1/-1
+		}
+
+		label {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 700
+		}
+
+		input,
+		select,
+		textarea {
+			width: 100%;
+			border: 1px solid #c8d1ca;
+			border-radius: 4px;
+			background: #fff;
+			color: var(--ink);
+			font: inherit
+		}
+
+		input,
+		select {
+			height: 42px;
+			padding: 0 11px
+		}
+
+		input:focus,
+		select:focus,
+		textarea:focus,
+		button:focus-visible {
+			outline: 3px solid rgba(216, 93, 69, .28);
+			outline-offset: 2px;
+			border-color: var(--coral)
+		}
+
+		textarea {
+			min-height: 365px;
+			padding: 16px;
+			resize: vertical;
+			font-family: var(--mono);
+			font-size: 13px;
+			line-height: 1.65
+		}
+
+		.actions {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 10px;
+			margin-top: 18px
+		}
+
+		button {
+			border: 0;
+			border-radius: 4px;
+			min-height: 40px;
+			padding: 0 15px;
+			color: var(--surface);
+			background: var(--teal);
+			font: 700 13px var(--sans);
+			cursor: pointer
+		}
+
+		button:hover:not(:disabled) {
+			background: var(--teal-dark)
+		}
+
+		button.secondary {
+			color: var(--teal-dark);
+			background: var(--mint)
+		}
+
+		button:disabled {
+			opacity: .48;
+			cursor: not-allowed
+		}
+
+		.status {
+			min-height: 22px;
+			color: var(--muted);
+			font-size: 12px;
+			line-height: 1.45
+		}
+
+		.status.success {
+			color: var(--green)
+		}
+
+		.status.error {
+			color: var(--coral)
+		}
+
+		.database-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 10px;
+			align-items: end
+		}
+
+		.database-context {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			align-items: center;
+			margin-top: 16px;
+			padding-top: 15px;
+			border-top: 1px solid var(--line)
+		}
+
+		.pill {
+			display: inline-flex;
+			align-items: center;
+			gap: 7px;
+			padding: 6px 9px;
+			border: 1px solid var(--line);
+			background: #f7faf5;
+			font-size: 12px
+		}
+
+		.dot {
+			width: 8px;
+			height: 8px;
+			background: var(--amber);
+			border-radius: 50%
+		}
+
+		.dot.on {
+			background: var(--green)
+		}
+
+		.warning {
+			margin-top: 12px;
+			color: #79530e;
+			background: #fff4d7;
+			border-left: 3px solid var(--amber);
+			padding: 10px 12px;
+			font-size: 12px;
+			line-height: 1.45
+		}
+
+		.results-panel {
+			min-height: 500px
+		}
+
+		.empty {
+			display: grid;
+			place-items: center;
+			min-height: 410px;
+			padding: 35px;
+			text-align: center;
+			color: var(--muted);
+			border: 1px dashed #c8d1ca
+		}
+
+		.empty strong {
+			display: block;
+			color: var(--ink);
+			font-size: 17px;
+			margin-bottom: 8px
+		}
+
+		.summary {
+			display: grid;
+			grid-template-columns: 1.3fr .7fr .9fr;
+			gap: 12px;
+			margin-bottom: 22px
+		}
+
+		.summary-cell {
+			padding: 15px;
+			background: var(--teal-dark);
+			color: white;
+			min-height: 93px
+		}
+
+		.summary-cell:nth-child(2) {
+			background: var(--coral)
+		}
+
+		.summary-cell:nth-child(3) {
+			background: #e8efe7;
+			color: var(--ink)
+		}
+
+		.summary-cell .label {
+			opacity: .75;
+			font-size: 10px;
+			letter-spacing: .13em;
+			text-transform: uppercase;
+			font-weight: 800
+		}
+
+		.summary-cell strong {
+			display: block;
+			margin-top: 9px;
+			font-size: 25px;
+			line-height: 1
+		}
+
+		.summary-cell small {
+			display: block;
+			margin-top: 8px;
+			font-size: 11px
+		}
+
+		.statement {
+			border-top: 4px solid var(--teal);
+			background: #fff;
+			margin-top: 18px
+		}
+
+		.statement-head {
+			display: flex;
+			justify-content: space-between;
+			gap: 15px;
+			align-items: start;
+			padding: 16px;
+			border-bottom: 1px solid var(--line)
+		}
+
+		.statement-title {
+			display: flex;
+			gap: 11px;
+			align-items: center;
+			flex-wrap: wrap
+		}
+
+		.statement-number {
+			color: var(--teal);
+			font: 700 12px var(--mono)
+		}
+
+		.statement-type {
+			font: 800 14px var(--mono)
+		}
+
+		.statement-tables {
+			color: var(--muted);
+			font-size: 12px
+		}
+
+		.risk {
+			padding: 5px 9px;
+			color: white;
+			font-size: 11px;
+			font-weight: 800;
+			letter-spacing: .08em
+		}
+
+		.risk.LOW {
+			background: var(--green)
+		}
+
+		.risk.MEDIUM {
+			background: var(--amber)
+		}
+
+		.risk.HIGH,
+		.risk.CRITICAL {
+			background: var(--coral)
+		}
+
+		.statement-body {
+			padding: 16px;
+			display: grid;
+			gap: 16px
+		}
+
+		.sql-block {
+			margin: 0;
+			padding: 12px;
+			overflow-x: auto;
+			white-space: pre-wrap;
+			word-break: break-word;
+			background: #f1f4ee;
+			border-left: 3px solid var(--teal);
+			color: #30413a;
+			font: 12px/1.6 var(--mono)
+		}
+
+		.metric-grid {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px
+		}
+
+		.metric {
+			border: 1px solid var(--line);
+			padding: 11px;
+			min-height: 62px
+		}
+
+		.metric b {
+			display: block;
+			margin-top: 5px;
+			font: 700 14px var(--mono)
+		}
+
+		.layer-grid {
+			display: grid;
+			grid-template-columns: repeat(2, 1fr);
+			gap: 12px
+		}
+
+		.layer {
+			border: 1px solid var(--line);
+			padding: 14px
+		}
+
+		.layer h3 {
+			margin: 0 0 12px;
+			font-size: 13px
+		}
+
+		.layer.evidence {
+			border-top: 3px solid var(--teal)
+		}
+
+		.layer.metadata {
+			border-top: 3px solid var(--amber)
+		}
+
+		.layer.static {
+			border-top: 3px solid #899a91
+		}
+
+		.layer p {
+			margin: 6px 0;
+			font-size: 12px;
+			color: var(--muted)
+		}
+
+		.factor-list,
+		.plain-list {
+			display: grid;
+			gap: 6px;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			font-size: 12px;
+			line-height: 1.45
+		}
+
+		.factor-list li {
+			display: flex;
+			justify-content: space-between;
+			gap: 12px;
+			border-bottom: 1px solid #edf0eb;
+			padding-bottom: 5px
+		}
+
+		.points {
+			white-space: nowrap;
+			font-family: var(--mono);
+			font-weight: 700;
+			color: var(--coral)
+		}
+
+		.subheading {
+			margin: 18px 0 8px;
+			color: var(--muted);
+			font-size: 11px;
+			letter-spacing: .1em;
+			text-transform: uppercase
+		}
+
+		.muted {
+			color: var(--muted);
+			font-size: 12px
+		}
+
+		.error-box {
+			color: var(--coral);
+			background: #fff0ec;
+			padding: 10px;
+			font-size: 12px
+		}
+
+		@media(max-width:880px) {
+			.workspace {
+				grid-template-columns: 1fr
+			}
+
+			.results-panel {
+				min-height: 0
+			}
+		}
+
+		@media(max-width:600px) {
+			header {
+				padding: 22px 18px
+			}
+
+			.masthead {
+				display: block
+			}
+
+			.context-chip {
+				margin-top: 18px
+			}
+
+			main {
+				padding: 20px 18px 45px
+			}
+
+			.fields,
+			.database-row,
+			.summary,
+			.layer-grid,
+			.metric-grid {
+				grid-template-columns: 1fr
+			}
+
+			.field.full {
+				grid-column: auto
+			}
+
+			.panel {
+				padding: 16px
+			}
+
+			.panel-title {
+				display: block
+			}
+
+			.panel-note {
+				margin-top: 8px;
+				text-align: left
+			}
+
+			textarea {
+				min-height: 280px
+			}
+
+			.statement-head {
+				display: block
+			}
+
+			.statement-head .risk {
+				display: inline-block;
+				margin-top: 12px
+			}
+		}
+
+		/* Single-view workspace: the page stays fixed while long editor and findings content scrolls internally. */
+		html,
+		body {
+			height: 100%;
+			overflow: hidden
+		}
+
+		body {
+			display: flex;
+			flex-direction: column
+		}
+
+		header {
+			flex: 0 0 auto
+		}
+
+		.stepper {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			gap: 1px;
+			background: var(--line);
+			border-bottom: 1px solid var(--line);
+			flex: 0 0 auto
+		}
+
+		.step {
+			position: relative;
+			padding: 12px clamp(10px, 2vw, 24px);
+			background: rgba(255, 254, 250, .92);
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 800;
+			letter-spacing: .04em
+		}
+
+		.step:not(:last-child):after {
+			content: "→";
+			position: absolute;
+			right: -9px;
+			top: 9px;
+			z-index: 2;
+			color: var(--teal);
+			font-size: 15px
+		}
+
+		.step.active {
+			background: var(--mint);
+			color: var(--teal-dark)
+		}
+
+		.step.done {
+			color: var(--green)
+		}
+
+		.step small {
+			display: block;
+			margin-top: 3px;
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: 0
+		}
+
+		.stepper .step:nth-child(1):before {
+			content: "1  ";
+			color: var(--teal)
+		}
+
+		.stepper .step:nth-child(2):before {
+			content: "2  ";
+			color: var(--teal)
+		}
+
+		.stepper .step:nth-child(3):before {
+			content: "3  ";
+			color: var(--teal)
+		}
+
+		.stepper .step:nth-child(4):before {
+			content: "4  ";
+			color: var(--teal)
+		}
+
+		main {
+			width: 100%;
+			max-width: none;
+			min-height: 0;
+			flex: 1;
+			padding: 16px clamp(16px, 3vw, 46px) 18px;
+			overflow: hidden
+		}
+
+		.workspace {
+			height: 100%;
+			min-height: 0;
+			grid-template-columns: minmax(220px, 260px) minmax(340px, 1fr) minmax(380px, 1.2fr);
+			gap: 16px;
+			overflow: hidden
+		}
+
+		.workspace>.stack {
+			display: contents
+		}
+
+		.workspace>.stack:nth-child(1)>.panel:nth-child(1) {
+			grid-column: 1;
+			grid-row: 1
+		}
+
+		.workspace>.stack:nth-child(1)>.panel:nth-child(2) {
+			grid-column: 1;
+			grid-row: 2
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) {
+			grid-column: 2;
+			grid-row: 1 / span 2;
+			min-height: 0;
+			display: flex;
+			flex-direction: column
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+			grid-column: 3;
+			grid-row: 1 / span 2;
+			min-height: 0;
+			display: flex;
+			flex-direction: column
+		}
+
+		.workspace .panel {
+			padding: 16px
+		}
+
+		.workspace .panel-title {
+			margin-bottom: 12px
+		}
+
+		.workspace .panel-note {
+			font-size: 11px
+		}
+
+		.workspace textarea {
+			flex: 1;
+			min-height: 0;
+			height: auto
+		}
+
+		.workspace #results {
+			min-height: 0;
+			overflow: auto;
+			padding-right: 4px
+		}
+
+		.workspace .summary {
+			grid-template-columns: 1fr 1fr 1fr;
+			margin-bottom: 12px
+		}
+
+		.workspace .statement {
+			margin-top: 12px
+		}
+
+		.workspace .layer-grid {
+			grid-template-columns: 1fr
+		}
+
+		.workspace .statement-body {
+			padding: 12px;
+			gap: 10px
+		}
+
+		.workspace .metric-grid {
+			grid-template-columns: repeat(2, 1fr)
+		}
+
+		@media(max-width:1100px) {
+			.workspace {
+				grid-template-columns: minmax(190px, 220px) minmax(300px, 1fr) minmax(300px, 1fr);
+				gap: 10px
+			}
+
+			.workspace .panel {
+				padding: 12px
+			}
+
+			.workspace .panel-note {
+				display: none
+			}
+
+			.workspace .fields {
+				grid-template-columns: 1fr
+			}
+
+			.workspace .field.full {
+				grid-column: auto
+			}
+
+			.workspace .database-row {
+				grid-template-columns: 1fr
+			}
+
+			.workspace .database-row button {
+				width: 100%
+			}
+
+			.step {
+				padding-left: 10px;
+				padding-right: 10px
+			}
+		}
+
+		@media(max-width:780px) {
+
+			html,
+			body {
+				overflow: auto
+			}
+
+			.stepper {
+				grid-template-columns: repeat(4, 1fr)
+			}
+
+			.step {
+				font-size: 10px;
+				padding: 9px 5px
+			}
+
+			.step:not(:last-child):after {
+				right: -7px;
+				top: 7px
+			}
+
+			.step small {
+				display: none
+			}
+
+			main {
+				overflow: auto;
+				padding: 12px
+			}
+
+			.workspace {
+				height: auto;
+				display: grid;
+				grid-template-columns: 1fr;
+				overflow: visible
+			}
+
+			.workspace>.stack {
+				display: contents
+			}
+
+			.workspace>.stack:nth-child(1)>.panel:nth-child(1),
+			.workspace>.stack:nth-child(1)>.panel:nth-child(2),
+			.workspace>.stack:nth-child(2)>.panel:nth-child(1),
+			.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+				grid-column: 1;
+				grid-row: auto
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(1) {
+				min-height: 390px
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+				min-height: 420px
+			}
+
+			.workspace textarea {
+				min-height: 270px
+			}
+
+			.workspace #results {
+				overflow: visible
+			}
+
+			.workspace .panel-note {
+				display: block;
+				text-align: left
+			}
+
+			.workspace .summary {
+				grid-template-columns: 1fr
+			}
+
+			.workspace .metric-grid {
+				grid-template-columns: 1fr
+			}
+
+			.workspace .layer-grid {
+				grid-template-columns: 1fr
+			}
+		}
+
+		@media(min-width:781px) {
+			.workspace>.stack:nth-child(1) {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				height: 100%;
+				min-height: 0;
+				align-self: stretch;
+				overflow: auto
+			}
+
+			.workspace>.stack:nth-child(1)>.panel:nth-child(1),
+			.workspace>.stack:nth-child(1)>.panel:nth-child(2) {
+				grid-column: auto;
+				grid-row: auto;
+				flex: 0 0 auto
+			}
+
+			.workspace>.stack:nth-child(1) .panel {
+				padding: 12px
+			}
+
+			.workspace>.stack:nth-child(1) .panel-note {
+				display: none
+			}
+
+			.workspace>.stack:nth-child(1) .panel-title {
+				margin-bottom: 10px
+			}
+
+			.workspace>.stack:nth-child(1) h2 {
+				font-size: 17px
+			}
+
+			.workspace>.stack:nth-child(1) .fields {
+				grid-template-columns: 1.15fr .85fr;
+				gap: 9px
+			}
+
+			.workspace>.stack:nth-child(1) .actions {
+				margin-top: 10px
+			}
+
+			.workspace>.stack:nth-child(1) .database-row {
+				grid-template-columns: 1fr
+			}
+
+			.workspace>.stack:nth-child(1) .database-row button {
+				width: 100%
+			}
+
+			.workspace>.stack:nth-child(1) .database-context {
+				margin-top: 10px;
+				padding-top: 10px
+			}
+		}
+
+		@media(min-width:781px) {
+			.workspace {
+				grid-template-rows: minmax(0, 1fr)
+			}
+
+			.workspace>.stack:nth-child(1) {
+				grid-column: 1;
+				grid-row: 1
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(1),
+			.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+				grid-row: 1;
+				height: 100%;
+				overflow: hidden
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(2) #results {
+				flex: 1;
+				min-height: 0
+			}
+
+			.workspace .summary-cell strong {
+				font-size: 17px;
+				overflow-wrap: normal;
+				word-break: normal
+			}
+		}
+
+		/* Typography refinement: a restrained weight ladder for technical reading. */
+		body {
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			font-weight: 400;
+			line-height: 1.45
+		}
+
+		h1 {
+			font-size: clamp(30px, 3vw, 38px);
+			font-weight: 650;
+			line-height: 1.05;
+			letter-spacing: -.018em
+		}
+
+		h2 {
+			font-size: 18px;
+			font-weight: 600;
+			line-height: 1.2;
+			letter-spacing: -.008em
+		}
+
+		.eyebrow,
+		.kicker,
+		.section-label {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .13em;
+			line-height: 1.2
+		}
+
+		.lede,
+		.panel-note,
+		.status,
+		.muted {
+			font-weight: 400;
+			line-height: 1.45
+		}
+
+		label {
+			font-size: 11px;
+			font-weight: 500;
+			letter-spacing: 0
+		}
+
+		button {
+			font-weight: 600;
+			letter-spacing: .005em
+		}
+
+		textarea,
+		.sql-block {
+			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-weight: 400
+		}
+
+		textarea {
+			font-size: 14px;
+			line-height: 1.55;
+			letter-spacing: 0
+		}
+
+		.statement-number {
+			font-weight: 600;
+			letter-spacing: .09em
+		}
+
+		.statement-type {
+			font-weight: 600;
+			letter-spacing: .015em
+		}
+
+		.statement-tables {
+			font-weight: 400
+		}
+
+		.summary-cell .label {
+			font-weight: 600;
+			letter-spacing: .1em
+		}
+
+		.summary-cell strong {
+			font-weight: 700;
+			line-height: 1.08;
+			overflow-wrap: normal;
+			word-break: normal
+		}
+
+		.summary-cell small {
+			font-weight: 400;
+			line-height: 1.35
+		}
+
+		.metric b {
+			font-weight: 500;
+			line-height: 1.2
+		}
+
+		.layer h3 {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .1em;
+			line-height: 1.25
+		}
+
+		.subheading {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .1em;
+			line-height: 1.25
+		}
+
+		.factor-list,
+		.plain-list {
+			font-weight: 400;
+			line-height: 1.5
+		}
+
+		.points {
+			font-weight: 600
+		}
+
+		/* Visual system: layered console surfaces, quiet separators, and a focused editor. */
+		:root {
+			--paper: #eef2ed;
+			--surface: #fbfcf8;
+			--ink: #17231f;
+			--muted: #65746d;
+			--line: #d4ddd6;
+			--teal: #176b63;
+			--teal-dark: #103f3c;
+			--mint: #d8eee3;
+			--coral: #c95745;
+			--amber: #a66f13;
+			--green: #2f7957;
+			--shadow: 0 18px 42px rgba(20, 45, 38, .09);
+			--soft-shadow: 0 8px 20px rgba(20, 45, 38, .06);
+			--radius-sm: 6px;
+			--radius-md: 12px
+		}
+
+		body {
+			background: radial-gradient(circle at 86% 2%, rgba(216, 238, 227, .8), transparent 27%), var(--paper);
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+			color: var(--ink)
+		}
+
+		body:before {
+			opacity: .2;
+			background-size: 40px 40px
+		}
+
+		header {
+			padding: 20px clamp(20px, 4vw, 64px) 18px;
+			background: rgba(251, 252, 248, .88);
+			border-bottom: 1px solid rgba(185, 199, 190, .8)
+		}
+
+		.masthead {
+			max-width: 1500px
+		}
+
+		.eyebrow {
+			font-size: 10px;
+			letter-spacing: .18em;
+			color: var(--teal)
+		}
+
+		h1 {
+			font-size: clamp(24px, 3vw, 38px);
+			font-weight: 750;
+			letter-spacing: -.02em
+		}
+
+		.lede {
+			font-size: 13px;
+			color: #728078
+		}
+
+		.context-chip {
+			min-width: 210px;
+			border: 0;
+			border-left: 3px solid var(--teal);
+			border-radius: var(--radius-sm);
+			padding: 10px 14px;
+			background: #edf5ef;
+			box-shadow: var(--soft-shadow)
+		}
+
+		.context-chip .kicker {
+			font-size: 9px
+		}
+
+		.context-chip strong {
+			font-size: 13px
+		}
+
+		.stepper {
+			padding: 0 clamp(20px, 4vw, 64px);
+			background: #183d39;
+			border: 0
+		}
+
+		.step {
+			max-width: none;
+			padding: 11px clamp(10px, 2vw, 22px);
+			background: transparent;
+			color: #a9c4b9;
+			border-bottom: 2px solid transparent
+		}
+
+		.step:not(:last-child):after {
+			right: -5px;
+			top: 8px;
+			color: #6fae9d
+		}
+
+		.step.active {
+			background: #275c55;
+			color: #f4fbf5;
+			border-bottom-color: #7bd1b5
+		}
+
+		.step.done {
+			color: #bfe1d0
+		}
+
+		.stepper .step:nth-child(n):before {
+			color: #7bd1b5
+		}
+
+		.step small {
+			font-size: 9px;
+			color: inherit;
+			opacity: .7
+		}
+
+		main {
+			padding: 14px clamp(14px, 3vw, 42px) 16px;
+			background: transparent
+		}
+
+		.workspace {
+			gap: 14px
+		}
+
+		.workspace>.stack:nth-child(1) {
+			gap: 8px
+		}
+
+		.workspace .panel {
+			border: 0;
+			border-radius: var(--radius-md);
+			background: rgba(251, 252, 248, .88);
+			box-shadow: var(--soft-shadow);
+			padding: 15px
+		}
+
+		.workspace>.stack:nth-child(1) .panel {
+			background: rgba(244, 248, 243, .78);
+			box-shadow: none;
+			border-left: 3px solid rgba(23, 107, 99, .22)
+		}
+
+		.workspace>.stack:nth-child(1) h2 {
+			font-size: 16px;
+			font-weight: 720
+		}
+
+		.workspace .panel-title {
+			border-bottom: 1px solid rgba(212, 221, 214, .7);
+			padding-bottom: 10px
+		}
+
+		.workspace .panel-title .kicker {
+			font-size: 9px
+		}
+
+		.workspace input,
+		.workspace select {
+			background: #fff;
+			border-color: #d0dbd2;
+			border-radius: var(--radius-sm);
+			box-shadow: inset 0 1px 2px rgba(24, 54, 44, .04);
+			height: 38px;
+			font-size: 12px
+		}
+
+		.workspace label {
+			font-size: 11px;
+			color: #55665e
+		}
+
+		.workspace .actions {
+			margin-top: 12px
+		}
+
+		.workspace button {
+			border-radius: var(--radius-sm);
+			box-shadow: 0 4px 10px rgba(16, 76, 72, .14);
+			transition: transform .15s ease, box-shadow .15s ease, background .15s ease
+		}
+
+		.workspace button:hover:not(:disabled) {
+			transform: translateY(-1px);
+			box-shadow: 0 7px 14px rgba(16, 76, 72, .2)
+		}
+
+		.workspace button.secondary {
+			box-shadow: none;
+			border: 1px solid #c8ddd1
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) {
+			background: #1d3835;
+			color: #ecf6ef;
+			box-shadow: var(--shadow);
+			border: 1px solid rgba(255, 255, 255, .08);
+			padding: 18px
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) .panel-title {
+			border-bottom-color: rgba(181, 218, 199, .18)
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) h2 {
+			color: #f3faf4
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) .kicker {
+			color: #8bd0b4
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) .panel-note {
+			color: #aac7bb
+		}
+
+		.workspace textarea {
+			border: 1px solid rgba(169, 218, 196, .24);
+			border-radius: var(--radius-sm);
+			background: #122825;
+			color: #d8efe2;
+			box-shadow: inset 0 2px 12px rgba(0, 0, 0, .2), 0 1px 0 rgba(255, 255, 255, .04);
+			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+			font-size: 13px;
+			line-height: 1.7;
+			padding: 18px
+		}
+
+		.workspace textarea::placeholder {
+			color: #78978a;
+			opacity: 1
+		}
+
+		.workspace textarea:focus {
+			outline: 2px solid rgba(123, 209, 181, .45);
+			border-color: #7bd1b5
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) button {
+			background: #86d8b7;
+			color: #123a35;
+			box-shadow: 0 7px 16px rgba(0, 0, 0, .2)
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) .status {
+			color: #a9cabc
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+			background: rgba(251, 252, 248, .96);
+			box-shadow: var(--shadow);
+			border: 1px solid rgba(191, 205, 195, .7);
+			padding: 17px
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(2) .panel-title {
+			border-bottom: 0;
+			padding-bottom: 0;
+			margin-bottom: 8px
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(2) h2 {
+			font-size: 18px
+		}
+
+		.workspace #results {
+			padding-right: 5px
+		}
+
+		.workspace .summary {
+			gap: 0;
+			background: #edf3ed;
+			border: 1px solid #d7e1d8;
+			border-radius: var(--radius-md);
+			overflow: hidden;
+			box-shadow: inset 0 1px 0 #fff
+		}
+
+		.workspace .summary-cell {
+			min-height: 76px;
+			padding: 13px 14px;
+			background: transparent !important;
+			color: var(--ink) !important;
+			border-right: 1px solid #d7e1d8
+		}
+
+		.workspace .summary-cell:last-child {
+			border-right: 0
+		}
+
+		.workspace .summary-cell:nth-child(1) {
+			border-top: 3px solid var(--coral)
+		}
+
+		.workspace .summary-cell:nth-child(2) {
+			border-top: 3px solid var(--teal)
+		}
+
+		.workspace .summary-cell:nth-child(3) {
+			border-top: 3px solid var(--amber)
+		}
+
+		.workspace .summary-cell .label {
+			color: var(--muted);
+			font-size: 9px;
+			letter-spacing: .1em
+		}
+
+		.workspace .summary-cell strong {
+			font-size: 20px;
+			color: var(--ink)
+		}
+
+		.workspace .summary-cell small {
+			color: var(--muted);
+			font-size: 10px
+		}
+
+		.workspace .statement {
+			border: 0;
+			border-top: 1px solid #dce4dd;
+			border-radius: 0;
+			background: transparent;
+			margin-top: 14px
+		}
+
+		.workspace .statement-head {
+			padding: 11px 2px;
+			border-bottom: 1px solid #dce4dd
+		}
+
+		.workspace .statement-number {
+			font-size: 10px;
+			letter-spacing: .1em
+		}
+
+		.workspace .statement-type {
+			font-size: 13px
+		}
+
+		.workspace .statement-tables {
+			font-size: 11px
+		}
+
+		.workspace .statement-body {
+			padding: 12px 2px
+		}
+
+		.workspace .sql-block {
+			background: #f0f4ef;
+			border: 0;
+			border-left: 3px solid #76b59a;
+			border-radius: 0;
+			color: #30463d;
+			padding: 11px 13px;
+			font-size: 11px
+		}
+
+		.workspace .layer-grid {
+			gap: 0
+		}
+
+		.workspace .layer {
+			border: 0;
+			border-top: 1px solid #e0e7e1;
+			border-radius: 0;
+			padding: 14px 0;
+			background: transparent
+		}
+
+		.workspace .layer h3 {
+			font-size: 10px;
+			letter-spacing: .12em;
+			color: var(--teal);
+			font-weight: 800
+		}
+
+		.workspace .layer p {
+			font-size: 11px
+		}
+
+		.workspace .layer.evidence {
+			border-top-color: #8fc4b0
+		}
+
+		.workspace .layer.metadata {
+			border-top-color: #d9b66a
+		}
+
+		.workspace .layer.static {
+			border-top-color: #cbd8cf
+		}
+
+		.workspace .metric {
+			border: 0;
+			border-bottom: 1px solid #edf1ed;
+			background: #f7faf6;
+			padding: 9px;
+			border-radius: 4px
+		}
+
+		.workspace .metric b {
+			font-size: 12px
+		}
+
+		.workspace .factor-list,
+		.workspace .plain-list {
+			font-size: 11px
+		}
+
+		@media(max-width:780px) {
+			body {
+				background: var(--paper)
+			}
+
+			header {
+				padding: 17px 16px
+			}
+
+			.masthead {
+				display: block
+			}
+
+			.context-chip {
+				margin-top: 14px
+			}
+
+			.step {
+				padding: 9px 3px;
+				font-size: 9px
+			}
+
+			.step:not(:last-child):after {
+				right: -6px;
+				top: 7px
+			}
+
+			main {
+				padding: 10px
+			}
+
+			.workspace .panel {
+				box-shadow: var(--soft-shadow)
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(1) {
+				min-height: 360px
+			}
+
+			.workspace>.stack:nth-child(2)>.panel:nth-child(2) {
+				min-height: 400px
+			}
+
+			.workspace .summary-cell {
+				border-right: 0;
+				border-bottom: 1px solid #d7e1d8
+			}
+
+			.workspace .summary-cell:last-child {
+				border-bottom: 0
+			}
+		}
+
+		/* Final type pass: these rules follow the surface overrides so the hierarchy is intentional. */
+		body {
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			font-weight: 400
+		}
+
+		h1 {
+			font-size: clamp(30px, 3vw, 38px);
+			font-weight: 650;
+			line-height: 1.05;
+			letter-spacing: -.018em
+		}
+
+		h2 {
+			font-size: 18px;
+			font-weight: 600;
+			line-height: 1.2;
+			letter-spacing: -.008em
+		}
+
+		.workspace>.stack:nth-child(1) h2 {
+			font-size: 16px;
+			font-weight: 600
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(1) h2 {
+			font-size: 18px;
+			font-weight: 600
+		}
+
+		.workspace>.stack:nth-child(2)>.panel:nth-child(2) h2 {
+			font-size: 18px;
+			font-weight: 600
+		}
+
+		.eyebrow,
+		.kicker,
+		.section-label {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .13em;
+			line-height: 1.2
+		}
+
+		label {
+			font-size: 11px;
+			font-weight: 500;
+			letter-spacing: 0
+		}
+
+		button {
+			font-weight: 600
+		}
+
+		textarea,
+		.sql-block {
+			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-weight: 400
+		}
+
+		textarea {
+			font-size: 14px;
+			line-height: 1.55;
+			letter-spacing: 0
+		}
+
+		.statement-number {
+			font-weight: 600
+		}
+
+		.statement-type {
+			font-weight: 600
+		}
+
+		.statement-tables {
+			font-weight: 400
+		}
+
+		.summary-cell .label {
+			font-weight: 600
+		}
+
+		.summary-cell strong {
+			font-weight: 700;
+			line-height: 1.08;
+			overflow-wrap: normal;
+			word-break: normal
+		}
+
+		.summary-cell small {
+			font-weight: 400
+		}
+
+		.metric b {
+			font-weight: 500
+		}
+
+		.layer h3,
+		.subheading {
+			font-weight: 600
+		}
+
+		.factor-list,
+		.plain-list {
+			font-weight: 400
+		}
+
+		.points {
+			font-weight: 600
+		}
+
+		.workspace button {
+			font-family: inherit;
+			font-weight: 600
+		}
+
+		.workspace textarea {
+			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-size: 14px;
+			line-height: 1.55;
+			font-weight: 400
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<div class="masthead">
+			<div>
+				<div class="eyebrow">Database-aware review desk</div>
+				<h1>MySQL DBA Validator</h1>
+				<p class="lede">Connect for evidence. Keep the final decision grounded in the actual statement.</p>
+			</div>
+			<div class="context-chip" aria-live="polite">
+				<div class="kicker">Current context</div><strong id="headerContext">Static analysis only</strong>
+			</div>
+		</div>
+	</header>
+	<nav class="stepper" aria-label="Validation workflow">
+		<div class="step done">Connection<small>configure / test</small></div>
+		<div class="step">Database<small>discover / select</small></div>
+		<div class="step active">SQL Review<small>inspect / validate</small></div>
+		<div class="step">Findings<small>read the result</small></div>
+	</nav>
+	<main>
+		<div class="workspace">
+			<div class="stack">
+				<section class="panel" aria-labelledby="connectionHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">01 / Connection</div>
+							<h2 id="connectionHeading">MySQL connection</h2>
+						</div>
+						<div class="panel-note" id="connectionNote">Credentials live in memory for this page only.
+							Nothing is persisted.
+						</div>
+					</div>
+					<div id="localConnectionFields" class="fields">
+						<div class="field"><label for="host">Host</label><input id="host" autocomplete="off"
+								value="127.0.0.1" placeholder="127.0.0.1" /></div>
+						<div class="field"><label for="port">Port</label><input id="port" type="number" min="1"
+								max="65535" value="3306" inputmode="numeric" /></div>
+						<div class="field"><label for="username">Username</label><input id="username"
+								autocomplete="off" /></div>
+						<div class="field"><label for="password">Password</label><input id="password" type="password"
+								autocomplete="new-password" /></div>
+					</div>
+					<div class="actions"><button id="testBtn">Test connection</button><span id="connectionStatus"
+							class="status" role="status">Not tested</span></div>
+				</section>
+				<section class="panel" aria-labelledby="databaseHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">02 / Context</div>
+							<h2 id="databaseHeading">Choose a database</h2>
+						</div>
+						<div class="panel-note">Discovery shows only names visible to the supplied MySQL account.</div>
+					</div>
+					<div class="database-row">
+						<div class="field"><label for="database">Selected database</label><select id="database"
+								disabled>
+								<option value="">Select a database</option>
+							</select></div><button class="secondary" id="discoverBtn">Discover databases</button>
+					</div>
+					<div id="discoveryStatus" class="status" role="status" style="margin-top:12px">Test the connection
+						before discovering databases.</div>
+					<div id="discoveryWarning" class="warning" hidden></div>
+					<div class="database-context"><span class="pill"><span id="contextDot" class="dot"></span><span
+								id="contextStatus">No database selected</span></span><span class="muted">Each validation
+							uses a fresh database connection.</span></div>
+				</section>
+			</div>
+			<div class="stack">
+				<section class="panel" aria-labelledby="sqlHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">03 / Review</div>
+							<h2 id="sqlHeading">SQL statement</h2>
+						</div>
+						<div class="panel-note">Database selection changes context, never the SQL you submit.</div>
+					</div><textarea id="sqlInput" spellcheck="false" placeholder="UPDATE orders
+SET status = 'cancelled'
+WHERE created_at < '2025-01-01';"></textarea>
+					<div class="actions"><button id="validateBtn">Validate SQL</button><span id="validationStatus"
+							class="status" role="status">Static validation is available without a database.</span></div>
+				</section>
+				<section class="panel results-panel" aria-labelledby="resultsHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">04 / Findings</div>
+							<h2 id="resultsHeading">Validation results</h2>
+						</div>
+						<div class="panel-note">Overall score is the highest final statement score, not a sum.</div>
+					</div>
+					<div id="results">
+						<div class="empty">
+							<div><strong>Ready for review</strong>Enter SQL and validate. Connect and select a database
+								when you need EXPLAIN and metadata evidence.</div>
+						</div>
+					</div>
+				</section>
+			</div>
+		</div>
+	</main>
+	<script>
+		const state = { credentials: { host: '127.0.0.1', port: 3306, username: '', password: '' }, tested: false, databases: [], selectedDatabase: '' };
+		const $ = id => document.getElementById(id); const host = $('host'), port = $('port'), username = $('username'), password = $('password'), database = $('database');
+		const testBtn = $('testBtn'), discoverBtn = $('discoverBtn'), validateBtn = $('validateBtn'), sqlInput = $('sqlInput');
+		function text(value) { return value == null || value === '' ? 'n/a' : String(value) }
+		function setStatus(node, message, kind) { node.textContent = message; node.className = 'status' + (kind ? ' ' + kind : '') }
+		function errorMessage(data, fallback) { return data && typeof data.message === 'string' ? data.message : fallback }
+		function syncCredentials() {
+			const changed = state.credentials.host !== host.value.trim() || state.credentials.port !== Number(port.value) || state.credentials.username !== username.value.trim() || state.credentials.password !== password.value;
+			state.credentials = { host: host.value.trim(), port: Number(port.value), username: username.value.trim(), password: password.value };
+			if (changed) {
+				state.tested = false; state.databases = []; state.selectedDatabase = '';
+				database.replaceChildren(new Option('Select a database', '')); database.disabled = true;
+				setStatus($('connectionStatus'), 'Connection details changed; test again.', '');
+				setStatus($('discoveryStatus'), 'Test the updated connection before discovering databases.', '');
+				$('discoveryWarning').hidden = true; updateContext();
+			}
+		}
+		function validConnection() { return state.credentials.host && state.credentials.username && state.credentials.password && Number.isInteger(state.credentials.port) && state.credentials.port >= 1 && state.credentials.port <= 65535 }
+		async function requestJson(url, options) { const response = await fetch(url, options); let data = null; try { data = await response.json() } catch (_) { data = null } if (!response.ok) throw new Error(errorMessage(data, 'The server could not complete this request.')); return data }
+		async function testConnection() {
+			syncCredentials();
+			if (!validConnection()) { setStatus($('connectionStatus'), 'Enter host, port, username, and password.', 'error'); return }
+			testBtn.disabled = true; discoverBtn.disabled = true; testBtn.textContent = 'Testing...'; setStatus($('connectionStatus'), 'Testing connection...', '');
+			try {
+				const data = await requestJson('/api/connections/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state.credentials) });
+				if (data.status !== 'success' || data.connected !== true) throw new Error(errorMessage(data, 'Unable to connect to the database.'));
+				state.tested = true; setStatus($('connectionStatus'), 'Connection configured.', 'success'); setStatus($('discoveryStatus'), 'Ready to discover visible databases.', 'success');
+			} catch (error) {
+				state.tested = false; setStatus($('connectionStatus'), error.message || 'Unable to connect to the database.', 'error');
+			} finally {
+				testBtn.disabled = false; discoverBtn.disabled = !validConnection(); testBtn.textContent = 'Test connection';
+			}
+		}
+		async function discoverDatabases() {
+			syncCredentials();
+			if (!validConnection()) { setStatus($('discoveryStatus'), 'Enter valid connection details first.', 'error'); return }
+			discoverBtn.disabled = true; testBtn.disabled = true; discoverBtn.textContent = 'Discovering...'; setStatus($('discoveryStatus'), 'Reading visible database names...', ''); $('discoveryWarning').hidden = true;
+			try {
+				const data = await requestJson('/api/connections/discover-databases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state.credentials) });
+				if (!Array.isArray(data.databases) || (data.status !== 'success' && data.status !== 'limited')) throw new Error(errorMessage(data, 'Unable to discover databases.'));
+				const previous = state.selectedDatabase; state.databases = data.databases; database.replaceChildren(new Option('Select a database', ''));
+				data.databases.forEach(name => database.add(new Option(String(name), String(name)))); database.disabled = false; database.value = data.databases.includes(previous) ? previous : ''; state.selectedDatabase = database.value;
+				setStatus($('discoveryStatus'), data.status === 'limited' ? 'Database list is limited.' : data.databases.length + ' database(s) discovered.', data.status === 'limited' ? '' : 'success');
+				if (data.status === 'limited' || data.complete === false) { $('discoveryWarning').textContent = 'Database list is limited. Not all visible databases are shown.'; $('discoveryWarning').hidden = false } updateContext();
+			} catch (error) {
+				setStatus($('discoveryStatus'), error.message || 'Unable to discover databases.', 'error');
+			} finally {
+				testBtn.disabled = false; discoverBtn.disabled = !validConnection(); discoverBtn.textContent = 'Discover databases';
+			}
+		}
+		async function validateSql() {
+			const sql = sqlInput.value; if (!sql.trim()) { setStatus($('validationStatus'), 'Enter SQL to validate.', 'error'); return }
+			validateBtn.disabled = true; validateBtn.textContent = 'Validating...'; setStatus($('validationStatus'), 'Reviewing statement...', '');
+			const body = { sql, host: state.credentials.host, port: state.credentials.port, username: state.credentials.username, password: state.credentials.password };
+			if (state.selectedDatabase) body.database = state.selectedDatabase;
+			try {
+				const data = await requestJson('/api/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+				if (!Array.isArray(data.statements)) throw new Error(errorMessage(data, 'Validation returned an unexpected response.'));
+				renderResults(data); setStatus($('validationStatus'), 'Review complete.', 'success');
+			} catch (error) {
+				setStatus($('validationStatus'), error.message || 'Validation failed.', 'error'); renderError(error.message || 'Validation failed.');
+			} finally {
+				validateBtn.disabled = false; validateBtn.textContent = 'Validate SQL';
+			}
+		}
+		function updateContext() { const selected = state.selectedDatabase; $('headerContext').textContent = selected ? 'Database: ' + selected : 'Static analysis only'; $('contextStatus').textContent = selected ? 'Database: ' + selected : 'No database selected'; $('contextDot').classList.toggle('on', Boolean(selected)); }
+		[host, port, username, password].forEach(input => input.addEventListener('input', syncCredentials));
+		testBtn.addEventListener('click', testConnection); discoverBtn.addEventListener('click', discoverDatabases); validateBtn.addEventListener('click', validateSql);
+		database.addEventListener('change', () => { state.selectedDatabase = database.value; updateContext(); });
+		updateContext();
+	</script>
+	<script>
+		function updateStepper() { const steps = [...document.querySelectorAll('.step')]; const completed = state.selectedDatabase ? 3 : state.tested && state.databases.length ? 2 : state.tested ? 1 : 0; const active = state.validationBusy || document.querySelector('#results .statement') ? 4 : state.selectedDatabase ? 3 : state.tested && state.databases.length ? 2 : 1; steps.forEach((step, index) => { step.classList.toggle('done', index < completed); step.classList.toggle('active', index + 1 === active) }) }
+		[testBtn, discoverBtn, validateBtn, database].forEach(control => control.addEventListener('click', () => setTimeout(updateStepper, 0))); updateStepper();
+	</script>
+	<script>
+		function factorList(factors, emptyMessage) {
+			const list = el('ul', 'factor-list');
+			if (!factors || !factors.length) {
+				list.append(el('li', 'muted', emptyMessage || 'No additional risk identified.'));
+				return list;
+			}
+			factors.forEach(factor => {
+				const row = el('li');
+				row.append(el('span', '', text(factor.label || factor.text || factor.code)));
+				if (factor.points != null) {
+					row.append(el('span', 'points', (factor.points > 0 ? '+' : '') + factor.points + ' points'));
+				}
+				list.append(row);
+			});
+			return list;
+		}
+
+		function analysisModeLabel(mode) {
+			return mode === 'DATABASE_EVIDENCE' ? 'Database evidence' : mode === 'STATIC_DATABASE_UNAVAILABLE' ? 'Static + database unavailable' : 'Static analysis';
+		}
+
+		function evidenceLayer(statement) {
+			const evidence = statement.database_evidence || {};
+			const body = [el('p', '', evidence.available ? 'EXPLAIN evidence is available.' : 'Database evidence is unavailable.')];
+			const grid = el('div', 'metric-grid');
+			grid.append(
+				metric('Access type', evidence.access_type),
+				metric('Estimated rows', evidence.estimated_rows == null ? 'n/a' : evidence.estimated_rows + ' (estimate)'),
+				metric('Possible keys', evidence.possible_keys && evidence.possible_keys.length ? evidence.possible_keys.join(', ') : 'n/a'),
+				metric('Selected key', evidence.key),
+				metric('Key length', evidence.key_length),
+				metric('Full table scan', evidence.full_table_scan == null ? 'n/a' : evidence.full_table_scan ? 'Yes' : 'No')
+			);
+			body.push(grid);
+			if (evidence.extra) body.push(el('p', '', 'Additional plan detail: ' + evidence.extra));
+			body.push(el('div', 'subheading', 'Evidence-based risk adjustment'));
+			body.push(factorList(statement.evidence_factors, 'No additional database-evidence adjustment.'));
+			if (statement.high_estimated_rows_applied != null) {
+				body.push(el('p', '', 'High estimated rows applied: ' + (statement.high_estimated_rows_applied ? 'Yes' : 'No')));
+			}
+			return layer('DATABASE EVIDENCE', 'evidence', body);
+		}
+
+		function metadataLayer(statement) {
+			const factors = statement.metadata_factors || [];
+			const m1 = factors.filter(factor => String(factor.code || '').startsWith('M1_'));
+			const m2 = factors.filter(factor => String(factor.code || '').startsWith('M2_'));
+			const status = statement.metadata_status === 'available' ? 'Available' : statement.metadata_status === 'unavailable' ? 'Unavailable' : 'Partial';
+			const body = [
+				el('p', '', 'Metadata: ' + status),
+				el('p', '', status === 'Available' ? 'Risk adjustment: ' + ((statement.metadata_score_adjustment || 0) > 0 ? '+' : '') + (statement.metadata_score_adjustment || 0) + ' points' : 'Metadata-based scoring was not applied.'),
+				el('div', 'subheading', 'M1 — Table-scale risk'),
+				factorList(m1, 'No additional risk identified.'),
+				el('div', 'subheading', 'M2 — Predicate/index risk'),
+				factorList(m2, 'No additional risk identified.')
+			];
+			return layer('METADATA ASSESSMENT', 'metadata', body);
+		}
+
+		function statementCard(statement, index) {
+			const card = el('article', 'statement');
+			const head = el('div', 'statement-head');
+			const title = el('div', 'statement-title');
+			title.append(
+				el('span', 'statement-number', 'STATEMENT ' + (index + 1)),
+				el('span', 'statement-type', text(statement.statement_type)),
+				el('span', 'statement-tables', statement.tables && statement.tables.length ? statement.tables.join(', ') : 'No table identified')
+			);
+			head.append(title, el('span', 'risk ' + text(statement.risk_level), text(statement.risk_level) + ' / ' + text(statement.score)));
+			card.append(head);
+
+			const body = el('div', 'statement-body');
+			body.append(el('pre', 'sql-block', statement.sql));
+			const metrics = el('div', 'metric-grid');
+			metrics.append(metric('Final score', statement.score + ' / 100'), metric('Confidence', statement.confidence), metric('Static score', statement.static_score + ' / 100'));
+			body.append(metrics);
+
+			const layers = el('div', 'layer-grid');
+			layers.append(
+				layer('FINAL RESULT', 'static', [
+					el('p', '', 'Final risk: ' + text(statement.risk_level)),
+					el('div', 'subheading', 'Why'),
+					plainList(statement.reasons, 'No additional reasons reported.'),
+					el('div', 'subheading', 'Review checklist'),
+					plainList(statement.checklist, 'No checklist items reported.')
+				]),
+				layer('STATIC ANALYSIS', 'static', [
+					el('p', '', 'Static risk: ' + text(statement.static_risk_level)),
+					el('div', 'subheading', 'Static factors'),
+					factorList(statement.factors, 'No additional static factors.')
+				]),
+				evidenceLayer(statement),
+				metadataLayer(statement)
+			);
+			body.append(layers);
+			card.append(body);
+			return card;
+		}
+
+		function renderResults(data) {
+			$('results').replaceChildren();
+			const summary = el('div', 'summary');
+			const aggregate = el('div', 'summary-cell');
+			aggregate.append(el('div', 'label', 'Aggregate / highest final risk'), el('strong', '', text(data.overall_risk_level)), el('small', '', text(data.statement_count) + ' statement(s), maximum final score'));
+			const score = el('div', 'summary-cell');
+			score.append(el('div', 'label', 'Overall score'), el('strong', '', text(data.overall_score) + ' / 100'), el('small', '', 'Not summed or averaged'));
+			const mode = el('div', 'summary-cell');
+			mode.append(el('div', 'label', 'Analysis mode'), el('strong', '', analysisModeLabel(data.analysis_mode)), el('small', '', state.selectedDatabase ? 'Selected database context' : 'Static validation remains available'));
+			summary.append(aggregate, score, mode);
+			$('results').append(summary);
+			data.statements.forEach((statement, index) => $('results').append(statementCard(statement, index)));
+		}
+	</script>
+	<script>
+		// Frontend remains target-driven: the browser submits actual connection details and selected database,
+		// while the backend decides whether the target is local, remote, or invalid.
+	</script>
+</body>
+
+</html>

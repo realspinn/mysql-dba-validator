@@ -1,0 +1,1583 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>MySQL DBA Validator</title>
+	<style>
+		:root {
+			--ink: #17231f;
+			--muted: #68756f;
+			--line: #d9dfd9;
+			--paper: #f4f5ef;
+			--surface: #fffefa;
+			--mint: #d8eee3;
+			--teal: #176b63;
+			--teal-dark: #104c48;
+			--coral: #d85d45;
+			--amber: #b57b16;
+			--green: #2f7957;
+			--mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+			--sans: "Avenir Next", Avenir, "Trebuchet MS", sans-serif
+		}
+
+		* {
+			box-sizing: border-box
+		}
+
+		body {
+			margin: 0;
+			color: var(--ink);
+			background: var(--paper);
+			font-family: var(--sans);
+			min-height: 100vh;
+			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			font-weight: 400;
+			line-height: 1.45
+		}
+
+		body:before {
+			content: "";
+			position: fixed;
+			inset: 0;
+			pointer-events: none;
+			opacity: .2;
+			background-image: linear-gradient(rgba(23, 35, 31, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(23, 35, 31, .035) 1px, transparent 1px);
+			background-size: 40px 40px
+		}
+
+		header,
+		main {
+			position: relative;
+			z-index: 1
+		}
+
+		header {
+			border-bottom: 1px solid rgba(185, 199, 190, .8);
+			padding: 20px clamp(20px, 4vw, 64px) 18px;
+			background: rgba(251, 252, 248, .88)
+		}
+
+		.masthead {
+			max-width: 1500px;
+			margin: auto
+		}
+
+		.eyebrow {
+			font-size: 10px;
+			letter-spacing: .18em;
+			color: var(--teal);
+			font-weight: 600
+		}
+
+		h1 {
+			font-size: clamp(24px, 3vw, 38px);
+			font-weight: 750;
+			letter-spacing: -.02em;
+			margin: 8px 0 4px;
+			line-height: 1
+		}
+
+		.lede {
+			margin: 0;
+			color: #728078;
+			font-size: 13px
+		}
+
+		.context-chip {
+			min-width: 210px;
+			border: 0;
+			border-left: 3px solid var(--teal);
+			border-radius: 6px;
+			padding: 10px 14px;
+			background: #edf5ef;
+			box-shadow: 0 8px 20px rgba(20, 45, 38, .06);
+			margin-top: 18px
+		}
+
+		.context-chip .kicker {
+			font-size: 9px
+		}
+
+		.context-chip strong {
+			display: block;
+			margin-top: 4px;
+			font-size: 14px;
+			font-weight: 600
+		}
+
+		main {
+			max-width: 1440px;
+			margin: 0 auto;
+			padding: 30px clamp(20px, 5vw, 76px) 70px
+		}
+
+		.workspace {
+			display: grid;
+			grid-template-columns: minmax(300px, .82fr) minmax(0, 1.5fr);
+			gap: 22px;
+			align-items: start
+		}
+
+		.stack {
+			display: grid;
+			gap: 22px
+		}
+
+		.panel {
+			border: 1px solid var(--line);
+			background: rgba(255, 254, 250, .92);
+			padding: 22px;
+			box-shadow: 0 12px 30px rgba(23, 35, 31, .045)
+		}
+
+		.panel-title {
+			display: flex;
+			justify-content: space-between;
+			gap: 14px;
+			align-items: start;
+			margin-bottom: 20px
+		}
+
+		h2 {
+			margin: 5px 0 0;
+			font-size: 18px;
+			font-weight: 600;
+			letter-spacing: -.008em;
+			line-height: 1.2
+		}
+
+		.panel-note {
+			color: var(--muted);
+			font-size: 12px;
+			line-height: 1.45;
+			max-width: 280px;
+			text-align: right;
+			font-weight: 400
+		}
+
+		.kicker {
+			color: var(--teal);
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .13em;
+			text-transform: uppercase
+		}
+
+		.fields {
+			display: grid;
+			grid-template-columns: 1.6fr .7fr;
+			gap: 14px
+		}
+
+		.field {
+			display: grid;
+			gap: 7px
+		}
+
+		.field.full {
+			grid-column: 1/-1
+		}
+
+		label {
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 500;
+			letter-spacing: 0
+		}
+
+		input,
+		select,
+		textarea {
+			width: 100%;
+			border: 1px solid #c8d1ca;
+			border-radius: 4px;
+			background: #fff;
+			color: var(--ink);
+			font: inherit
+		}
+
+		input,
+		select {
+			height: 42px;
+			padding: 0 11px
+		}
+
+		input[readonly] {
+			background: #eef1ee;
+			color: var(--muted)
+		}
+
+		input:focus,
+		select:focus,
+		textarea:focus,
+		button:focus-visible {
+			outline: 3px solid rgba(216, 93, 69, .28);
+			outline-offset: 2px;
+			border-color: var(--coral)
+		}
+
+		textarea {
+			min-height: 365px;
+			padding: 16px;
+			resize: vertical;
+			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-size: 14px;
+			line-height: 1.55;
+			font-weight: 400
+		}
+
+		.actions {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 10px;
+			margin-top: 18px
+		}
+
+		button {
+			border: 0;
+			border-radius: 4px;
+			min-height: 40px;
+			padding: 0 15px;
+			color: var(--surface);
+			background: var(--teal);
+			font: 600 13px var(--sans);
+			letter-spacing: .005em;
+			cursor: pointer
+		}
+
+		button:hover:not(:disabled) {
+			background: var(--teal-dark)
+		}
+
+		button.secondary {
+			color: var(--teal-dark);
+			background: var(--mint)
+		}
+
+		button:disabled {
+			opacity: .48;
+			cursor: not-allowed
+		}
+
+		.status {
+			min-height: 22px;
+			color: var(--muted);
+			font-size: 12px;
+			line-height: 1.45;
+			font-weight: 400
+		}
+
+		.status.success {
+			color: var(--green)
+		}
+
+		.status.error {
+			color: var(--coral)
+		}
+
+		.database-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 10px;
+			align-items: end
+		}
+
+		.database-context {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			align-items: center;
+			margin-top: 16px;
+			padding-top: 15px;
+			border-top: 1px solid var(--line)
+		}
+
+		.pill {
+			display: inline-flex;
+			align-items: center;
+			gap: 7px;
+			padding: 6px 9px;
+			border: 1px solid var(--line);
+			background: #f7faf5;
+			font-size: 12px
+		}
+
+		.dot {
+			width: 8px;
+			height: 8px;
+			background: var(--amber);
+			border-radius: 50%
+		}
+
+		.dot.on {
+			background: var(--green)
+		}
+
+		.warning {
+			margin-top: 12px;
+			color: #79530e;
+			background: #fff4d7;
+			border-left: 3px solid var(--amber);
+			padding: 10px 12px;
+			font-size: 12px;
+			line-height: 1.45
+		}
+
+		.stepper {
+			position: relative;
+			z-index: 1;
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			gap: 1px;
+			padding: 0 clamp(20px, 4vw, 64px);
+			background: #183d39
+		}
+
+		.step {
+			position: relative;
+			padding: 11px clamp(10px, 2vw, 22px);
+			color: #a9c4b9;
+			font-size: 12px;
+			font-weight: 800;
+			letter-spacing: .04em;
+			border-bottom: 2px solid transparent
+		}
+
+		.step:before {
+			color: #7bd1b5
+		}
+
+		.step:nth-child(1):before {
+			content: "1  "
+		}
+
+		.step:nth-child(2):before {
+			content: "2  "
+		}
+
+		.step:nth-child(3):before {
+			content: "3  "
+		}
+
+		.step:nth-child(4):before {
+			content: "4  "
+		}
+
+		.step.active {
+			background: #275c55;
+			color: #f4fbf5;
+			border-bottom-color: #7bd1b5
+		}
+
+		.step.done {
+			color: #bfe1d0
+		}
+
+		.step small {
+			display: block;
+			margin-top: 3px;
+			font-size: 9px;
+			font-weight: 600;
+			letter-spacing: 0;
+			opacity: .7
+		}
+
+		.results-panel {
+			min-height: 500px
+		}
+
+		.empty {
+			display: grid;
+			place-items: center;
+			min-height: 410px;
+			padding: 35px;
+			text-align: center;
+			color: var(--muted);
+			border: 1px dashed #c8d1ca
+		}
+
+		.empty strong {
+			display: block;
+			color: var(--ink);
+			font-size: 17px;
+			margin-bottom: 8px
+		}
+
+		.summary {
+			display: grid;
+			grid-template-columns: 1.3fr .7fr .9fr;
+			gap: 12px;
+			margin-bottom: 22px
+		}
+
+		.summary-cell {
+			padding: 15px;
+			background: var(--teal-dark);
+			color: white;
+			min-height: 93px
+		}
+
+		.summary-cell:nth-child(2) {
+			background: var(--coral)
+		}
+
+		.summary-cell:nth-child(3) {
+			background: #e8efe7;
+			color: var(--ink)
+		}
+
+		.summary-cell .label {
+			opacity: .75;
+			font-size: 10px;
+			letter-spacing: .13em;
+			text-transform: uppercase;
+			font-weight: 600
+		}
+
+		.summary-cell strong {
+			display: block;
+			margin-top: 9px;
+			font-size: 25px;
+			line-height: 1;
+			font-weight: 700
+		}
+
+		.summary-cell small {
+			display: block;
+			margin-top: 8px;
+			font-size: 11px;
+			font-weight: 400;
+			line-height: 1.35
+		}
+
+		.statement {
+			border-top: 4px solid var(--teal);
+			background: #fff;
+			margin-top: 18px
+		}
+
+		.statement-head {
+			display: flex;
+			justify-content: space-between;
+			gap: 15px;
+			align-items: start;
+			padding: 16px;
+			border-bottom: 1px solid var(--line)
+		}
+
+		.statement-title {
+			display: flex;
+			gap: 11px;
+			align-items: center;
+			flex-wrap: wrap
+		}
+
+		.statement-number {
+			color: var(--teal);
+			font: 600 12px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			letter-spacing: .09em;
+			font-weight: 600
+		}
+
+		.statement-type {
+			font: 600 14px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			letter-spacing: .015em;
+			font-weight: 600
+		}
+
+		.statement-tables {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 400
+		}
+
+		.risk {
+			padding: 5px 9px;
+			color: white;
+			font-size: 11px;
+			font-weight: 800;
+			letter-spacing: .08em
+		}
+
+		.risk.LOW {
+			background: var(--green)
+		}
+
+		.risk.MEDIUM {
+			background: var(--amber)
+		}
+
+		.risk.HIGH,
+		.risk.CRITICAL {
+			background: var(--coral)
+		}
+
+		.statement-body {
+			padding: 16px;
+			display: grid;
+			gap: 16px
+		}
+
+		.sql-block {
+			margin: 0;
+			padding: 12px;
+			overflow-x: auto;
+			white-space: pre-wrap;
+			word-break: break-word;
+			background: #f1f4ee;
+			border-left: 3px solid var(--teal);
+			color: #30413a;
+			font: 12px/1.6 "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace
+		}
+
+		.metric-grid {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px
+		}
+
+		.metric {
+			border: 1px solid var(--line);
+			padding: 11px;
+			min-height: 62px
+		}
+
+		.metric b {
+			display: block;
+			margin-top: 5px;
+			font: 600 14px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-weight: 600
+		}
+
+		.section-label {
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .1em;
+			line-height: 1.25
+		}
+
+		.layer-grid {
+			display: grid;
+			grid-template-columns: repeat(2, 1fr);
+			gap: 12px
+		}
+
+		.layer {
+			border: 1px solid var(--line);
+			padding: 14px
+		}
+
+		.layer h3 {
+			margin: 0 0 12px;
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: .1em;
+			line-height: 1.25
+		}
+
+		.layer.evidence {
+			border-top: 3px solid var(--teal)
+		}
+
+		.layer.metadata {
+			border-top: 3px solid var(--amber)
+		}
+
+		.layer.static {
+			border-top: 3px solid #899a91
+		}
+
+		.layer p {
+			margin: 6px 0;
+			font-size: 12px;
+			color: var(--muted);
+			font-weight: 400
+		}
+
+		.factor-list,
+		.plain-list {
+			display: grid;
+			gap: 6px;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			font-size: 12px;
+			line-height: 1.45;
+			font-weight: 400
+		}
+
+		.factor-list li {
+			display: flex;
+			justify-content: space-between;
+			gap: 12px;
+			border-bottom: 1px solid #edf0eb;
+			padding-bottom: 5px
+		}
+
+		.points {
+			white-space: nowrap;
+			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
+			font-weight: 600;
+			color: var(--coral)
+		}
+
+		.subheading {
+			margin: 18px 0 8px;
+			color: var(--muted);
+			font-size: 10px;
+			letter-spacing: .1em;
+			text-transform: uppercase;
+			font-weight: 600
+		}
+
+		.muted {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 400
+		}
+
+		.error-box {
+			color: var(--coral);
+			background: #fff0ec;
+			padding: 10px;
+			font-size: 12px
+		}
+
+		@media(max-width:880px) {
+			.workspace {
+				grid-template-columns: 1fr
+			}
+
+			.results-panel {
+				min-height: 0
+			}
+		}
+
+		@media(max-width:600px) {
+			header {
+				padding: 22px 18px
+			}
+
+			main {
+				padding: 20px 18px 45px
+			}
+
+			.fields,
+			.database-row,
+			.summary,
+			.layer-grid,
+			.metric-grid {
+				grid-template-columns: 1fr
+			}
+
+			.field.full {
+				grid-column: auto
+			}
+
+			.panel {
+				padding: 16px
+			}
+
+			textarea {
+				min-height: 280px
+			}
+
+			.statement-head {
+				display: block
+			}
+
+			.statement-head .risk {
+				display: inline-block;
+				margin-top: 12px
+			}
+
+			.stepper {
+				padding: 0 8px
+			}
+
+			.step {
+				font-size: 10px;
+				padding: 9px 5px
+			}
+
+			.step small {
+				display: none
+			}
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<div class="masthead">
+			<div>
+				<div class="eyebrow">Database-aware review desk</div>
+				<h1>MySQL DBA Validator</h1>
+				<p class="lede">Connect to your MySQL database. The backend determines the security context
+					automatically.</p>
+			</div>
+			<div class="context-chip" aria-live="polite">
+				<div class="kicker">Current context</div>
+				<strong id="headerContext">Static analysis only</strong>
+			</div>
+		</div>
+	</header>
+	<nav class="stepper" aria-label="Validation workflow">
+		<div class="step active">Connection<small>configure / test</small></div>
+		<div class="step">Database<small>discover / select</small></div>
+		<div class="step">SQL Review<small>inspect / validate</small></div>
+		<div class="step">Findings<small>read the result</small></div>
+	</nav>
+
+	<main>
+		<div class="workspace">
+			<div class="stack">
+				<section class="panel" aria-labelledby="connectionHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">01 / Connection</div>
+							<h2 id="connectionHeading">MySQL connection</h2>
+						</div>
+						<div class="panel-note">Credentials live in memory only. Nothing is persisted.</div>
+					</div>
+					<div class="fields">
+						<div class="field full"><label for="targetSelect">Target</label><select id="targetSelect">
+								<option value="">Local (this machine)</option>
+							</select></div>
+						<div class="field"><label for="host">Host</label><input id="host" autocomplete="off"
+								value="127.0.0.1" placeholder="127.0.0.1" /></div>
+						<div class="field"><label for="port">Port</label><input id="port" type="number" min="1"
+								max="65535" value="3306" inputmode="numeric" /></div>
+						<div class="field"><label for="username">Username</label><input id="username"
+								autocomplete="off" /></div>
+						<div class="field"><label for="password">Password</label><input id="password" type="password"
+								autocomplete="new-password" /></div>
+					</div>
+					<div class="actions"><button id="testBtn">Test connection</button><span id="connectionStatus"
+							class="status" role="status">Not tested</span></div>
+					<div class="database-context">
+						<div class="field full" style="flex:1 1 100%"><label for="pairingCode">Local connector pairing
+								code (remote targets only)</label><input id="pairingCode" type="password"
+								autocomplete="off" spellcheck="false"
+								placeholder="Paste the code printed by the local connector" /></div>
+						<button class="secondary" id="pairBtn">Pair connector</button>
+						<button class="secondary" id="unpairBtn" hidden>Unpair</button>
+						<button class="secondary" id="loadTargetsBtn" hidden>Reload approved targets</button>
+						<span id="pairingStatus" class="status" role="status">Not paired. Remote targets need a pairing
+							code from the local connector.</span>
+					</div>
+				</section>
+
+				<section class="panel" aria-labelledby="databaseHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">02 / Context</div>
+							<h2 id="databaseHeading">Choose a database</h2>
+						</div>
+						<div class="panel-note">Discovery shows only names visible to your MySQL account.</div>
+					</div>
+					<div class="database-row">
+						<div class="field"><label for="database">Selected database</label><select id="database"
+								disabled>
+								<option value="">Select a database</option>
+							</select></div><button class="secondary" id="discoverBtn">Discover databases</button>
+					</div>
+					<div id="discoveryStatus" class="status" role="status" style="margin-top:12px">Test the connection
+						before discovering databases.</div>
+					<div id="discoveryWarning" class="warning" role="alert" hidden></div>
+					<div class="database-context"><span class="pill"><span id="contextDot" class="dot"></span><span
+								id="contextStatus">No database selected</span></span><span class="muted">Each validation
+							uses a fresh database connection.</span></div>
+				</section>
+			</div>
+
+			<div class="stack">
+				<section class="panel" aria-labelledby="sqlHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">03 / Review</div>
+							<h2 id="sqlHeading">SQL statement</h2>
+						</div>
+						<div class="panel-note">Database selection changes context, never the SQL you submit.</div>
+					</div>
+					<textarea id="sqlInput" aria-labelledby="sqlHeading" spellcheck="false"
+						placeholder="UPDATE orders SET status = 'active' WHERE created_at > '2024-01-01';"></textarea>
+					<div class="actions"><button id="validateBtn">Validate SQL</button><span id="validationStatus"
+							class="status" role="status">Static validation is available without a database.</span></div>
+				</section>
+
+				<section class="panel results-panel" aria-labelledby="resultsHeading">
+					<div class="panel-title">
+						<div>
+							<div class="kicker">04 / Findings</div>
+							<h2 id="resultsHeading">Validation results</h2>
+						</div>
+						<div class="panel-note">Overall score is the highest final statement score, not a sum.</div>
+					</div>
+					<div id="results">
+						<div class="empty">
+							<div><strong>Ready for review</strong>Enter SQL and validate. Connect and select a database
+								when you need EXPLAIN and metadata evidence.</div>
+						</div>
+					</div>
+				</section>
+			</div>
+		</div>
+	</main>
+
+	<script>
+		// Target-driven state: backend determines security, not frontend mode selection.
+		// Remote (non-loopback) targets are only ever sent to the local connector, never to the public /api/* routes.
+		const CONNECTOR_URL = 'http://127.0.0.1:8765';
+		const REMOTE_NOT_AVAILABLE = 'Remote targets are handled only through the local connector. ';
+
+		// DOM elements
+		const $ = id => document.getElementById(id);
+		const host = $('host'), port = $('port'), username = $('username'), password = $('password');
+		const database = $('database');
+		const testBtn = $('testBtn'), discoverBtn = $('discoverBtn'), validateBtn = $('validateBtn');
+		const sqlInput = $('sqlInput');
+
+		function readCredentialsFromForm() {
+			return {
+				host: host.value.trim(),
+				port: Number(port.value),
+				username: username.value.trim(),
+				password: password.value
+			};
+		}
+
+		const state = {
+			// Initialised from the form so the default loopback host is used before any input event fires.
+			credentials: readCredentialsFromForm(),
+			tested: false,
+			databases: [],
+			selectedDatabase: '',
+			// Connector session token: obtained only by the explicit "Pair connector" action,
+			// held in memory only (never storage, cookies, or URLs). Until it exists, remote
+			// validation fails closed before any credentials leave the page.
+			connectorSessionToken: null,
+			// Approved targets as listed by the connector for this session. A remote
+			// target is referenced only by its target_id; the host/port shown in the form
+			// are display-only and never sent anywhere.
+			approvedTargets: [],
+			remoteTarget: null,
+			// Which target/login/session produced the current remote database list. A
+			// database is only sent with a remote validation while all three still match;
+			// the connector re-checks the same binding server-side.
+			discovery: null
+		};
+		const pairingCode = $('pairingCode'), pairBtn = $('pairBtn'), unpairBtn = $('unpairBtn');
+		const targetSelect = $('targetSelect'), loadTargetsBtn = $('loadTargetsBtn');
+
+		// Utility functions
+		function text(value) { return value == null || value === '' ? 'n/a' : String(value) }
+		function setStatus(node, message, kind) { node.textContent = message; node.className = 'status' + (kind ? ' ' + kind : '') }
+		// The public API reports some validation limits as {"error": code} without a message.
+		const RESPONSE_ERROR_MESSAGES = {
+			statement_limit_exceeded: 'Too many statements. At most 16 statements can be validated at once.',
+			request_too_large: 'The SQL is too large. Validation is limited to 64 KiB.'
+		};
+		function errorMessage(data, fallback) {
+			if (data && typeof data.message === 'string') return data.message;
+			const code = data && (typeof data.error_code === 'string' ? data.error_code : typeof data.error === 'string' ? data.error : null);
+			return (code && RESPONSE_ERROR_MESSAGES[code]) || fallback;
+		}
+
+		// Sync credentials from form inputs into state
+		function syncCredentials() {
+			const changed = state.credentials.host !== host.value.trim() ||
+				state.credentials.port !== Number(port.value) ||
+				state.credentials.username !== username.value.trim() ||
+				state.credentials.password !== password.value;
+
+			state.credentials = readCredentialsFromForm();
+
+			if (changed) {
+				clearDiscoveredDatabases();
+				setStatus($('connectionStatus'), 'Connection details changed; test again.', '');
+				setStatus($('discoveryStatus'), 'Test the updated connection before discovering databases.', '');
+			}
+		}
+
+		// Drops every discovered database and the selection (target, login, or session changed).
+		function clearDiscoveredDatabases() {
+			state.tested = false;
+			state.databases = [];
+			state.selectedDatabase = '';
+			state.discovery = null;
+			database.replaceChildren(new Option('Select a database', ''));
+			database.disabled = true;
+			$('discoveryWarning').hidden = true;
+			updateContext();
+		}
+
+		function validConnection() {
+			return state.credentials.host && state.credentials.username && state.credentials.password &&
+				Number.isInteger(state.credentials.port) && state.credentials.port >= 1 && state.credentials.port <= 65535;
+		}
+
+		async function requestJson(url, options) {
+			const response = await fetch(url, options);
+			let data = null;
+			try { data = await response.json() } catch (_) { data = null }
+			if (!response.ok) {
+				const error = new Error(errorMessage(data, 'The server could not complete this request.'));
+				error.status = response.status;
+				error.errorCode = data && typeof data.error_code === 'string' ? data.error_code : null;
+				throw error;
+			}
+			return data;
+		}
+
+		async function testConnection() {
+			syncCredentials();
+			if (!validConnection()) {
+				setStatus($('connectionStatus'), 'Enter host, port, username, and password.', 'error');
+				return;
+			}
+
+			if (isRemoteTarget(state.credentials.host)) {
+				// Never send remote credentials to the public API. Browser connector sessions
+				// cannot open bare connections; discovery is the login check for remote targets.
+				state.tested = false;
+				setStatus($('connectionStatus'), state.remoteTarget
+					? 'For connector targets, use "Discover databases" to check your MySQL login.'
+					: REMOTE_NOT_AVAILABLE + 'Select an approved connector target instead of typing a remote host.',
+					state.remoteTarget ? '' : 'error');
+				updateStepper();
+				return;
+			}
+
+			testBtn.disabled = true;
+			discoverBtn.disabled = true;
+			testBtn.textContent = 'Testing...';
+			setStatus($('connectionStatus'), 'Testing connection...', '');
+
+			try {
+				const data = await requestJson('/api/connections/test', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(state.credentials)
+				});
+
+				if (data.status !== 'success' || data.connected !== true)
+					throw new Error(errorMessage(data, 'Unable to connect to the database.'));
+
+				state.tested = true;
+				setStatus($('connectionStatus'), 'Connection configured.', 'success');
+				setStatus($('discoveryStatus'), 'Ready to discover visible databases.', 'success');
+			} catch (error) {
+				state.tested = false;
+				setStatus($('connectionStatus'), error.message || 'Unable to connect to the database.', 'error');
+			} finally {
+				testBtn.disabled = false;
+				discoverBtn.disabled = false; // re-enable always; the click handler validates input
+				testBtn.textContent = 'Test connection';
+				updateStepper();
+			}
+		}
+
+		async function discoverDatabases() {
+			syncCredentials();
+			if (!validConnection()) {
+				setStatus($('discoveryStatus'), 'Enter valid connection details first.', 'error');
+				return;
+			}
+
+			if (isRemoteTarget(state.credentials.host)) {
+				if (!state.remoteTarget) {
+					// A typed remote host is never a destination: refuse locally, send nothing.
+					$('discoveryWarning').hidden = true;
+					setStatus($('discoveryStatus'),
+						REMOTE_NOT_AVAILABLE + 'Select an approved connector target instead of typing a remote host.',
+						'error');
+					updateStepper();
+					return;
+				}
+				// Otherwise continue: discovery goes to the connector by target_id (below).
+			}
+
+			discoverBtn.disabled = true;
+			testBtn.disabled = true;
+			discoverBtn.textContent = 'Discovering...';
+			setStatus($('discoveryStatus'), 'Reading visible database names...', '');
+			$('discoveryWarning').hidden = true;
+
+			// Remote: connector only, by target_id. Local: public API (unchanged).
+			const remoteTarget = state.remoteTarget;
+			const binding = remoteTarget ? {
+				targetId: remoteTarget.target_id,
+				username: state.credentials.username,
+				password: state.credentials.password,
+				sessionToken: state.connectorSessionToken
+			} : null;
+
+			try {
+				const data = remoteTarget
+					? await discoverRemote(remoteTarget)
+					: await requestJson('/api/connections/discover-databases', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify(state.credentials)
+					});
+
+				if (!data || !Array.isArray(data.databases) || (data.status !== 'success' && data.status !== 'limited'))
+					throw new Error(errorMessage(data, 'Unable to discover databases.'));
+
+				if (binding) {
+					// Target, login or session changed while discovery ran: discard the result.
+					if (!state.remoteTarget || state.remoteTarget.target_id !== binding.targetId ||
+						state.credentials.username !== binding.username || state.credentials.password !== binding.password ||
+						state.connectorSessionToken !== binding.sessionToken || data.target_id !== binding.targetId)
+						throw new Error('Target, login, or connector session changed during discovery. Discover again.');
+					state.discovery = {
+						targetId: binding.targetId,
+						username: binding.username,
+						sessionToken: binding.sessionToken,
+						databases: data.databases.map(String)
+					};
+					state.tested = true;
+				}
+
+				const previous = state.selectedDatabase;
+				state.databases = data.databases;
+				database.replaceChildren(new Option('Select a database', ''));
+				data.databases.forEach(name => database.add(new Option(String(name), String(name))));
+				database.disabled = false;
+				database.value = data.databases.includes(previous) ? previous : '';
+				state.selectedDatabase = database.value;
+
+				setStatus($('discoveryStatus'),
+					data.status === 'limited' ? 'Database list is limited.' : data.databases.length + ' database(s) discovered.',
+					data.status === 'limited' ? '' : 'success');
+
+				// Safety-relevant: make it obvious when the database list is incomplete.
+				if (data.status === 'limited' || data.complete === false) {
+					$('discoveryWarning').textContent = 'Database list is limited. Not all visible databases are shown.';
+					$('discoveryWarning').hidden = false;
+				}
+
+				updateContext();
+			} catch (error) {
+				// A failed remote discovery also clears the connector's state for this session,
+				// so drop the local list too rather than offer databases the connector will refuse.
+				if (binding) clearDiscoveredDatabases();
+				setStatus($('discoveryStatus'), error.message || 'Unable to discover databases.', 'error');
+			} finally {
+				testBtn.disabled = false;
+				discoverBtn.disabled = false; // re-enable always; the click handler validates input
+				discoverBtn.textContent = 'Discover databases';
+				updateStepper();
+			}
+		}
+
+		// Any non-empty host that is not an explicit loopback name is treated as remote,
+		// regardless of port, so remote credentials can never fall through to the public API.
+		// The backend remains authoritative for classification; this check only decides routing.
+		function isRemoteTarget(hostname) {
+			if (!hostname || !hostname.trim()) return false;
+			const normalized = hostname.trim().toLowerCase();
+			return !(normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1');
+		}
+
+		// The browser sends the Origin header itself; it cannot be set from script.
+		function connectorHeaders(sessionToken, withBody) {
+			const headers = { 'Authorization': 'Bearer ' + sessionToken };
+			if (withBody) headers['Content-Type'] = 'application/json';
+			return headers;
+		}
+
+		// Never pairs implicitly: the session comes only from the explicit pairing action.
+		// Without one, remote validation stops here, before any credentials are sent anywhere.
+		async function ensureConnectorSession() {
+			if (state.connectorSessionToken) return state.connectorSessionToken;
+			throw new Error(REMOTE_NOT_AVAILABLE + 'Pair with the local connector first using the pairing code it printed.');
+		}
+
+		const CONNECTOR_ERROR_MESSAGES = {
+			invalid_pairing_token: 'Pairing code was not accepted. Request a new code from the local connector.',
+			pairing_expired: 'Pairing code has expired. Press Enter in the connector window for a new code.',
+			pairing_already_used: 'Pairing code was already used. Request a new code from the local connector.',
+			pairing_rate_limited: 'Too many failed pairing attempts. Wait a minute and try again.',
+			invalid_pairing_request: 'Pairing code format is invalid.',
+			invalid_origin: 'The local connector does not allow this page. Start it with --allow-origin ' + window.location.origin + '.',
+			invalid_session: 'Connector session is no longer valid. Pair again.',
+			session_expired: 'Connector session has expired. Pair again.',
+			insufficient_session_scope: 'This connector session is not allowed to perform that operation.',
+			company_target_not_approved: 'This target is not approved in the local connector.',
+			unknown_company_target: 'This target is not registered in the local connector.',
+			request_too_large: 'The request is too large. SQL for remote validation is limited to 64 KiB.',
+			statement_limit_exceeded: 'Too many statements. At most 16 statements can be validated at once.',
+			company_database_scope_unavailable: 'Discover databases again with this MySQL login before selecting one.',
+			company_database_scope_stale: 'The target changed while discovering databases. Discover again.',
+			database_not_authorized: 'That database is not in the list discovered for this target and login. Discover again.',
+			database_discovery_failed: 'The connector could not list databases for this target and login.',
+			target_needs_reapproval: 'This target must be re-approved in the local connector before use.',
+			target_not_approved: 'This target is not approved in the local connector.',
+			dns_identity_mismatch: 'The target host no longer resolves to its approved address. Ask the connector operator to re-approve it.'
+		};
+
+		function setPaired(sessionToken, message, kind) {
+			const changed = state.connectorSessionToken !== (sessionToken || null);
+			state.connectorSessionToken = sessionToken || null;
+			unpairBtn.hidden = !state.connectorSessionToken;
+			loadTargetsBtn.hidden = !state.connectorSessionToken;
+			if (changed) {
+				// Targets and discovered databases belong to one connector session only.
+				state.approvedTargets = [];
+				renderTargetOptions();
+				if (state.remoteTarget) selectTarget('');
+				else if (state.discovery) clearDiscoveredDatabases();
+			}
+			setStatus($('pairingStatus'), message, kind);
+		}
+
+		// All connector calls go through here: maps connector errors to clear messages and
+		// drops the in-memory session on any 401. Errors are re-thrown, never retried
+		// against the public API.
+		async function connectorRequest(url, options) {
+			if (url.indexOf(CONNECTOR_URL + '/') !== 0) throw new Error('Refusing a non-connector request.');
+			try {
+				return await requestJson(url, options);
+			} catch (error) {
+				if (error.status === undefined) {
+					throw new Error('The local connector is not reachable at ' + CONNECTOR_URL + '. Is it running?');
+				}
+				if (error.status === 401 && url !== CONNECTOR_URL + '/pair') {
+					setPaired(null, 'Connector session ended. Pair again to validate remote targets.', 'error');
+				}
+				const friendly = CONNECTOR_ERROR_MESSAGES[error.errorCode];
+				const wrapped = new Error(friendly || error.message);
+				wrapped.status = error.status;
+				wrapped.errorCode = error.errorCode;
+				throw wrapped;
+			}
+		}
+
+		async function pairConnector() {
+			const code = pairingCode.value.trim();
+			pairingCode.value = '';
+			if (!code) {
+				setStatus($('pairingStatus'), 'Paste the pairing code printed by the local connector.', 'error');
+				return;
+			}
+			pairBtn.disabled = true;
+			setStatus($('pairingStatus'), 'Pairing...', '');
+			try {
+				const data = await connectorRequest(CONNECTOR_URL + '/pair', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ pairing_token: code })
+				});
+				if (!data || data.status !== 'paired' || typeof data.session_token !== 'string' || !data.session_token)
+					throw new Error('The local connector returned an unexpected pairing response.');
+				const minutes = Math.max(1, Math.round((Number(data.expires_in_seconds) || 0) / 60));
+				setPaired(data.session_token, 'Paired with the local connector. Session expires in about ' + minutes + ' minute(s).', 'success');
+				await loadApprovedTargets();
+			} catch (error) {
+				setPaired(null, error.message || 'Pairing failed.', 'error');
+			} finally {
+				pairBtn.disabled = false;
+			}
+		}
+
+		async function unpairConnector() {
+			const sessionToken = state.connectorSessionToken;
+			setPaired(null, 'Not paired. Remote targets need a pairing code from the local connector.', '');
+			if (!sessionToken) return;
+			try {
+				await connectorRequest(CONNECTOR_URL + '/unpair', { method: 'POST', headers: connectorHeaders(sessionToken, false) });
+			} catch (_) {
+				// The local session is already discarded; a failed server-side unpair only
+				// leaves a session that expires on its own.
+			}
+		}
+
+		// Loads the targets this connector session may use. The connector lists approved
+		// targets only for browser sessions; anything else is dropped here as well.
+		async function loadApprovedTargets() {
+			try {
+				const sessionToken = await ensureConnectorSession();
+				const data = await connectorRequest(CONNECTOR_URL + '/company/targets', {
+					method: 'GET',
+					headers: connectorHeaders(sessionToken, false),
+				});
+				state.approvedTargets = (data && Array.isArray(data.targets) ? data.targets : []).filter(target =>
+					target && target.approval_state === 'approved' && typeof target.target_id === 'string' &&
+					target.target_id && isRemoteTarget(String(target.host || '')));
+			} catch (error) {
+				state.approvedTargets = [];
+				setStatus($('pairingStatus'), error.message || 'Could not load approved targets.', 'error');
+			}
+			renderTargetOptions();
+			// A selection that is no longer approved is dropped (and its discovery state with it).
+			if (state.remoteTarget && !state.approvedTargets.some(t => t.target_id === state.remoteTarget.target_id))
+				selectTarget('');
+			else if (state.remoteTarget)
+				targetSelect.value = state.remoteTarget.target_id;
+		}
+
+		function renderTargetOptions() {
+			targetSelect.replaceChildren(new Option('Local (this machine)', ''));
+			state.approvedTargets.forEach(target => targetSelect.add(new Option(
+				String(target.display_name || target.target_id) + ' (' + String(target.host) + ':' + String(target.port) + ')',
+				target.target_id)));
+		}
+
+		// Selecting a target only changes which approved target_id is used. The host/port
+		// fields become read-only display copies; they are never sent for remote operations.
+		function selectTarget(targetId) {
+			const target = state.approvedTargets.find(t => t.target_id === targetId) || null;
+			const wasRemote = Boolean(state.remoteTarget);
+			state.remoteTarget = target;
+			targetSelect.value = target ? target.target_id : '';
+			host.readOnly = port.readOnly = Boolean(target);
+			if (target) {
+				host.value = String(target.host);
+				port.value = String(target.port);
+			} else if (wasRemote) {
+				host.value = '127.0.0.1';
+				port.value = '3306';
+				// A login typed for a company target must never be reused by the local
+				// path, which posts credentials to the public API: leaving connector
+				// mode (target change, unpair, session expiry) clears it.
+				username.value = '';
+				password.value = '';
+			}
+			syncCredentials();
+			clearDiscoveredDatabases();
+			setStatus($('discoveryStatus'), target
+				? 'Enter your MySQL username and password, then discover databases.'
+				: 'Test the connection before discovering databases.', '');
+		}
+
+		// The approved target selected for remote work, or a local refusal (nothing is sent).
+		function selectedRemoteTarget() {
+			if (!state.remoteTarget)
+				throw new Error(REMOTE_NOT_AVAILABLE + 'Select an approved connector target instead of typing a remote host.');
+			return state.remoteTarget;
+		}
+
+		async function discoverRemote(target) {
+			const login = remoteLogin();
+			const sessionToken = await ensureConnectorSession();
+			// Fixed-purpose discovery: the body carries only the per-request login.
+			return connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/databases', {
+				method: 'POST',
+				headers: connectorHeaders(sessionToken, true),
+				body: JSON.stringify({ username: login.username, password: login.password })
+			});
+		}
+
+		// True only while the selected database came from discovery for this exact
+		// target, MySQL username and connector session.
+		function discoveryMatches(target) {
+			const discovery = state.discovery;
+			return Boolean(discovery && target &&
+				discovery.targetId === target.target_id &&
+				discovery.username === state.credentials.username &&
+				discovery.sessionToken === state.connectorSessionToken &&
+				discovery.databases.includes(state.selectedDatabase));
+		}
+
+		// The user's own MySQL login for a company target, sent to the local connector in
+		// the body of each operation. The connector uses it for that operation only and
+		// never stores it; it is never sent to the public API.
+		function remoteLogin() {
+			if (!state.credentials.username || !state.credentials.password)
+				throw new Error('Enter your MySQL username and password for the remote target.');
+			return { username: state.credentials.username, password: state.credentials.password };
+		}
+
+		// REMOTE: connector only. Must never call the public /api/* routes.
+		async function validateRemote(sql) {
+			const remoteTarget = selectedRemoteTarget();
+			const login = remoteLogin();
+			// Only target_id, the SQL, the login and (optionally) a discovered database are sent.
+			const body = { sql: sql, username: login.username, password: login.password };
+			if (state.selectedDatabase) {
+				if (!discoveryMatches(remoteTarget))
+					throw new Error('The selected database was not discovered for this target, login and session. Discover again.');
+				body.database = state.selectedDatabase;
+			}
+			const sessionToken = await ensureConnectorSession();
+			return connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(remoteTarget.target_id) + '/validate', {
+				method: 'POST',
+				headers: connectorHeaders(sessionToken, true),
+				body: JSON.stringify(body)
+			});
+		}
+
+		// LOCAL: loopback or static validation through the public API (unchanged contract).
+		async function validateLocal(sql) {
+			const body = {
+				sql: sql,
+				host: state.credentials.host,
+				port: state.credentials.port,
+				username: state.credentials.username,
+				password: state.credentials.password
+			};
+			if (state.selectedDatabase) body.database = state.selectedDatabase;
+			return requestJson('/api/validate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+		}
+
+		async function validateSql() {
+			const sql = sqlInput.value;
+			if (!sql.trim()) {
+				setStatus($('validationStatus'), 'Enter SQL to validate.', 'error');
+				return;
+			}
+
+			validateBtn.disabled = true;
+			validateBtn.textContent = 'Validating...';
+			setStatus($('validationStatus'), 'Reviewing statement...', '');
+
+			try {
+				// A selected connector target, or any typed remote host, takes the connector path;
+				// validateRemote refuses locally when no approved target is selected.
+				const data = state.remoteTarget || isRemoteTarget(state.credentials.host)
+					? await validateRemote(sql)
+					: await validateLocal(sql);
+
+				if (!data || !Array.isArray(data.statements))
+					throw new Error(errorMessage(data, 'Validation returned an unexpected response.'));
+
+				renderResults(data);
+				setStatus($('validationStatus'), 'Review complete.', 'success');
+			} catch (error) {
+				setStatus($('validationStatus'), error.message || 'Validation failed.', 'error');
+				renderError(error.message || 'Validation failed.');
+			} finally {
+				validateBtn.disabled = false;
+				validateBtn.textContent = 'Validate SQL';
+				updateStepper();
+			}
+		}
+
+		function updateContext() {
+			$('headerContext').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only';
+			$('contextStatus').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'No database selected';
+			$('contextDot').classList.toggle('on', Boolean(state.selectedDatabase));
+			updateStepper();
+		}
+
+		function updateStepper() {
+			const steps = [...document.querySelectorAll('.stepper .step')];
+			const hasResults = Boolean(document.querySelector('#results .statement'));
+			const completed = state.selectedDatabase ? 3 : state.tested && state.databases.length ? 2 : state.tested ? 1 : 0;
+			const active = hasResults ? 4 : state.selectedDatabase ? 3 : state.tested && state.databases.length ? 2 : 1;
+			steps.forEach((step, index) => {
+				step.classList.toggle('done', index < completed);
+				step.classList.toggle('active', index + 1 === active);
+			});
+		}
+
+		// UI Rendering
+		function el(tag, className, content) {
+			const node = document.createElement(tag);
+			if (className) node.className = className;
+			if (content != null) node.textContent = content;
+			return node;
+		}
+
+		function metric(label, value) {
+			const node = el('div', 'metric');
+			node.append(el('div', 'section-label', label), el('b', '', text(value)));
+			return node;
+		}
+
+		function factorList(factors, emptyMessage) {
+			const list = el('ul', 'factor-list');
+			if (!factors || !factors.length) {
+				list.append(el('li', 'muted', emptyMessage || 'No additional risk identified.'));
+				return list;
+			}
+			factors.forEach(factor => {
+				const row = el('li');
+				row.append(el('span', '', text(factor.label || factor.text || factor.code)));
+				if (factor.points != null) row.append(el('span', 'points', (factor.points > 0 ? '+' : '') + factor.points + ' points'));
+				list.append(row);
+			});
+			return list;
+		}
+
+		function analysisModeLabel(mode) {
+			return mode === 'DATABASE_EVIDENCE' ? 'Database evidence'
+				: mode === 'STATIC_DATABASE_UNAVAILABLE' ? 'Static + database unavailable'
+					: 'Static analysis';
+		}
+
+		function metadataStatusLabel(status) {
+			return status === 'available' ? 'Available' : status === 'unavailable' ? 'Unavailable' : 'Partial';
+		}
+
+		function plainList(items, empty) {
+			const list = el('ul', 'plain-list');
+			if (!items || !items.length) {
+				list.append(el('li', 'muted', empty || 'None reported.'));
+				return list;
+			}
+			items.forEach(item => {
+				list.append(el('li', '', typeof item === 'string' ? item : (item.text || item.name || JSON.stringify(item))));
+			});
+			return list;
+		}
+
+		function layer(title, className, children) {
+			const box = el('section', 'layer ' + className);
+			box.append(el('h3', '', title));
+			children.forEach(child => box.append(child));
+			return box;
+		}
+
+		function evidenceLayer(s) {
+			const evidence = s.database_evidence || {};
+			const body = [el('p', '', evidence.available ? 'EXPLAIN evidence is available.' : 'Database evidence is unavailable.')];
+			const grid = el('div', 'metric-grid');
+			grid.append(
+				metric('Access type', evidence.access_type),
+				metric('Estimated rows', evidence.estimated_rows == null ? 'n/a' : evidence.estimated_rows + ' (estimate)'),
+				metric('Possible keys', evidence.possible_keys && evidence.possible_keys.length ? evidence.possible_keys.join(', ') : 'n/a'),
+				metric('Selected key', evidence.key),
+				metric('Key length', evidence.key_length),
+				metric('Full table scan', evidence.full_table_scan == null ? 'n/a' : evidence.full_table_scan ? 'Yes' : 'No')
+			);
+			body.push(grid);
+			if (evidence.extra) body.push(el('p', '', 'Additional plan detail: ' + evidence.extra));
+			body.push(el('div', 'subheading', 'Evidence-based risk adjustment'));
+			body.push(factorList(s.evidence_factors, 'No additional database-evidence adjustment.'));
+			if (s.high_estimated_rows_applied != null) {
+				body.push(el('p', '', 'High estimated rows applied: ' + (s.high_estimated_rows_applied ? 'Yes' : 'No')));
+			}
+			return layer('DATABASE EVIDENCE', 'evidence', body);
+		}
+
+		function metadataLayer(s) {
+			const factors = s.metadata_factors || [];
+			const m1 = factors.filter(f => String(f.code || '').startsWith('M1_'));
+			const m2 = factors.filter(f => String(f.code || '').startsWith('M2_'));
+			const status = metadataStatusLabel(s.metadata_status);
+			const adjustment = s.metadata_score_adjustment || 0;
+			const body = [
+				el('p', '', 'Metadata: ' + status),
+				el('p', '', status === 'Available'
+					? 'Risk adjustment: ' + (adjustment > 0 ? '+' : '') + adjustment + ' points'
+					: 'Metadata-based scoring was not applied.'),
+				el('div', 'subheading', 'M1 — Table-scale risk'),
+				factorList(m1, 'No additional risk identified.'),
+				el('div', 'subheading', 'M2 — Predicate/index risk'),
+				factorList(m2, 'No additional risk identified.')
+			];
+			return layer('METADATA ASSESSMENT', 'metadata', body);
+		}
+
+		function statementCard(s, index) {
+			const card = el('article', 'statement');
+			const head = el('div', 'statement-head');
+			const title = el('div', 'statement-title');
+			title.append(
+				el('span', 'statement-number', 'STATEMENT ' + (index + 1)),
+				el('span', 'statement-type', text(s.statement_type)),
+				el('span', 'statement-tables', s.tables && s.tables.length ? s.tables.join(', ') : 'No table identified')
+			);
+			head.append(title, el('span', 'risk ' + text(s.risk_level), text(s.risk_level) + ' / ' + text(s.score)));
+			card.append(head);
+
+			const body = el('div', 'statement-body');
+			body.append(el('pre', 'sql-block', s.sql));
+
+			const metrics = el('div', 'metric-grid');
+			metrics.append(
+				metric('Final score', s.score + ' / 100'),
+				metric('Confidence', s.confidence),
+				metric('Static score', s.static_score + ' / 100')
+			);
+			body.append(metrics);
+
+			const layers = el('div', 'layer-grid');
+			layers.append(
+				layer('FINAL RESULT', 'static', [
+					el('p', '', 'Final risk: ' + text(s.risk_level)),
+					el('div', 'subheading', 'Why'),
+					plainList(s.reasons, 'No additional reasons reported.'),
+					el('div', 'subheading', 'Review checklist'),
+					plainList(s.checklist, 'No checklist items reported.')
+				]),
+				layer('STATIC ANALYSIS', 'static', [
+					el('p', '', 'Static risk: ' + text(s.static_risk_level)),
+					el('div', 'subheading', 'Static factors'),
+					factorList(s.factors, 'No additional static factors.')
+				]),
+				evidenceLayer(s),
+				metadataLayer(s)
+			);
+			body.append(layers);
+			card.append(body);
+			return card;
+		}
+
+		function renderResults(data) {
+			$('results').replaceChildren();
+
+			const summary = el('div', 'summary');
+			const aggregate = el('div', 'summary-cell');
+			aggregate.append(
+				el('div', 'label', 'Aggregate / highest final risk'),
+				el('strong', '', text(data.overall_risk_level)),
+				el('small', '', text(data.statement_count) + ' statement(s), maximum final score')
+			);
+
+			const score = el('div', 'summary-cell');
+			score.append(
+				el('div', 'label', 'Overall score'),
+				el('strong', '', text(data.overall_score) + ' / 100'),
+				el('small', '', 'Not summed or averaged')
+			);
+
+			const mode = el('div', 'summary-cell');
+			mode.append(
+				el('div', 'label', 'Analysis mode'),
+				el('strong', '', analysisModeLabel(data.analysis_mode)),
+				el('small', '', state.selectedDatabase ? 'Selected database context' : 'Static validation remains available')
+			);
+
+			summary.append(aggregate, score, mode);
+			$('results').append(summary);
+
+			data.statements.forEach((statement, index) => {
+				$('results').append(statementCard(statement, index));
+			});
+		}
+
+		function renderError(message) {
+			$('results').replaceChildren(el('div', 'error-box', message));
+		}
+
+		// Event listeners
+		[host, port, username, password].forEach(input => input.addEventListener('input', syncCredentials));
+		testBtn.addEventListener('click', testConnection);
+		discoverBtn.addEventListener('click', discoverDatabases);
+		validateBtn.addEventListener('click', validateSql);
+		pairBtn.addEventListener('click', pairConnector);
+		unpairBtn.addEventListener('click', unpairConnector);
+		loadTargetsBtn.addEventListener('click', loadApprovedTargets);
+		targetSelect.addEventListener('change', () => selectTarget(targetSelect.value));
+		database.addEventListener('change', () => {
+			state.selectedDatabase = database.value;
+			updateContext();
+		});
+
+		// Initial state
+		updateContext();
+	</script>
+</body>
+
+</html>

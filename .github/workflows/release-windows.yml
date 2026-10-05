@@ -1,0 +1,61 @@
+name: Windows portable release
+
+# Builds MySQL-DBA-Validator-v<version>-windows-x64.zip, smoke-tests the built
+# artifact, and (for v* tags) attaches it to a DRAFT GitHub Release. A maintainer
+# reviews and publishes the draft by hand.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          architecture: x64
+
+      - name: Tag matches backend/version.py
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = python -c "import re,pathlib; print(re.search(r'APP_VERSION = \"(.+?)\"', pathlib.Path('backend/version.py').read_text()).group(1))"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} does not match APP_VERSION $version" }
+
+      - name: Test suite
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pytest -q
+          python -m pip check
+
+      - name: Build portable release
+        run: python release/build_windows.py
+
+      - name: Smoke-test the built artifact
+        run: python release/smoke_test_artifact.py (Get-ChildItem dist/*.zip).FullName
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-portable
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Create draft GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = (Get-ChildItem dist/*.zip, dist/*.sha256).FullName
+          gh release create "${{ github.ref_name }}" @files --draft --title "MySQL DBA Validator ${{ github.ref_name }}" --notes "Windows x64 portable ZIP (no installer). Verify with the .sha256 file. See README for scope and verification status."

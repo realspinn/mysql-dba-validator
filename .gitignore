@@ -1,0 +1,68 @@
+# Environment variables with credentials
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local runtime data: logs, connector target registries, certificates and keys
+*.log
+connector-targets*.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Local-only folders (broken bundled venv, tool scratch)
+test_clean_env/
+.claude/
+
+# Release builds (build/ and dist/ above) are published as GitHub Release
+# assets, never committed.
