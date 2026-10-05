@@ -10,8 +10,9 @@ score. No LLM makes risk or security decisions.
 tested. The remote/company workflow through the local connector is tested
 locally (unit tests, a real connector process, and real headless Chrome), but
 it has **not** yet been verified end-to-end against real company
-infrastructure: a hosted HTTPS frontend, company MySQL, VPN/LAN and company
-TLS. See [Verification status](#verification-status).
+infrastructure. Real company infrastructure validation, including a hosted
+HTTPS frontend, company MySQL, VPN/LAN connectivity and company TLS, remains
+outstanding. See [Verification status](#verification-status).
 
 ---
 
@@ -106,9 +107,9 @@ test and database discovery.
 | Area | Status |
 | --- | --- |
 | Parser, risk engine, API, connector security rules | Automated tests |
-| Local web app and connector in real headless Chrome (B3.1) | Passed, company MySQL replaced by a stand-in |
+| Local web app and connector in real headless Chrome | Passed, company MySQL replaced by a stand-in |
 | Windows portable release | Built and smoke-tested from the extracted zip |
-| Hosted HTTPS frontend, real company MySQL, VPN/LAN, company TLS (B3.2 to B3.6) | **Not verified** |
+| Real company infrastructure: hosted HTTPS frontend, company MySQL, VPN/LAN connectivity, company TLS | **Not verified** |
 
 This is not a multi-user or internet-facing service. It has no user
 authentication. See [SECURITY.md](SECURITY.md) to report vulnerabilities.
@@ -152,7 +153,7 @@ Layout:
 ```text
 backend/     FastAPI app (main.py), parser and risk engine, evidence collectors
 connector/   local connector: launcher, server, target policy and registry
-frontend/    index.html (served page); index_legacy.html is a rollback copy
+frontend/    index.html (served page)
 release/     Windows release launcher, PyInstaller spec, build, audit and smoke test
 tests/       pytest suite
 ```
@@ -202,8 +203,6 @@ keep MySQL private, and use a read-only MySQL account.
 
 ## Roadmap
 
-- Complete B3: hosted HTTPS frontend, real company MySQL, VPN/LAN and company
-  TLS end-to-end verification.
 - Windows installer after the portable build has proven reliable.
 - Deeper DBA analysis: stored procedures, transaction and session state,
   exportable reports.

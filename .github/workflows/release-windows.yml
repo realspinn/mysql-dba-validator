@@ -52,16 +52,33 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
-      # Inspection only: keeps whatever a failed build/audit/smoke test produced.
-      # The job still fails and no release is created.
-      - name: Upload failed build for inspection
+      # Diagnostics only. On failure, record file names, sizes, SHA256 hashes and
+      # the audit output, never the failed binaries. The audit never prints
+      # secret values. The job still fails and no release is created.
+      - name: Write failure manifest
+        if: failure()
+        run: |
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          if (Test-Path dist) {
+            Get-ChildItem dist -Recurse -File | ForEach-Object {
+              "{0}`t{1}`t{2}" -f (Resolve-Path -Relative $_.FullName), $_.Length, (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            } | Set-Content diagnostics/manifest.tsv -Encoding utf8
+            $py = "build/release/venv/Scripts/python.exe"
+            $app = Get-ChildItem dist -Directory | Select-Object -First 1
+            if ((Test-Path $py) -and $app) { & $py release/audit_artifact.py $app.FullName *> diagnostics/audit.txt }
+          } else {
+            "no dist/ folder was produced" | Set-Content diagnostics/manifest.tsv -Encoding utf8
+          }
+          $warn = "build/release/work/mysql-dba-validator/warn-mysql-dba-validator.txt"
+          if (Test-Path $warn) { Copy-Item $warn diagnostics/ }
+          exit 0
+
+      - name: Upload failure manifest
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: FAILED-build-for-inspection
-          path: |
-            dist/
-            build/release/work/mysql-dba-validator/warn-mysql-dba-validator.txt
+          name: FAILED-build-manifest
+          path: diagnostics/
           if-no-files-found: ignore
           retention-days: 7
 

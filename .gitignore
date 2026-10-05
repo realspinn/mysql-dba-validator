@@ -1,7 +1,7 @@
-# Environment variables with credentials
+# Environment variables with credentials (only the example is tracked)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -60,9 +60,14 @@ connector-targets*.json
 *.pfx
 *.p12
 
-# Local-only folders (broken bundled venv, tool scratch)
+# Local-only folders and files: local environments, scratch work and
+# AI-assistant context. These never belong in the public repository.
 test_clean_env/
+scratch/
 .claude/
+CLAUDE.md
+AGENTS.md
 
-# Release builds (build/ and dist/ above) are published as GitHub Release
-# assets, never committed.
+# Release builds (build/ and dist/ above) and their checksums are published as
+# GitHub Release assets, never committed.
+*.sha256

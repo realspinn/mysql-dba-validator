@@ -66,12 +66,6 @@ def test_root_serves_the_intended_frontend(served_html):
     assert "<title>MySQL DBA Validator</title>" in served_html
 
 
-def test_legacy_page_is_kept_for_rollback_but_not_served(served_html):
-    legacy = FRONTEND_DIR / "index_legacy.html"
-    assert legacy.is_file()
-    assert served_html.encode("utf-8") != legacy.read_bytes()
-
-
 def test_served_page_contains_connector_validation_route(served_html):
     assert "CONNECTOR_URL = 'http://127.0.0.1:8765'" in served_html
     assert "'/company/targets/'" in served_html

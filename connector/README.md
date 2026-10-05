@@ -1,69 +1,37 @@
-# Local Connector Stage 2
+# Local connector
 
-This package provides the local-only connector for the MySQL DBA Validator.
+The local connector lets the MySQL DBA Validator page work with remote/company
+MySQL targets without sending company credentials to the public web API. It
+runs on the user's machine; the browser talks to it directly.
 
 ## Security boundary
 
-- binds only to 127.0.0.1
-- no 0.0.0.0 or wildcard listener
-- no IPv6 listener
-- no outbound network access beyond a single localhost MySQL connection test
-- no arbitrary host, port, SQL, or network proxy capability
-- pair by short-lived random token
-- session tokens live only in memory
-- origin validation is enforced against an explicit allowlist
-- all other endpoints are rejected
+- Listens on `127.0.0.1:8765` only: no `0.0.0.0`, wildcard or IPv6 listener.
+- Accepts requests only from an explicit allowlist of browser origins.
+- A browser gets a session only by entering a single-use pairing code printed
+  in the launcher terminal. Sessions live in memory.
+- Unknown routes return `404`. Browser sessions are limited to a small route
+  allowlist (see [Session scopes](#session-scopes)).
+- Outbound database connections go only to targets an operator has registered
+  and approved in the launcher console. The browser refers to a target by its
+  `target_id`; it cannot supply a hostname, IP, port, TLS setting or database
+  target of its own.
+- Every company connection re-checks the approved DNS identity and the exact
+  destination IP, and requires TLS verified against the configured CA. Without a
+  CA, company operations fail closed before any TCP connection is opened.
+- No generic SQL endpoint: discovery is a fixed, capped `SHOW DATABASES`, and
+  evidence is limited to bounded `EXPLAIN` and fixed metadata queries.
+- Company MySQL credentials are supplied per request and never stored (see
+  [Company MySQL credentials](#company-mysql-credentials-per-request-never-stored)).
 
-## Stage 2 capability
+### Localhost connection test (`/db/test`)
 
-The connector exposes a single authenticated local database test endpoint at `/db/test` only when the Stage 2 runtime is explicitly created with `allows_database=True`.
-
-The safe enablement path is the explicit constructor/factory used by the Stage 2 launcher, not a default runtime. `create_app()` still creates the Stage 1 default runtime with `allows_database=False`, which keeps `/db/test` hidden unless the app is intentionally created as a Stage 2 runtime.
-
-## Stage 3A company-target policy boundary
-
-> Historical stage note. Company connections, TLS, per-request credentials and
-> bounded discovery now exist; the current behaviour is described from
-> "Configuration" onward. Only the approved-target / `target_id` principle below
-> still applies unchanged.
-
-Stage 3A is policy-only. It introduces a local, explicit Company target registry but does not enable any network or database connection capability.
-
-The connector remains the authority for target approval. The public validator may only refer to an already approved target by `target_id`; it cannot supply an arbitrary hostname, IP, port, TLS configuration, credential, or database target for Company Mode.
-
-Requirements:
-
-- Local Mode remains unchanged and still only allows loopback localhost targets on port 3306.
-- Company Mode is represented as a local approved-target policy object, not a generic network connection object.
-- No DNS lookups, sockets, HTTP requests, MySQL connection attempts, or credential flows are enabled in Stage 3A.
-- A target must be explicitly registered locally before it can be approved.
-- Unknown or unapproved target IDs are rejected.
-- Company DB connections, TLS, credentials, discovery, and metadata remain deferred to later stages.
-
-This stage is intentionally a policy gate only.
-
-Requirements:
-
-- valid Stage 1 session token required
-- valid Origin required
-- local target only: `localhost` or `127.0.0.1`
-- port must be exactly `3306`
-- no arbitrary hosts, ports, DNS names, private IPs, public IPs, or IPv6 targets
-- MySQL credentials are accepted only in the browser request and are used only inside the local connector process for the one connection attempt
-- credentials are never logged, persisted, stored in URLs, or returned in responses
-- the connection is closed immediately after the test
-
-## MySQL connection policy
-
-> Stage 2 (localhost `/db/test`) note. For company targets, discovery is the
-> fixed, capped `SHOW DATABASES` described below; there is still no generic SQL
-> endpoint.
-
-- no generic SQL endpoint is provided
-- no arbitrary SQL execution is allowed
-- no discovery query is used in this stage
-- no company cloud/dev database targets are supported yet
-- only localhost MySQL is allowed for the Stage 2 boundary
+A localhost-only MySQL connection test route exists but is **disabled by
+default**. It is enabled only in a runtime created explicitly with
+`create_stage2_app()`; the launcher does not enable it. When enabled it accepts
+only `localhost`/`127.0.0.1` on port `3306`, requires a valid session and
+origin, uses the supplied credentials for that one attempt, never logs, stores
+or returns them, and closes the connection immediately.
 
 ## Running locally
 
@@ -179,7 +147,3 @@ file holds destination policy only and rejects unknown fields.
   `/validate`. Operator sessions are only issued
   programmatically (`ConnectorRuntime.issue_pairing_token()`). The production
   operator workflow is the launcher's operator console, which needs no session.
-
-## Stage 2 intent
-
-This stage proves the connector can safely validate a local MySQL target and establish a localhost-only connection boundary without routing credentials to the public validator or enabling arbitrary database access.

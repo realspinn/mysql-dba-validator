@@ -19,7 +19,7 @@ a = Analysis(
     [str(ROOT / "release" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    # Only the served page. index_legacy.html is a source-tree rollback copy.
+    # Only the served page.
     datas=[(str(ROOT / "frontend" / "index.html"), "frontend")],
     hiddenimports=hiddenimports,
     hookspath=[],

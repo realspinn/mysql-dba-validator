@@ -50,16 +50,27 @@ python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v<version>-window
 5. Runs `release/audit_artifact.py` on the folder.
 6. Zips the folder, writes the SHA256 file and audits the zip.
 
-The output is reproducible in content, from the same pinned inputs. It is not
-bit-for-bit identical, because timestamps differ between builds.
+The build is not bit-for-bit reproducible. Two builds from the same commit and
+pinned inputs produce the same file set, and every file except two is
+byte-identical. The two that differ are `MySQL-DBA-Validator.exe`, which
+PyInstaller regenerates on each build, and one `*.dist-info/RECORD` file written
+by pip. So the zip's SHA256 changes on every build. Always verify a downloaded
+release against the `.sha256` file published with that release.
 
 The audit fails the build on any of these:
 
 - `.env` files, keys or certificates, connector registries, logs, databases,
-  tests, venvs or the legacy page;
+  tests, venvs or source-tree documents;
 - private-key material;
 - the build machine's home or checkout path;
 - the values of secret-like keys in your local `.env`.
+
+One narrow exception applies to the home-path check. Some PyPI wheels with
+compiled Rust code embed their own build path, `C:\Users\runneradmin\.cargo\registry\...`.
+`runneradmin` is also the home folder on GitHub-hosted runners. Inside a compiled
+`.pyd` or `.dll` only, a home-folder match immediately followed by
+`.cargo\registry\` is not a finding. Every other home-path match still fails,
+including in those same files.
 
 The audit inspects the executable's embedded Python archive as well as the
 loose files. Pass extra literals that must not ship with `--forbid`.
@@ -82,10 +93,17 @@ those versions.
 2. Tag and push the version, for example `git tag v0.2.0` then
    `git push origin v0.2.0`.
 3. The **Windows portable release** workflow
-   (`.github/workflows/release-windows.yml`) runs the tests, builds the zip,
-   smoke-tests it and attaches the zip and checksum to a **draft** release.
-4. Review the draft, add release notes including the verification status, and
-   publish it.
+   (`.github/workflows/release-windows.yml`) checks that the tag matches
+   `APP_VERSION`, runs the tests, builds and audits the zip, smoke-tests it,
+   and attaches the zip and checksum to a **draft** release. The audit and smoke
+   test are release gates: if either fails, no draft is created, and the run
+   uploads only a diagnostic manifest (file names, sizes, SHA256 hashes and the
+   audit output), never the failed binaries.
+4. Download the draft's zip and verify it before publishing: check the
+   checksum, run the audit against it with your local `.env`, and run the
+   smoke test.
+5. Add release notes that include the verification status, then publish the
+   draft.
 
 ## Not done yet
 
