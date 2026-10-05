@@ -52,6 +52,19 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+      # Inspection only: keeps whatever a failed build/audit/smoke test produced.
+      # The job still fails and no release is created.
+      - name: Upload failed build for inspection
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FAILED-build-for-inspection
+          path: |
+            dist/
+            build/release/work/mysql-dba-validator/warn-mysql-dba-validator.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Create draft GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:

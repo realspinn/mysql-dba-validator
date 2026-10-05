@@ -204,3 +204,40 @@ def test_audit_passes_clean_folder_and_ignores_variable_names(tmp_path):
         audit_artifact.embedded_entries = original
     assert findings == []
     assert stats["files"] == 2
+
+
+def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tmp_path, monkeypatch):
+    home = r"C:\Users\runneradmin"
+    checkout = r"D:\a\repo\repo"
+    monkeypatch.setattr(audit_artifact, "machine_paths", lambda: [
+        (audit_artifact.HOME_LABEL, home), ("source checkout path", checkout)])
+    monkeypatch.setattr(audit_artifact, "embedded_entries", lambda _data: iter(()))
+    app_dir = tmp_path / "app"
+    internal = app_dir / "_internal"
+    (internal / "frontend").mkdir(parents=True)
+    (internal / "frontend" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (app_dir / audit_artifact.EXE_NAME).write_bytes(b"")
+    cargo = rb"\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-0.25.1\src\err.rs"
+    # Allowed: upstream Rust wheel build paths (both separator styles) inside .pyd/.dll.
+    (internal / "_rust.pyd").write_bytes(b"\x00MZ" + home.encode() + cargo + b"\x00")
+    (internal / "_rust_notify.dll").write_bytes(home.encode() + b"/.cargo\\registry\\src\\x.rs")
+    # Rejected: a genuine home path in a binary, even next to an allowed one.
+    (internal / "mixed.pyd").write_bytes(home.encode() + cargo + b"\x00" + home.encode() + rb"\Documents\x")
+    # Rejected: the same cargo path outside a compiled binary.
+    (internal / "notes.txt").write_bytes(home.encode() + cargo)
+    # Rejected: UTF-16 occurrences stay strict.
+    (internal / "wide.dll").write_bytes((home + r"\.cargo\registry\x").encode("utf-16-le"))
+    # Rejected: the exception never covers the checkout path.
+    (internal / "checkout.pyd").write_bytes(checkout.encode() + cargo)
+    (internal / "leak.pyd").write_bytes(home.encode() + rb"\AppData\Local\x")
+
+    findings, _stats = audit_artifact.audit(app_dir, tmp_path / "no.env", [])
+    text = "\n".join(findings)
+    assert "_rust.pyd" not in text
+    assert "_rust_notify.dll" not in text
+    assert "build user's home folder found in _internal/mixed.pyd" in text
+    assert "build user's home folder found in _internal/notes.txt" in text
+    assert "build user's home folder found in _internal/wide.dll" in text
+    assert "source checkout path found in _internal/checkout.pyd" in text
+    assert "build user's home folder found in _internal/leak.pyd" in text
+    assert len(findings) == 5

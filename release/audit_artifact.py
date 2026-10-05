@@ -15,6 +15,9 @@ Checks, failing (exit 1) on any finding:
     SECRET, TOKEN or KEY), plus any --forbid strings;
   - PEM private-key blocks;
   - machine-specific paths: the build user's home folder and this source checkout.
+    One narrow exception: inside a compiled .pyd/.dll, a home-folder path
+    immediately followed by .cargo/registry/ (either separator; upstream Rust
+    wheel build path).
 
 Secret values are never printed; findings name the key and the file only.
 Variable names such as ``password`` in source code are not findings.
@@ -54,6 +57,15 @@ FORBIDDEN_MODULE_PREFIXES = ("tests", "test_qa", "pytest", "_pytest", "httpx", "
 PRIVATE_KEY_RE = re.compile(rb"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----\s*[A-Za-z0-9+/=\r\n]{64,}")
 SECRET_KEY_RE = re.compile(r"PASSWORD|SECRET|TOKEN|KEY", re.I)
 
+# Rust wheels from PyPI (cryptography, pydantic-core, watchfiles) are built on
+# GitHub-hosted runners and embed C:\Users\runneradmin\.cargo\registry\... source
+# paths for panic messages. On our own GitHub runner the home folder is that same
+# path, so a home-folder hit in a compiled .pyd/.dll is allowed only when it is
+# immediately followed by .cargo\registry\. Any other occurrence still fails.
+HOME_LABEL = "build user's home folder"
+COMPILED_SUFFIXES = (".pyd", ".dll")
+UPSTREAM_CARGO_SUFFIX = re.compile(rb"[\\/]+\.cargo[\\/]+registry[\\/]")  # UTF-8 only; UTF-16 stays strict
+
 
 def read_env_secrets(env_file: Path) -> list[tuple[str, str]]:
     secrets = []
@@ -73,11 +85,11 @@ def read_env_secrets(env_file: Path) -> list[tuple[str, str]]:
 def machine_paths() -> list[tuple[str, str]]:
     paths = []
     home = Path.home()
-    paths.append(("build user's home folder", str(home)))
+    paths.append((HOME_LABEL, str(home)))
     paths.append(("source checkout path", str(ROOT)))
     short_home = os.environ.get("USERPROFILE", "")
     if short_home and short_home.lower() != str(home).lower():
-        paths.append(("build user's home folder", short_home))
+        paths.append((HOME_LABEL, short_home))
     return paths
 
 
@@ -128,6 +140,18 @@ def needles_for(text: str) -> list[bytes]:
     return out
 
 
+def contains_needle(lowered: bytes, needles: list[bytes], allow_upstream_cargo: bool) -> bool:
+    """True if any needle occurs; with allow_upstream_cargo, occurrences followed by .cargo\\registry\\ don't count."""
+    for needle in needles:
+        start = lowered.find(needle)
+        while start != -1:
+            end = start + len(needle)
+            if not (allow_upstream_cargo and UPSTREAM_CARGO_SUFFIX.match(lowered, end)):
+                return True
+            start = lowered.find(needle, start + 1)
+    return False
+
+
 def audit(target: Path, env_file: Path, forbid: list[str]) -> tuple[list[str], dict]:
     findings: list[str] = []
     secrets = read_env_secrets(env_file) + [(f"--forbid #{i + 1}", v) for i, v in enumerate(forbid)]
@@ -161,8 +185,9 @@ def audit(target: Path, env_file: Path, forbid: list[str]) -> tuple[list[str], d
             lowered = blob.lower()
             if PRIVATE_KEY_RE.search(blob):
                 findings.append(f"PEM private key block in {where}")
+            compiled = where.lower().endswith(COMPILED_SUFFIXES)
             for label, needles, _secret in content_rules:
-                if any(n in lowered for n in needles):
+                if contains_needle(lowered, needles, compiled and label == HOME_LABEL):
                     findings.append(f"{label} found in {where}")
 
     for required in REQUIRED:
