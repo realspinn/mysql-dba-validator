@@ -14,6 +14,7 @@ import hashlib
 import importlib
 import json
 import logging
+import re
 import socket
 import sys
 import threading
@@ -317,8 +318,11 @@ def test_served_page_sends_login_per_request_to_connector_only():
     assert "username: login.username, password: login.password" in remote
     assert "CONNECTOR_URL + '/company/targets/'" in remote and "'/validate'" in remote
     assert "/api/" not in remote
-    for forbidden in ("localStorage", "sessionStorage", "document.cookie", "URLSearchParams"):
+    for forbidden in ("sessionStorage", "document.cookie", "URLSearchParams"):
         assert forbidden not in html
+    # localStorage holds only the appearance preference (see test_frontend_served_page).
+    uses = re.findall(r"localStorage\.(getItem|setItem)\('mdv-theme'", html)
+    assert html.count("localStorage") == len(uses)
 
 
 # ---------------------------------------------------------------- F / G: no leakage

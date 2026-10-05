@@ -4,176 +4,464 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="color-scheme" content="light dark" />
 	<title>MySQL DBA Validator</title>
+	<script>
+		// Appearance only, applied before first paint to avoid a theme flash. The only
+		// value ever stored is one of three fixed words under the 'mdv-theme' key.
+		(function () {
+			try {
+				var theme = localStorage.getItem('mdv-theme');
+				if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
+			} catch (_) { }
+		})();
+	</script>
 	<style>
+		/* ---------------------------------------------------------------- tokens */
 		:root {
-			--ink: #17231f;
-			--muted: #68756f;
-			--line: #d9dfd9;
-			--paper: #f4f5ef;
-			--surface: #fffefa;
-			--mint: #d8eee3;
-			--teal: #176b63;
-			--teal-dark: #104c48;
-			--coral: #d85d45;
-			--amber: #b57b16;
-			--green: #2f7957;
-			--mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-			--sans: "Avenir Next", Avenir, "Trebuchet MS", sans-serif
+			color-scheme: light;
+			--bg: #f4f5f7;
+			--surface: #ffffff;
+			--surface-2: #f7f8fa;
+			--surface-3: #eceff3;
+			--border: #e1e4e9;
+			--border-strong: #c9cfd7;
+			--text: #12161c;
+			--text-2: #444d59;
+			--text-3: #66707d;
+			--accent: #0f766e;
+			--accent-hover: #0b5c56;
+			--accent-soft: #e5f3f1;
+			--accent-text: #0b5c56;
+			--on-accent: #ffffff;
+			--focus: rgba(15, 118, 110, .32);
+			--code-bg: #f7f8fa;
+			--code-text: #1d2530;
+			--success: #157a3c;
+			--danger: #b42318;
+			--danger-soft: #fdeceb;
+			--danger-border: #f2bdb7;
+			--warn: #855400;
+			--warn-soft: #fdf3df;
+			--warn-border: #eed39b;
+			--low: #157a3c;
+			--low-soft: #e8f5ec;
+			--low-border: #b5dcc2;
+			--medium: #855400;
+			--medium-soft: #fdf3df;
+			--medium-border: #eed39b;
+			--high: #b9480c;
+			--high-soft: #fdede3;
+			--high-border: #f3c3a2;
+			--critical: #b42318;
+			--critical-soft: #fde9e7;
+			--critical-border: #efb1aa;
+			--critical-solid: #c4261a;
+			--on-critical: #ffffff;
+			--shadow: 0 1px 2px rgba(16, 24, 40, .05);
+			--radius: 10px;
+			--radius-sm: 6px;
+			--sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+			--mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace
 		}
 
+		/* Dark: a deliberately designed palette, not an inversion. Defined twice so it
+		   applies for an explicit "dark" choice and for "system" on a dark OS. */
+		:root[data-theme="dark"] {
+			color-scheme: dark;
+			--bg: #0d1015;
+			--surface: #151a21;
+			--surface-2: #1a2028;
+			--surface-3: #222a34;
+			--border: #29313c;
+			--border-strong: #3a4451;
+			--text: #e7eaf0;
+			--text-2: #b5bdc9;
+			--text-3: #8d97a5;
+			--accent: #2aae9f;
+			--accent-hover: #3cc4b4;
+			--accent-soft: rgba(42, 174, 159, .14);
+			--accent-text: #63d3c4;
+			--on-accent: #04201c;
+			--focus: rgba(60, 196, 180, .45);
+			--code-bg: #10151b;
+			--code-text: #d6dde7;
+			--success: #5ad38a;
+			--danger: #ff8a80;
+			--danger-soft: rgba(255, 107, 96, .12);
+			--danger-border: rgba(255, 107, 96, .38);
+			--warn: #f2c35b;
+			--warn-soft: rgba(242, 195, 91, .1);
+			--warn-border: rgba(242, 195, 91, .34);
+			--low: #5ad38a;
+			--low-soft: rgba(90, 211, 138, .1);
+			--low-border: rgba(90, 211, 138, .34);
+			--medium: #f2c35b;
+			--medium-soft: rgba(242, 195, 91, .1);
+			--medium-border: rgba(242, 195, 91, .36);
+			--high: #ff9f5a;
+			--high-soft: rgba(255, 159, 90, .11);
+			--high-border: rgba(255, 159, 90, .4);
+			--critical: #ff8a80;
+			--critical-soft: rgba(255, 107, 96, .13);
+			--critical-border: rgba(255, 107, 96, .5);
+			--critical-solid: #e5483b;
+			--on-critical: #ffffff;
+			--shadow: none
+		}
+
+		@media (prefers-color-scheme: dark) {
+			:root:not([data-theme="light"]) {
+				color-scheme: dark;
+				--bg: #0d1015;
+				--surface: #151a21;
+				--surface-2: #1a2028;
+				--surface-3: #222a34;
+				--border: #29313c;
+				--border-strong: #3a4451;
+				--text: #e7eaf0;
+				--text-2: #b5bdc9;
+				--text-3: #8d97a5;
+				--accent: #2aae9f;
+				--accent-hover: #3cc4b4;
+				--accent-soft: rgba(42, 174, 159, .14);
+				--accent-text: #63d3c4;
+				--on-accent: #04201c;
+				--focus: rgba(60, 196, 180, .45);
+				--code-bg: #10151b;
+				--code-text: #d6dde7;
+				--success: #5ad38a;
+				--danger: #ff8a80;
+				--danger-soft: rgba(255, 107, 96, .12);
+				--danger-border: rgba(255, 107, 96, .38);
+				--warn: #f2c35b;
+				--warn-soft: rgba(242, 195, 91, .1);
+				--warn-border: rgba(242, 195, 91, .34);
+				--low: #5ad38a;
+				--low-soft: rgba(90, 211, 138, .1);
+				--low-border: rgba(90, 211, 138, .34);
+				--medium: #f2c35b;
+				--medium-soft: rgba(242, 195, 91, .1);
+				--medium-border: rgba(242, 195, 91, .36);
+				--high: #ff9f5a;
+				--high-soft: rgba(255, 159, 90, .11);
+				--high-border: rgba(255, 159, 90, .4);
+				--critical: #ff8a80;
+				--critical-soft: rgba(255, 107, 96, .13);
+				--critical-border: rgba(255, 107, 96, .5);
+				--critical-solid: #e5483b;
+				--on-critical: #ffffff;
+				--shadow: none
+			}
+		}
+
+		/* ---------------------------------------------------------------- base */
 		* {
 			box-sizing: border-box
 		}
 
 		body {
 			margin: 0;
-			color: var(--ink);
-			background: var(--paper);
-			font-family: var(--sans);
 			min-height: 100vh;
-			font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-			font-weight: 400;
-			line-height: 1.45
+			background: var(--bg);
+			color: var(--text);
+			font: 400 14px/1.5 var(--sans);
+			-webkit-font-smoothing: antialiased
 		}
 
-		body:before {
-			content: "";
-			position: fixed;
-			inset: 0;
-			pointer-events: none;
-			opacity: .2;
-			background-image: linear-gradient(rgba(23, 35, 31, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(23, 35, 31, .035) 1px, transparent 1px);
-			background-size: 40px 40px
+		h1,
+		h2,
+		h3 {
+			margin: 0;
+			color: var(--text)
 		}
 
-		header,
-		main {
-			position: relative;
-			z-index: 1
+		p {
+			margin: 0
 		}
 
-		header {
-			border-bottom: 1px solid rgba(185, 199, 190, .8);
-			padding: 20px clamp(20px, 4vw, 64px) 18px;
-			background: rgba(251, 252, 248, .88)
+		[hidden] {
+			display: none !important
 		}
 
-		.masthead {
-			max-width: 1500px;
-			margin: auto
+		/* ---------------------------------------------------------------- header */
+		.topbar {
+			background: var(--surface);
+			border-bottom: 1px solid var(--border)
 		}
 
-		.eyebrow {
-			font-size: 10px;
-			letter-spacing: .18em;
-			color: var(--teal);
-			font-weight: 600
+		.topbar-inner {
+			max-width: 1440px;
+			margin: 0 auto;
+			padding: 14px clamp(16px, 3vw, 40px);
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 16px;
+			flex-wrap: wrap
+		}
+
+		.brand {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			min-width: 0
+		}
+
+		.brand-mark {
+			width: 32px;
+			height: 32px;
+			flex: none;
+			padding: 6px;
+			border-radius: 8px;
+			color: var(--accent-text);
+			background: var(--accent-soft)
 		}
 
 		h1 {
-			font-size: clamp(24px, 3vw, 38px);
-			font-weight: 750;
-			letter-spacing: -.02em;
-			margin: 8px 0 4px;
-			line-height: 1
+			font-size: 16px;
+			font-weight: 650;
+			letter-spacing: -.01em;
+			line-height: 1.25
 		}
 
 		.lede {
-			margin: 0;
-			color: #728078;
+			color: var(--text-3);
 			font-size: 13px
 		}
 
+		.topbar-tools {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			flex-wrap: wrap
+		}
+
 		.context-chip {
-			min-width: 210px;
-			border: 0;
-			border-left: 3px solid var(--teal);
-			border-radius: 6px;
-			padding: 10px 14px;
-			background: #edf5ef;
-			box-shadow: 0 8px 20px rgba(20, 45, 38, .06);
-			margin-top: 18px
+			display: inline-flex;
+			align-items: baseline;
+			gap: 8px;
+			max-width: 420px;
+			padding: 5px 12px;
+			border: 1px solid var(--border);
+			border-radius: 999px;
+			background: var(--surface-2);
+			font-size: 13px;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis
 		}
 
 		.context-chip .kicker {
-			font-size: 9px
+			font-size: 11px
 		}
 
 		.context-chip strong {
-			display: block;
-			margin-top: 4px;
-			font-size: 14px;
-			font-weight: 600
+			font-weight: 600;
+			overflow: hidden;
+			text-overflow: ellipsis
 		}
 
+		/* Appearance: three native radios styled as one compact segmented control. */
+		.appearance {
+			display: inline-flex;
+			padding: 2px;
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			background: var(--surface-2)
+		}
+
+		.appearance label {
+			position: relative;
+			margin: 0
+		}
+
+		.appearance input {
+			position: absolute;
+			opacity: 0;
+			width: 1px;
+			height: 1px;
+			margin: 0
+		}
+
+		.appearance span {
+			display: block;
+			padding: 3px 10px;
+			border-radius: 6px;
+			color: var(--text-3);
+			font-size: 12px;
+			font-weight: 500;
+			cursor: pointer;
+			user-select: none
+		}
+
+		.appearance span:hover {
+			color: var(--text)
+		}
+
+		.appearance input:checked+span {
+			background: var(--surface);
+			color: var(--text);
+			box-shadow: 0 0 0 1px var(--border-strong)
+		}
+
+		.appearance input:focus-visible+span {
+			outline: 2px solid var(--accent);
+			outline-offset: 1px
+		}
+
+		/* ---------------------------------------------------------------- layout */
 		main {
 			max-width: 1440px;
 			margin: 0 auto;
-			padding: 30px clamp(20px, 5vw, 76px) 70px
+			padding: 20px clamp(16px, 3vw, 40px) 64px
 		}
 
 		.workspace {
 			display: grid;
-			grid-template-columns: minmax(300px, .82fr) minmax(0, 1.5fr);
-			gap: 22px;
+			grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+			gap: 20px;
 			align-items: start
 		}
 
 		.stack {
 			display: grid;
-			gap: 22px
+			gap: 20px;
+			min-width: 0
 		}
 
-		.panel {
-			border: 1px solid var(--line);
-			background: rgba(255, 254, 250, .92);
-			padding: 22px;
-			box-shadow: 0 12px 30px rgba(23, 35, 31, .045)
-		}
-
-		.panel-title {
-			display: flex;
-			justify-content: space-between;
-			gap: 14px;
-			align-items: start;
+		/* ---------------------------------------------------------------- stepper */
+		.stepper {
+			counter-reset: step;
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 8px;
 			margin-bottom: 20px
 		}
 
-		h2 {
-			margin: 5px 0 0;
-			font-size: 18px;
-			font-weight: 600;
-			letter-spacing: -.008em;
-			line-height: 1.2
+		.step {
+			counter-increment: step;
+			display: grid;
+			grid-template-columns: auto 1fr;
+			column-gap: 10px;
+			align-items: center;
+			padding: 10px 12px;
+			border-radius: 8px;
+			border: 1px solid transparent;
+			color: var(--text-3);
+			font-size: 13px;
+			font-weight: 600
 		}
 
-		.panel-note {
-			color: var(--muted);
+		.step:before {
+			content: counter(step);
+			grid-row: span 2;
+			display: grid;
+			place-items: center;
+			width: 24px;
+			height: 24px;
+			border-radius: 50%;
+			border: 1px solid var(--border-strong);
+			color: var(--text-3);
 			font-size: 12px;
-			line-height: 1.45;
-			max-width: 280px;
-			text-align: right;
+			font-weight: 600
+		}
+
+		.step small {
+			display: block;
+			color: var(--text-3);
+			font-size: 12px;
 			font-weight: 400
 		}
 
+		.step.done {
+			color: var(--text-2)
+		}
+
+		.step.done:before {
+			content: "\2713";
+			border-color: var(--accent);
+			background: var(--accent);
+			color: var(--on-accent)
+		}
+
+		.step.active {
+			color: var(--text);
+			background: var(--surface);
+			border-color: var(--border)
+		}
+
+		.step.active:before {
+			border: 2px solid var(--accent);
+			color: var(--accent-text)
+		}
+
+		/* ---------------------------------------------------------------- panels */
+		.panel {
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			box-shadow: var(--shadow);
+			padding: 22px 24px 24px;
+			min-width: 0
+		}
+
+		.panel-title {
+			margin-bottom: 18px
+		}
+
 		.kicker {
-			color: var(--teal);
-			font-size: 10px;
+			color: var(--text-3);
+			font-size: 11px;
 			font-weight: 600;
-			letter-spacing: .13em;
+			letter-spacing: .06em;
 			text-transform: uppercase
 		}
 
+		h2 {
+			margin-top: 2px;
+			font-size: 16px;
+			font-weight: 650;
+			letter-spacing: -.01em;
+			line-height: 1.3
+		}
+
+		.panel-note {
+			margin-top: 4px;
+			color: var(--text-3);
+			font-size: 13px;
+			line-height: 1.5
+		}
+
+		.subsection {
+			margin-top: 22px;
+			padding-top: 20px;
+			border-top: 1px solid var(--border)
+		}
+
+		.subsection-title {
+			font-size: 14px;
+			font-weight: 600
+		}
+
+		.hint {
+			margin-top: 4px;
+			color: var(--text-3);
+			font-size: 12.5px;
+			line-height: 1.5
+		}
+
+		/* ---------------------------------------------------------------- forms */
 		.fields {
 			display: grid;
-			grid-template-columns: 1.6fr .7fr;
-			gap: 14px
+			grid-template-columns: minmax(0, 1fr) 104px;
+			gap: 14px 12px
 		}
 
 		.field {
 			display: grid;
-			gap: 7px
+			gap: 6px;
+			min-width: 0
 		}
 
 		.field.full {
@@ -181,101 +469,205 @@
 		}
 
 		label {
-			color: var(--muted);
-			font-size: 11px;
-			font-weight: 500;
-			letter-spacing: 0
+			color: var(--text-2);
+			font-size: 13px;
+			font-weight: 500
 		}
 
 		input,
 		select,
 		textarea {
 			width: 100%;
-			border: 1px solid #c8d1ca;
-			border-radius: 4px;
-			background: #fff;
-			color: var(--ink);
-			font: inherit
+			border: 1px solid var(--border-strong);
+			border-radius: var(--radius-sm);
+			background: var(--surface);
+			color: var(--text);
+			font: inherit;
+			transition: border-color .12s, box-shadow .12s
 		}
 
 		input,
 		select {
-			height: 42px;
+			height: 38px;
 			padding: 0 11px
 		}
 
+		input::placeholder,
+		textarea::placeholder {
+			color: var(--text-3);
+			opacity: .8
+		}
+
+		input:hover:not(:focus):not([readonly]),
+		select:hover:not(:focus):not(:disabled),
+		textarea:hover:not(:focus) {
+			border-color: var(--text-3)
+		}
+
 		input[readonly] {
-			background: #eef1ee;
-			color: var(--muted)
+			background: var(--surface-3);
+			color: var(--text-2);
+			border-style: dashed
+		}
+
+		select:disabled {
+			background: var(--surface-2);
+			color: var(--text-3);
+			cursor: not-allowed
 		}
 
 		input:focus,
 		select:focus,
-		textarea:focus,
-		button:focus-visible {
-			outline: 3px solid rgba(216, 93, 69, .28);
-			outline-offset: 2px;
-			border-color: var(--coral)
+		textarea:focus {
+			outline: none;
+			border-color: var(--accent);
+			box-shadow: 0 0 0 3px var(--focus)
 		}
 
 		textarea {
-			min-height: 365px;
-			padding: 16px;
+			display: block;
+			min-height: 300px;
+			padding: 14px 16px;
 			resize: vertical;
-			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
-			font-size: 14px;
-			line-height: 1.55;
-			font-weight: 400
+			background: var(--code-bg);
+			color: var(--code-text);
+			caret-color: var(--accent);
+			font: 13.5px/1.65 var(--mono);
+			tab-size: 4
 		}
 
 		.actions {
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;
-			gap: 10px;
-			margin-top: 18px
+			gap: 8px 12px;
+			margin-top: 16px
 		}
 
-		button {
-			border: 0;
+		.kbd-hint {
+			margin-left: auto;
+			color: var(--text-3);
+			font-size: 12px
+		}
+
+		kbd {
+			padding: 1px 5px;
+			border: 1px solid var(--border-strong);
+			border-bottom-width: 2px;
 			border-radius: 4px;
-			min-height: 40px;
-			padding: 0 15px;
-			color: var(--surface);
-			background: var(--teal);
+			background: var(--surface-2);
+			color: var(--text-2);
+			font: 11px var(--mono)
+		}
+
+		/* ---------------------------------------------------------------- buttons */
+		button {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 8px;
+			height: 36px;
+			padding: 0 14px;
+			border: 1px solid var(--accent);
+			border-radius: var(--radius-sm);
+			background: var(--accent);
+			color: var(--on-accent);
 			font: 600 13px var(--sans);
-			letter-spacing: .005em;
-			cursor: pointer
+			white-space: nowrap;
+			cursor: pointer;
+			transition: background-color .12s, border-color .12s, color .12s
 		}
 
 		button:hover:not(:disabled) {
-			background: var(--teal-dark)
+			background: var(--accent-hover);
+			border-color: var(--accent-hover)
 		}
 
 		button.secondary {
-			color: var(--teal-dark);
-			background: var(--mint)
+			background: var(--surface);
+			border-color: var(--border-strong);
+			color: var(--text)
+		}
+
+		button.secondary:hover:not(:disabled) {
+			background: var(--surface-3);
+			border-color: var(--border-strong)
+		}
+
+		button.primary {
+			height: 40px;
+			padding: 0 18px;
+			font-size: 14px
+		}
+
+		button:focus-visible {
+			outline: 2px solid var(--accent);
+			outline-offset: 2px
 		}
 
 		button:disabled {
-			opacity: .48;
+			opacity: .55;
 			cursor: not-allowed
 		}
 
+		button[aria-busy="true"] {
+			opacity: .8;
+			cursor: progress
+		}
+
+		button[aria-busy="true"]:before {
+			content: "";
+			width: 12px;
+			height: 12px;
+			border: 2px solid currentColor;
+			border-right-color: transparent;
+			border-radius: 50%;
+			animation: spin .7s linear infinite
+		}
+
+		@keyframes spin {
+			to {
+				transform: rotate(360deg)
+			}
+		}
+
+		/* ---------------------------------------------------------------- status */
 		.status {
-			min-height: 22px;
-			color: var(--muted);
-			font-size: 12px;
-			line-height: 1.45;
-			font-weight: 400
+			min-height: 20px;
+			color: var(--text-3);
+			font-size: 13px;
+			line-height: 1.5
 		}
 
 		.status.success {
-			color: var(--green)
+			color: var(--success)
 		}
 
 		.status.error {
-			color: var(--coral)
+			color: var(--danger)
+		}
+
+		.status.success:before {
+			content: "\2713\00a0";
+			font-weight: 700
+		}
+
+		.status.error:before {
+			content: "\26A0\00a0"
+		}
+
+		.warning {
+			margin-top: 12px;
+			padding: 10px 12px;
+			border: 1px solid var(--warn-border);
+			border-radius: var(--radius-sm);
+			background: var(--warn-soft);
+			color: var(--warn);
+			font-size: 13px
+		}
+
+		.warning:before {
+			content: "\26A0\00a0"
 		}
 
 		.database-row {
@@ -285,368 +677,439 @@
 			align-items: end
 		}
 
+		#discoveryStatus {
+			margin-top: 10px
+		}
+
 		.database-context {
 			display: flex;
-			gap: 8px;
+			gap: 8px 10px;
 			flex-wrap: wrap;
 			align-items: center;
-			margin-top: 16px;
-			padding-top: 15px;
-			border-top: 1px solid var(--line)
+			margin-top: 18px;
+			padding-top: 16px;
+			border-top: 1px solid var(--border)
 		}
 
 		.pill {
 			display: inline-flex;
 			align-items: center;
 			gap: 7px;
-			padding: 6px 9px;
-			border: 1px solid var(--line);
-			background: #f7faf5;
-			font-size: 12px
+			padding: 3px 10px;
+			border: 1px solid var(--border);
+			border-radius: 999px;
+			background: var(--surface-2);
+			font-size: 12.5px;
+			font-weight: 500
 		}
 
 		.dot {
 			width: 8px;
 			height: 8px;
-			background: var(--amber);
-			border-radius: 50%
+			border-radius: 50%;
+			background: var(--text-3)
 		}
 
 		.dot.on {
-			background: var(--green)
+			background: var(--success)
 		}
 
-		.warning {
-			margin-top: 12px;
-			color: #79530e;
-			background: #fff4d7;
-			border-left: 3px solid var(--amber);
-			padding: 10px 12px;
-			font-size: 12px;
-			line-height: 1.45
+		.muted {
+			color: var(--text-3);
+			font-size: 12.5px
 		}
 
-		.stepper {
-			position: relative;
-			z-index: 1;
-			display: grid;
-			grid-template-columns: repeat(4, 1fr);
-			gap: 1px;
-			padding: 0 clamp(20px, 4vw, 64px);
-			background: #183d39
-		}
-
-		.step {
-			position: relative;
-			padding: 11px clamp(10px, 2vw, 22px);
-			color: #a9c4b9;
-			font-size: 12px;
-			font-weight: 800;
-			letter-spacing: .04em;
-			border-bottom: 2px solid transparent
-		}
-
-		.step:before {
-			color: #7bd1b5
-		}
-
-		.step:nth-child(1):before {
-			content: "1  "
-		}
-
-		.step:nth-child(2):before {
-			content: "2  "
-		}
-
-		.step:nth-child(3):before {
-			content: "3  "
-		}
-
-		.step:nth-child(4):before {
-			content: "4  "
-		}
-
-		.step.active {
-			background: #275c55;
-			color: #f4fbf5;
-			border-bottom-color: #7bd1b5
-		}
-
-		.step.done {
-			color: #bfe1d0
-		}
-
-		.step small {
-			display: block;
-			margin-top: 3px;
-			font-size: 9px;
-			font-weight: 600;
-			letter-spacing: 0;
-			opacity: .7
-		}
-
+		/* ---------------------------------------------------------------- results */
 		.results-panel {
-			min-height: 500px
+			min-height: 420px
+		}
+
+		#results[aria-busy="true"] {
+			opacity: .5;
+			transition: opacity .15s
 		}
 
 		.empty {
 			display: grid;
 			place-items: center;
-			min-height: 410px;
-			padding: 35px;
+			min-height: 260px;
+			padding: 32px;
+			border: 1px dashed var(--border-strong);
+			border-radius: var(--radius);
+			background: var(--surface-2);
+			color: var(--text-3);
 			text-align: center;
-			color: var(--muted);
-			border: 1px dashed #c8d1ca
+			font-size: 13.5px
 		}
 
 		.empty strong {
 			display: block;
-			color: var(--ink);
-			font-size: 17px;
+			margin-bottom: 6px;
+			color: var(--text);
+			font-size: 15px;
+			font-weight: 600
+		}
+
+		.empty span {
+			display: block;
+			max-width: 440px
+		}
+
+		.error-box {
+			padding: 12px 14px;
+			border: 1px solid var(--danger-border);
+			border-radius: var(--radius-sm);
+			background: var(--danger-soft);
+			color: var(--danger);
+			font-size: 13.5px
+		}
+
+		.error-box:before {
+			content: "\26A0\00a0"
+		}
+
+		/* Overall summary: the first cell carries the risk colour; the others stay neutral. */
+		.summary {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 10px;
 			margin-bottom: 8px
 		}
 
-		.summary {
-			display: grid;
-			grid-template-columns: 1.3fr .7fr .9fr;
-			gap: 12px;
-			margin-bottom: 22px
-		}
-
 		.summary-cell {
-			padding: 15px;
-			background: var(--teal-dark);
-			color: white;
-			min-height: 93px
-		}
-
-		.summary-cell:nth-child(2) {
-			background: var(--coral)
-		}
-
-		.summary-cell:nth-child(3) {
-			background: #e8efe7;
-			color: var(--ink)
+			padding: 14px 16px;
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			background: var(--surface-2)
 		}
 
 		.summary-cell .label {
-			opacity: .75;
-			font-size: 10px;
-			letter-spacing: .13em;
-			text-transform: uppercase;
-			font-weight: 600
+			color: var(--text-3);
+			font-size: 11.5px;
+			font-weight: 600;
+			letter-spacing: .05em;
+			text-transform: uppercase
 		}
 
 		.summary-cell strong {
 			display: block;
-			margin-top: 9px;
-			font-size: 25px;
-			line-height: 1;
-			font-weight: 700
+			margin-top: 6px;
+			font-size: 22px;
+			font-weight: 700;
+			letter-spacing: -.01em;
+			line-height: 1.15
 		}
 
 		.summary-cell small {
 			display: block;
-			margin-top: 8px;
-			font-size: 11px;
-			font-weight: 400;
-			line-height: 1.35
+			margin-top: 4px;
+			color: var(--text-3);
+			font-size: 12.5px
 		}
 
+		.summary-cell.risk-LOW {
+			background: var(--low-soft);
+			border-color: var(--low-border)
+		}
+
+		.summary-cell.risk-MEDIUM {
+			background: var(--medium-soft);
+			border-color: var(--medium-border)
+		}
+
+		.summary-cell.risk-HIGH {
+			background: var(--high-soft);
+			border-color: var(--high-border)
+		}
+
+		.summary-cell.risk-CRITICAL {
+			background: var(--critical-soft);
+			border-color: var(--critical-border);
+			box-shadow: inset 4px 0 0 var(--critical-solid)
+		}
+
+		.summary-cell.risk-LOW strong {
+			color: var(--low)
+		}
+
+		.summary-cell.risk-MEDIUM strong {
+			color: var(--medium)
+		}
+
+		.summary-cell.risk-HIGH strong {
+			color: var(--high)
+		}
+
+		.summary-cell.risk-CRITICAL strong {
+			color: var(--critical)
+		}
+
+		/* Statement cards */
 		.statement {
-			border-top: 4px solid var(--teal);
-			background: #fff;
-			margin-top: 18px
+			margin-top: 14px;
+			border: 1px solid var(--border);
+			border-left: 4px solid var(--border-strong);
+			border-radius: var(--radius);
+			background: var(--surface);
+			overflow: hidden
+		}
+
+		.statement.lvl-LOW {
+			border-left-color: var(--low)
+		}
+
+		.statement.lvl-MEDIUM {
+			border-left-color: var(--medium)
+		}
+
+		.statement.lvl-HIGH {
+			border-left-color: var(--high)
+		}
+
+		.statement.lvl-CRITICAL {
+			border-left-color: var(--critical-solid)
 		}
 
 		.statement-head {
 			display: flex;
 			justify-content: space-between;
-			gap: 15px;
-			align-items: start;
-			padding: 16px;
-			border-bottom: 1px solid var(--line)
+			align-items: center;
+			gap: 12px;
+			padding: 12px 16px;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface-2)
 		}
 
 		.statement-title {
 			display: flex;
-			gap: 11px;
-			align-items: center;
-			flex-wrap: wrap
+			gap: 10px;
+			align-items: baseline;
+			flex-wrap: wrap;
+			min-width: 0
 		}
 
 		.statement-number {
-			color: var(--teal);
-			font: 600 12px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
-			letter-spacing: .09em;
-			font-weight: 600
+			color: var(--text-3);
+			font: 600 11.5px var(--mono);
+			letter-spacing: .04em
 		}
 
 		.statement-type {
-			font: 600 14px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
-			letter-spacing: .015em;
-			font-weight: 600
+			font: 700 14px var(--mono)
 		}
 
 		.statement-tables {
-			color: var(--muted);
-			font-size: 12px;
-			font-weight: 400
+			color: var(--text-2);
+			font-size: 13px
 		}
 
 		.risk {
-			padding: 5px 9px;
-			color: white;
-			font-size: 11px;
-			font-weight: 800;
-			letter-spacing: .08em
+			flex: none;
+			padding: 3px 10px;
+			border: 1px solid transparent;
+			border-radius: 999px;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: .04em;
+			white-space: nowrap
 		}
 
 		.risk.LOW {
-			background: var(--green)
+			background: var(--low-soft);
+			border-color: var(--low-border);
+			color: var(--low)
 		}
 
 		.risk.MEDIUM {
-			background: var(--amber)
+			background: var(--medium-soft);
+			border-color: var(--medium-border);
+			color: var(--medium)
 		}
 
-		.risk.HIGH,
+		.risk.HIGH {
+			background: var(--high-soft);
+			border-color: var(--high-border);
+			color: var(--high)
+		}
+
 		.risk.CRITICAL {
-			background: var(--coral)
+			background: var(--critical-solid);
+			border-color: var(--critical-solid);
+			color: var(--on-critical)
 		}
 
 		.statement-body {
-			padding: 16px;
 			display: grid;
-			gap: 16px
+			gap: 14px;
+			padding: 16px
 		}
 
 		.sql-block {
 			margin: 0;
-			padding: 12px;
+			padding: 10px 12px;
 			overflow-x: auto;
 			white-space: pre-wrap;
 			word-break: break-word;
-			background: #f1f4ee;
-			border-left: 3px solid var(--teal);
-			color: #30413a;
-			font: 12px/1.6 "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace
+			border: 1px solid var(--border);
+			border-radius: var(--radius-sm);
+			background: var(--code-bg);
+			color: var(--code-text);
+			font: 12.5px/1.6 var(--mono)
 		}
 
 		.metric-grid {
 			display: grid;
-			grid-template-columns: repeat(3, 1fr);
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 			gap: 8px
 		}
 
 		.metric {
-			border: 1px solid var(--line);
-			padding: 11px;
-			min-height: 62px
+			padding: 9px 12px;
+			border-radius: var(--radius-sm);
+			background: var(--surface-2);
+			min-width: 0
 		}
 
 		.metric b {
 			display: block;
-			margin-top: 5px;
-			font: 600 14px "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
-			font-weight: 600
+			margin-top: 3px;
+			font: 600 14px var(--mono);
+			overflow-wrap: anywhere
+		}
+
+		/* Confidence is not risk: neutral outline, never a risk colour. */
+		.metric.confidence {
+			background: transparent;
+			box-shadow: inset 0 0 0 1px var(--border-strong)
 		}
 
 		.section-label {
-			font-size: 10px;
+			color: var(--text-3);
+			font-size: 11px;
 			font-weight: 600;
-			letter-spacing: .1em;
-			line-height: 1.25
+			letter-spacing: .05em;
+			text-transform: uppercase
 		}
 
 		.layer-grid {
 			display: grid;
-			grid-template-columns: repeat(2, 1fr);
+			grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 			gap: 12px
 		}
 
 		.layer {
-			border: 1px solid var(--line);
-			padding: 14px
+			padding: 14px 16px;
+			border: 1px solid var(--border);
+			border-radius: var(--radius-sm);
+			min-width: 0
+		}
+
+		.layer.final {
+			grid-column: 1/-1;
+			background: var(--surface-2)
 		}
 
 		.layer h3 {
-			margin: 0 0 12px;
-			font-size: 10px;
-			font-weight: 600;
-			letter-spacing: .1em;
-			line-height: 1.25
-		}
-
-		.layer.evidence {
-			border-top: 3px solid var(--teal)
-		}
-
-		.layer.metadata {
-			border-top: 3px solid var(--amber)
-		}
-
-		.layer.static {
-			border-top: 3px solid #899a91
+			margin-bottom: 8px;
+			color: var(--text-2);
+			font-size: 11.5px;
+			font-weight: 650;
+			letter-spacing: .06em
 		}
 
 		.layer p {
-			margin: 6px 0;
-			font-size: 12px;
-			color: var(--muted);
-			font-weight: 400
+			margin: 4px 0;
+			color: var(--text-2);
+			font-size: 13px
+		}
+
+		.subheading {
+			margin: 14px 0 6px;
+			color: var(--text-3);
+			font-size: 11px;
+			font-weight: 600;
+			letter-spacing: .05em;
+			text-transform: uppercase
 		}
 
 		.factor-list,
 		.plain-list {
 			display: grid;
-			gap: 6px;
+			gap: 4px;
 			margin: 0;
 			padding: 0;
 			list-style: none;
-			font-size: 12px;
-			line-height: 1.45;
-			font-weight: 400
+			font-size: 13px
+		}
+
+		.plain-list li {
+			position: relative;
+			padding-left: 16px
+		}
+
+		.plain-list li:before {
+			content: "";
+			position: absolute;
+			left: 3px;
+			top: .62em;
+			width: 5px;
+			height: 5px;
+			border-radius: 50%;
+			background: var(--text-3)
+		}
+
+		/* The review checklist (last list in the final layer) reads as tick boxes. */
+		.layer.final .plain-list:last-of-type li {
+			padding-left: 24px
+		}
+
+		.layer.final .plain-list:last-of-type li:before {
+			left: 0;
+			top: .22em;
+			width: 13px;
+			height: 13px;
+			border: 1.5px solid var(--border-strong);
+			border-radius: 3px;
+			background: transparent
+		}
+
+		.plain-list li.muted:before,
+		.layer.final .plain-list:last-of-type li.muted:before {
+			display: none
+		}
+
+		.plain-list li.muted {
+			padding-left: 0
 		}
 
 		.factor-list li {
 			display: flex;
 			justify-content: space-between;
 			gap: 12px;
-			border-bottom: 1px solid #edf0eb;
-			padding-bottom: 5px
+			padding: 4px 0;
+			border-bottom: 1px solid var(--border)
+		}
+
+		.factor-list li:last-child {
+			border-bottom: 0
 		}
 
 		.points {
 			white-space: nowrap;
-			font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", "Liberation Mono", Consolas, monospace;
-			font-weight: 600;
-			color: var(--coral)
+			font: 600 12.5px var(--mono);
+			color: var(--text-3)
 		}
 
-		.subheading {
-			margin: 18px 0 8px;
-			color: var(--muted);
-			font-size: 10px;
-			letter-spacing: .1em;
-			text-transform: uppercase;
-			font-weight: 600
+		.points.up {
+			color: var(--danger)
 		}
 
-		.muted {
-			color: var(--muted);
-			font-size: 12px;
-			font-weight: 400
+		.points.down {
+			color: var(--success)
 		}
 
-		.error-box {
-			color: var(--coral);
-			background: #fff0ec;
-			padding: 10px;
-			font-size: 12px
-		}
-
-		@media(max-width:880px) {
+		/* ---------------------------------------------------------------- responsive */
+		@media (max-width: 1080px) {
 			.workspace {
 				grid-template-columns: 1fr
 			}
@@ -656,97 +1119,128 @@
 			}
 		}
 
-		@media(max-width:600px) {
-			header {
-				padding: 22px 18px
-			}
-
-			main {
-				padding: 20px 18px 45px
-			}
-
-			.fields,
-			.database-row,
-			.summary,
-			.layer-grid,
-			.metric-grid {
-				grid-template-columns: 1fr
-			}
-
-			.field.full {
-				grid-column: auto
-			}
-
-			.panel {
-				padding: 16px
-			}
-
-			textarea {
-				min-height: 280px
-			}
-
-			.statement-head {
-				display: block
-			}
-
-			.statement-head .risk {
-				display: inline-block;
-				margin-top: 12px
-			}
-
+		@media (max-width: 720px) {
 			.stepper {
-				padding: 0 8px
+				grid-template-columns: repeat(4, auto);
+				justify-content: space-between
 			}
 
 			.step {
-				font-size: 10px;
-				padding: 9px 5px
+				grid-template-columns: auto;
+				justify-items: center;
+				padding: 8px 6px;
+				font-size: 12px;
+				text-align: center
+			}
+
+			.step:before {
+				grid-row: auto;
+				margin-bottom: 4px
 			}
 
 			.step small {
 				display: none
+			}
+
+			.summary,
+			.metric-grid {
+				grid-template-columns: 1fr
+			}
+
+			.kbd-hint {
+				display: none
+			}
+		}
+
+		@media (max-width: 560px) {
+			.topbar-tools {
+				width: 100%;
+				justify-content: space-between
+			}
+
+			.context-chip {
+				max-width: 100%
+			}
+
+			.fields,
+			.database-row {
+				grid-template-columns: 1fr
+			}
+
+			.panel {
+				padding: 18px 16px 20px
+			}
+
+			textarea {
+				min-height: 240px
+			}
+
+			.statement-head {
+				flex-wrap: wrap
+			}
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			* {
+				transition: none !important;
+				animation-duration: 1.5s !important
 			}
 		}
 	</style>
 </head>
 
 <body>
-	<header>
-		<div class="masthead">
-			<div>
-				<div class="eyebrow">Database-aware review desk</div>
-				<h1>MySQL DBA Validator</h1>
-				<p class="lede">Connect to your MySQL database. The backend determines the security context
-					automatically.</p>
+	<header class="topbar">
+		<div class="topbar-inner">
+			<div class="brand">
+				<svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+					stroke-linecap="round" aria-hidden="true">
+					<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+					<path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5" />
+					<path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12" />
+				</svg>
+				<div>
+					<h1>MySQL DBA Validator</h1>
+					<p class="lede">Review MySQL statements for risk before you run them.</p>
+				</div>
 			</div>
-			<div class="context-chip" aria-live="polite">
-				<div class="kicker">Current context</div>
-				<strong id="headerContext">Static analysis only</strong>
+			<div class="topbar-tools">
+				<div class="context-chip" aria-live="polite">
+					<span class="kicker">Context</span>
+					<strong id="headerContext">Static analysis only</strong>
+				</div>
+				<div class="appearance" role="radiogroup" aria-label="Appearance">
+					<label><input type="radio" name="theme" value="light" /><span>Light</span></label>
+					<label><input type="radio" name="theme" value="dark" /><span>Dark</span></label>
+					<label><input type="radio" name="theme" value="system" checked /><span>System</span></label>
+				</div>
 			</div>
 		</div>
 	</header>
-	<nav class="stepper" aria-label="Validation workflow">
-		<div class="step active">Connection<small>configure / test</small></div>
-		<div class="step">Database<small>discover / select</small></div>
-		<div class="step">SQL Review<small>inspect / validate</small></div>
-		<div class="step">Findings<small>read the result</small></div>
-	</nav>
 
 	<main>
+		<nav class="stepper" aria-label="Validation workflow">
+			<div class="step active">Connection<small>configure / test</small></div>
+			<div class="step">Database<small>discover / select</small></div>
+			<div class="step">SQL Review<small>inspect / validate</small></div>
+			<div class="step">Findings<small>read the result</small></div>
+		</nav>
+
 		<div class="workspace">
 			<div class="stack">
 				<section class="panel" aria-labelledby="connectionHeading">
 					<div class="panel-title">
-						<div>
-							<div class="kicker">01 / Connection</div>
-							<h2 id="connectionHeading">MySQL connection</h2>
-						</div>
-						<div class="panel-note">Credentials live in memory only. Nothing is persisted.</div>
+						<div class="kicker">Step 1</div>
+						<h2 id="connectionHeading">MySQL connection</h2>
+						<p class="panel-note">Credentials stay in this page's memory and are never saved.</p>
 					</div>
 					<div class="fields">
 						<div class="field full"><label for="targetSelect">Target</label><select id="targetSelect">
 								<option value="">Local (this machine)</option>
-							</select></div>
+							</select>
+							<p class="hint">Local uses MySQL on this computer. Approved remote targets appear here after
+								you pair the local connector.</p>
+						</div>
 						<div class="field"><label for="host">Host</label><input id="host" autocomplete="off"
 								value="127.0.0.1" placeholder="127.0.0.1" /></div>
 						<div class="field"><label for="port">Port</label><input id="port" type="number" min="1"
@@ -756,28 +1250,32 @@
 						<div class="field"><label for="password">Password</label><input id="password" type="password"
 								autocomplete="new-password" /></div>
 					</div>
-					<div class="actions"><button id="testBtn">Test connection</button><span id="connectionStatus"
-							class="status" role="status">Not tested</span></div>
-					<div class="database-context">
-						<div class="field full" style="flex:1 1 100%"><label for="pairingCode">Local connector pairing
-								code (remote targets only)</label><input id="pairingCode" type="password"
-								autocomplete="off" spellcheck="false"
+					<div class="actions"><button class="secondary" id="testBtn">Test connection</button><span
+							id="connectionStatus" class="status" role="status">Not tested</span></div>
+
+					<div class="subsection" role="group" aria-labelledby="connectorHeading">
+						<h3 class="subsection-title" id="connectorHeading">Remote targets</h3>
+						<p class="hint">Remote MySQL is reached only through the local connector on this computer
+							(127.0.0.1:8765). Your login is sent with each request and is not stored.</p>
+						<div class="field" style="margin-top:14px"><label for="pairingCode">Connector pairing
+								code</label><input id="pairingCode" type="password" autocomplete="off" spellcheck="false"
 								placeholder="Paste the code printed by the local connector" /></div>
-						<button class="secondary" id="pairBtn">Pair connector</button>
-						<button class="secondary" id="unpairBtn" hidden>Unpair</button>
-						<button class="secondary" id="loadTargetsBtn" hidden>Reload approved targets</button>
-						<span id="pairingStatus" class="status" role="status">Not paired. Remote targets need a pairing
-							code from the local connector.</span>
+						<div class="actions">
+							<button class="secondary" id="pairBtn">Pair connector</button>
+							<button class="secondary" id="unpairBtn" hidden>Unpair</button>
+							<button class="secondary" id="loadTargetsBtn" hidden>Reload approved targets</button>
+						</div>
+						<p id="pairingStatus" class="status" role="status" style="margin-top:10px">Not paired. Remote
+							targets need a pairing code from the local connector.</p>
 					</div>
 				</section>
 
 				<section class="panel" aria-labelledby="databaseHeading">
 					<div class="panel-title">
-						<div>
-							<div class="kicker">02 / Context</div>
-							<h2 id="databaseHeading">Choose a database</h2>
-						</div>
-						<div class="panel-note">Discovery shows only names visible to your MySQL account.</div>
+						<div class="kicker">Step 2 &middot; optional</div>
+						<h2 id="databaseHeading">Choose a database</h2>
+						<p class="panel-note">Needed only for EXPLAIN and metadata evidence. Discovery lists only the
+							databases your MySQL account can see.</p>
 					</div>
 					<div class="database-row">
 						<div class="field"><label for="database">Selected database</label><select id="database"
@@ -785,8 +1283,8 @@
 								<option value="">Select a database</option>
 							</select></div><button class="secondary" id="discoverBtn">Discover databases</button>
 					</div>
-					<div id="discoveryStatus" class="status" role="status" style="margin-top:12px">Test the connection
-						before discovering databases.</div>
+					<div id="discoveryStatus" class="status" role="status">Test the connection before discovering
+						databases.</div>
 					<div id="discoveryWarning" class="warning" role="alert" hidden></div>
 					<div class="database-context"><span class="pill"><span id="contextDot" class="dot"></span><span
 								id="contextStatus">No database selected</span></span><span class="muted">Each validation
@@ -797,30 +1295,30 @@
 			<div class="stack">
 				<section class="panel" aria-labelledby="sqlHeading">
 					<div class="panel-title">
-						<div>
-							<div class="kicker">03 / Review</div>
-							<h2 id="sqlHeading">SQL statement</h2>
-						</div>
-						<div class="panel-note">Database selection changes context, never the SQL you submit.</div>
+						<div class="kicker">Step 3</div>
+						<h2 id="sqlHeading">SQL statement</h2>
+						<p class="panel-note">Paste up to 16 MySQL statements. A selected database adds context; it
+							never changes the SQL you submit.</p>
 					</div>
 					<textarea id="sqlInput" aria-labelledby="sqlHeading" spellcheck="false"
 						placeholder="UPDATE orders SET status = 'active' WHERE created_at > '2024-01-01';"></textarea>
-					<div class="actions"><button id="validateBtn">Validate SQL</button><span id="validationStatus"
-							class="status" role="status">Static validation is available without a database.</span></div>
+					<div class="actions"><button class="primary" id="validateBtn">Validate SQL</button><span
+							id="validationStatus" class="status" role="status">Static validation is available without a
+							database.</span><span class="kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span></div>
 				</section>
 
 				<section class="panel results-panel" aria-labelledby="resultsHeading">
 					<div class="panel-title">
-						<div>
-							<div class="kicker">04 / Findings</div>
-							<h2 id="resultsHeading">Validation results</h2>
-						</div>
-						<div class="panel-note">Overall score is the highest final statement score, not a sum.</div>
+						<div class="kicker">Step 4</div>
+						<h2 id="resultsHeading">Validation results</h2>
+						<p class="panel-note">Risk is how dangerous the SQL looks; confidence is how much evidence
+							supports that. The overall score is the highest statement score, not a sum.</p>
 					</div>
 					<div id="results">
 						<div class="empty">
-							<div><strong>Ready for review</strong>Enter SQL and validate. Connect and select a database
-								when you need EXPLAIN and metadata evidence.</div>
+							<div><strong>Ready for review</strong><span>Paste SQL and choose Validate SQL. Static
+									analysis needs no database; select one to add EXPLAIN and metadata
+									evidence.</span></div>
 						</div>
 					</div>
 				</section>
@@ -955,6 +1453,7 @@
 			testBtn.disabled = true;
 			discoverBtn.disabled = true;
 			testBtn.textContent = 'Testing...';
+			testBtn.setAttribute('aria-busy', 'true');
 			setStatus($('connectionStatus'), 'Testing connection...', '');
 
 			try {
@@ -977,6 +1476,7 @@
 				testBtn.disabled = false;
 				discoverBtn.disabled = false; // re-enable always; the click handler validates input
 				testBtn.textContent = 'Test connection';
+				testBtn.removeAttribute('aria-busy');
 				updateStepper();
 			}
 		}
@@ -1004,6 +1504,7 @@
 			discoverBtn.disabled = true;
 			testBtn.disabled = true;
 			discoverBtn.textContent = 'Discovering...';
+			discoverBtn.setAttribute('aria-busy', 'true');
 			setStatus($('discoveryStatus'), 'Reading visible database names...', '');
 			$('discoveryWarning').hidden = true;
 
@@ -1071,6 +1572,7 @@
 				testBtn.disabled = false;
 				discoverBtn.disabled = false; // re-enable always; the click handler validates input
 				discoverBtn.textContent = 'Discover databases';
+				discoverBtn.removeAttribute('aria-busy');
 				updateStepper();
 			}
 		}
@@ -1166,6 +1668,7 @@
 				return;
 			}
 			pairBtn.disabled = true;
+			pairBtn.setAttribute('aria-busy', 'true');
 			setStatus($('pairingStatus'), 'Pairing...', '');
 			try {
 				const data = await connectorRequest(CONNECTOR_URL + '/pair', {
@@ -1182,6 +1685,7 @@
 				setPaired(null, error.message || 'Pairing failed.', 'error');
 			} finally {
 				pairBtn.disabled = false;
+				pairBtn.removeAttribute('aria-busy');
 			}
 		}
 
@@ -1338,6 +1842,8 @@
 
 			validateBtn.disabled = true;
 			validateBtn.textContent = 'Validating...';
+			validateBtn.setAttribute('aria-busy', 'true');
+			$('results').setAttribute('aria-busy', 'true');
 			setStatus($('validationStatus'), 'Reviewing statement...', '');
 
 			try {
@@ -1358,12 +1864,19 @@
 			} finally {
 				validateBtn.disabled = false;
 				validateBtn.textContent = 'Validate SQL';
+				validateBtn.removeAttribute('aria-busy');
+				$('results').removeAttribute('aria-busy');
 				updateStepper();
 			}
 		}
 
 		function updateContext() {
-			$('headerContext').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only';
+			// Header shows where SQL is reviewed: Local, or the selected approved remote target.
+			const where = state.remoteTarget
+				? 'Remote: ' + String(state.remoteTarget.display_name || state.remoteTarget.target_id)
+				: 'Local';
+			$('headerContext').textContent = where + ' · ' +
+				(state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only');
 			$('contextStatus').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'No database selected';
 			$('contextDot').classList.toggle('on', Boolean(state.selectedDatabase));
 			updateStepper();
@@ -1388,8 +1901,8 @@
 			return node;
 		}
 
-		function metric(label, value) {
-			const node = el('div', 'metric');
+		function metric(label, value, extraClass) {
+			const node = el('div', 'metric' + (extraClass ? ' ' + extraClass : ''));
 			node.append(el('div', 'section-label', label), el('b', '', text(value)));
 			return node;
 		}
@@ -1403,7 +1916,9 @@
 			factors.forEach(factor => {
 				const row = el('li');
 				row.append(el('span', '', text(factor.label || factor.text || factor.code)));
-				if (factor.points != null) row.append(el('span', 'points', (factor.points > 0 ? '+' : '') + factor.points + ' points'));
+				if (factor.points != null) row.append(el('span',
+					'points ' + (factor.points > 0 ? 'up' : factor.points < 0 ? 'down' : 'zero'),
+					(factor.points > 0 ? '+' : '') + factor.points + ' points'));
 				list.append(row);
 			});
 			return list;
@@ -1441,16 +1956,19 @@
 		function evidenceLayer(s) {
 			const evidence = s.database_evidence || {};
 			const body = [el('p', '', evidence.available ? 'EXPLAIN evidence is available.' : 'Database evidence is unavailable.')];
-			const grid = el('div', 'metric-grid');
-			grid.append(
-				metric('Access type', evidence.access_type),
-				metric('Estimated rows', evidence.estimated_rows == null ? 'n/a' : evidence.estimated_rows + ' (estimate)'),
-				metric('Possible keys', evidence.possible_keys && evidence.possible_keys.length ? evidence.possible_keys.join(', ') : 'n/a'),
-				metric('Selected key', evidence.key),
-				metric('Key length', evidence.key_length),
-				metric('Full table scan', evidence.full_table_scan == null ? 'n/a' : evidence.full_table_scan ? 'Yes' : 'No')
-			);
-			body.push(grid);
+			// Without evidence every plan field is n/a: skip the empty grid rather than show six blanks.
+			if (evidence.available) {
+				const grid = el('div', 'metric-grid');
+				grid.append(
+					metric('Access type', evidence.access_type),
+					metric('Estimated rows', evidence.estimated_rows == null ? 'n/a' : evidence.estimated_rows + ' (estimate)'),
+					metric('Possible keys', evidence.possible_keys && evidence.possible_keys.length ? evidence.possible_keys.join(', ') : 'n/a'),
+					metric('Selected key', evidence.key),
+					metric('Key length', evidence.key_length),
+					metric('Full table scan', evidence.full_table_scan == null ? 'n/a' : evidence.full_table_scan ? 'Yes' : 'No')
+				);
+				body.push(grid);
+			}
 			if (evidence.extra) body.push(el('p', '', 'Additional plan detail: ' + evidence.extra));
 			body.push(el('div', 'subheading', 'Evidence-based risk adjustment'));
 			body.push(factorList(s.evidence_factors, 'No additional database-evidence adjustment.'));
@@ -1480,7 +1998,7 @@
 		}
 
 		function statementCard(s, index) {
-			const card = el('article', 'statement');
+			const card = el('article', 'statement lvl-' + text(s.risk_level));
 			const head = el('div', 'statement-head');
 			const title = el('div', 'statement-title');
 			title.append(
@@ -1497,14 +2015,14 @@
 			const metrics = el('div', 'metric-grid');
 			metrics.append(
 				metric('Final score', s.score + ' / 100'),
-				metric('Confidence', s.confidence),
+				metric('Confidence', s.confidence, 'confidence'),
 				metric('Static score', s.static_score + ' / 100')
 			);
 			body.append(metrics);
 
 			const layers = el('div', 'layer-grid');
 			layers.append(
-				layer('FINAL RESULT', 'static', [
+				layer('FINAL RESULT', 'final', [
 					el('p', '', 'Final risk: ' + text(s.risk_level)),
 					el('div', 'subheading', 'Why'),
 					plainList(s.reasons, 'No additional reasons reported.'),
@@ -1528,7 +2046,7 @@
 			$('results').replaceChildren();
 
 			const summary = el('div', 'summary');
-			const aggregate = el('div', 'summary-cell');
+			const aggregate = el('div', 'summary-cell risk-' + text(data.overall_risk_level));
 			aggregate.append(
 				el('div', 'label', 'Aggregate / highest final risk'),
 				el('strong', '', text(data.overall_risk_level)),
@@ -1558,7 +2076,9 @@
 		}
 
 		function renderError(message) {
-			$('results').replaceChildren(el('div', 'error-box', message));
+			const box = el('div', 'error-box', message);
+			box.setAttribute('role', 'alert');
+			$('results').replaceChildren(box);
 		}
 
 		// Event listeners
@@ -1573,6 +2093,42 @@
 		database.addEventListener('change', () => {
 			state.selectedDatabase = database.value;
 			updateContext();
+		});
+
+		// Ctrl/Cmd + Enter in the editor runs the same Validate action.
+		sqlInput.addEventListener('keydown', event => {
+			if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !validateBtn.disabled) {
+				event.preventDefault();
+				validateBtn.click();
+			}
+		});
+
+		// Appearance: Light / Dark / System. Only the theme word is stored, under 'mdv-theme';
+		// nothing else on this page uses browser storage.
+		const THEMES = ['light', 'dark', 'system'];
+		function applyTheme(choice) {
+			if (choice === 'light' || choice === 'dark') document.documentElement.setAttribute('data-theme', choice);
+			else document.documentElement.removeAttribute('data-theme');
+		}
+		function readTheme() {
+			try {
+				const stored = localStorage.getItem('mdv-theme');
+				return THEMES.includes(stored) ? stored : 'system';
+			} catch (_) { return 'system' }
+		}
+		function saveTheme(choice) {
+			if (!THEMES.includes(choice)) return;
+			try { localStorage.setItem('mdv-theme', choice) } catch (_) { }
+		}
+		const savedTheme = readTheme();
+		applyTheme(savedTheme);
+		document.querySelectorAll('input[name="theme"]').forEach(radio => {
+			radio.checked = radio.value === savedTheme;
+			radio.addEventListener('change', () => {
+				if (!radio.checked) return;
+				applyTheme(radio.value);
+				saveTheme(radio.value);
+			});
 		});
 
 		// Initial state

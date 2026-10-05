@@ -596,9 +596,12 @@ def test_remote_browser_flow_never_falls_back_to_public_api():
 
 def test_pairing_code_and_session_are_never_persisted_or_put_in_urls():
     html = FRONTEND_INDEX.read_text(encoding="utf-8")
-    for forbidden in ("localStorage", "sessionStorage", "document.cookie", "indexedDB",
+    for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
                       "URLSearchParams", "location.search", "location.hash", "window.__"):
         assert forbidden not in html, forbidden
+    # localStorage holds only the appearance preference (see test_frontend_served_page).
+    uses = re.findall(r"localStorage\.(getItem|setItem)\('mdv-theme'", html)
+    assert html.count("localStorage") == len(uses)
     pair = _function_body(html, "pairConnector")
     assert "pairingCode.value = ''" in pair  # code is cleared from the input immediately
     assert "body: JSON.stringify({ pairing_token: code })" in pair  # sent in the body, not the URL

@@ -132,7 +132,9 @@ def test_no_hidden_pairing_global_in_served_page(served_html):
     # session must never come from a hidden global, browser storage, or the URL,
     # and ensureConnectorSession must never pair implicitly.
     assert "__CONNECTOR_PAIRING_TOKEN__" not in served_html
-    for forbidden in ("localStorage", "sessionStorage", "document.cookie",
+    # localStorage is allowed only for the appearance preference; see
+    # test_browser_storage_holds_only_the_theme_preference.
+    for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
                       "URLSearchParams", "location.hash", "location.search", "window.__"):
         assert forbidden not in served_html, forbidden
     session = _function_body(served_html, "ensureConnectorSession")
@@ -144,6 +146,29 @@ def test_no_hidden_pairing_global_in_served_page(served_html):
     pair = _function_body(served_html, "pairConnector")
     assert "pairingCode.value" in pair
     assert "CONNECTOR_URL + '/pair'" in pair
+
+
+def test_browser_storage_holds_only_the_theme_preference(served_html):
+    """The appearance toggle may remember Light/Dark/System. Nothing else on the page
+    may touch browser storage: no session token, credentials or connector state."""
+    uses = re.findall(r"localStorage\.(\w+)\(([^)]*)\)", served_html)
+    assert uses, "theme preference is expected to use localStorage"
+    assert served_html.count("localStorage") == len(uses)  # no other kind of access
+    for method, args in uses:
+        assert method in ("getItem", "setItem"), method
+        assert args.split(",")[0].strip() == "'mdv-theme'", args
+    # Only saveTheme writes, and only a value from the fixed list.
+    writes = [args for method, args in uses if method == "setItem"]
+    assert writes == ["'mdv-theme', choice"]
+    save = _function_body(served_html, "saveTheme")
+    assert "if (!THEMES.includes(choice)) return;" in save
+    assert "const THEMES = ['light', 'dark', 'system'];" in served_html
+    # The theme code never sees credentials, the session or the network.
+    for name in ("saveTheme", "readTheme", "applyTheme"):
+        body = _function_body(served_html, name)
+        for secret in ("password", "username", "credentials", "SessionToken", "sessionToken",
+                       "pairing", "fetch", "CONNECTOR_URL", "state."):
+            assert secret not in body, (name, secret)
 
 
 def test_served_page_keeps_database_list_limited_warning(served_html):
