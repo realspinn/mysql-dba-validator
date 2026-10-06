@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import backend.metadata_scoring as scoring
 from backend.metadata_scoring import M1_FACTOR_CODE, apply_m1_adjustment
 from backend.main import ValidateRequest, validate
+from tests.local_evidence import local_request, use_fake_evidence_connection
 from backend.parser import StatementFacts
 from backend.risk_engine import score_statement
 
@@ -127,9 +128,10 @@ def test_m1_scorer_has_no_database_or_collection_dependencies():
 
 
 def test_api_exposes_additive_m1_fields_without_merging_factors(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: SimpleNamespace(
+        lambda sql, **_kwargs: SimpleNamespace(
             available=True,
             explain_available=True,
             estimated_rows=500,
@@ -144,10 +146,11 @@ def test_api_exposes_additive_m1_fields_without_merging_factors(monkeypatch):
             error=None,
         ),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: make_metadata(100000))
+    monkeypatch.setattr("backend.main.collect_metadata",
+                        lambda tables, **_kwargs: make_metadata(100000))
 
     statement = validate(
-        ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';")
+        local_request("UPDATE users SET active = 0 WHERE status = 'pending';")
     )["statements"][0]
 
     assert statement["static_score"] == 20

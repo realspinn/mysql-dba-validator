@@ -1,6 +1,8 @@
 from backend.db_evidence import DatabaseEvidence
 from backend.evidence_scoring import apply_evidence_adjustments
 from backend.main import ValidateRequest, validate
+from backend.metadata import MetadataEvidence
+from tests.local_evidence import local_request, use_fake_evidence_connection
 from backend.parser import parse_sql
 from backend.risk_engine import score_batch
 
@@ -173,15 +175,18 @@ def test_evidence_cannot_reduce_hard_critical_or_no_where_writes():
 
 
 def test_api_exposes_static_final_and_evidence_scores_additively(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: evidence(
+        lambda sql, **_kwargs: evidence(
             access_type="ALL",
             full_table_scan=True,
             estimated_rows=12000,
         ),
     )
-    result = validate(ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';"))
+    monkeypatch.setattr("backend.main.collect_metadata",
+                        lambda tables, **_kwargs: MetadataEvidence(status="unavailable"))
+    result = validate(local_request("UPDATE users SET active = 0 WHERE status = 'pending';"))
     statement = result["statements"][0]
     assert statement["static_score"] == 20
     assert statement["static_risk_level"] == "MEDIUM"

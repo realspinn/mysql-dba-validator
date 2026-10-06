@@ -1034,6 +1034,13 @@
 			font-size: 13px
 		}
 
+		.layer p.evidence-reason {
+			padding: 6px 10px;
+			border-left: 3px solid var(--warn-border);
+			background: var(--warn-soft);
+			color: var(--text)
+		}
+
 		.subheading {
 			margin: 14px 0 6px;
 			color: var(--text-3);
@@ -1245,7 +1252,8 @@
 					<div class="panel-title">
 						<div class="kicker">Step 1</div>
 						<h2 id="connectionHeading">MySQL connection</h2>
-						<p class="panel-note">Credentials stay in this page's memory and are never saved.</p>
+						<p class="panel-note">Your database login is used for connection, database evidence and
+							metadata during validation. Credentials are not saved.</p>
 					</div>
 					<div class="fields">
 						<div class="field full"><label for="targetSelect">Target</label><select id="targetSelect">
@@ -1330,8 +1338,8 @@
 					<div id="results">
 						<div class="empty">
 							<div><strong>Ready for review</strong><span>Paste SQL and choose Validate SQL. Static
-									analysis needs no database; select one to add EXPLAIN and metadata
-									evidence.</span></div>
+									analysis needs no database; enter your login and select a database to add
+									EXPLAIN and metadata evidence.</span></div>
 						</div>
 					</div>
 				</section>
@@ -1966,9 +1974,25 @@
 			return box;
 		}
 
+		// Why evidence is missing, from the stable status the server reports. These say what
+		// to do next; they never contain hosts, usernames, SQL or raw database errors.
+		const EVIDENCE_STATUS_MESSAGES = {
+			not_configured: 'Enter your database login and select a database, then validate again.',
+			unreachable: 'The database could not be reached. Check that MySQL is running and reachable.',
+			auth_failed: 'The database rejected your login. Check the username and password.',
+			database_not_found: 'The selected database was not found. Discover databases again.',
+			insufficient_privileges: 'Your account lacks a privilege this evidence needs. EXPLAIN requires the same privileges as the statement itself.',
+			explain_failed: 'MySQL could not produce an EXPLAIN plan for this statement.',
+			unsupported_statement_type: 'EXPLAIN evidence is collected only for SELECT, UPDATE and DELETE statements.',
+			collection_failed: 'Evidence collection failed. The static analysis is still complete.'
+		};
+
 		function evidenceLayer(s) {
 			const evidence = s.database_evidence || {};
 			const body = [el('p', '', evidence.available ? 'EXPLAIN evidence is available.' : 'Database evidence is unavailable.')];
+			if (!evidence.available && Object.prototype.hasOwnProperty.call(EVIDENCE_STATUS_MESSAGES, evidence.status)) {
+				body.push(el('p', 'evidence-reason', EVIDENCE_STATUS_MESSAGES[evidence.status]));
+			}
 			// Without evidence every plan field is n/a: skip the empty grid rather than show six blanks.
 			if (evidence.available) {
 				const grid = el('div', 'metric-grid');

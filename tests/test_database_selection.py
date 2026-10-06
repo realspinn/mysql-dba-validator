@@ -1,8 +1,8 @@
-from types import SimpleNamespace
-
 from backend.db import AnalysisSession, ConnectionProfile, DBClient, DBConfig
 from backend.db_evidence import DatabaseEvidence, collect_statement_evidence
 from backend.main import ValidateRequest, validate
+from tests.local_evidence import (
+    FAKE_LOGIN, FakeEvidenceConnection, local_request, use_fake_evidence_connection)
 from backend.metadata import MetadataEvidence, collect_metadata
 
 
@@ -97,54 +97,36 @@ def test_validate_rejects_invalid_database_before_parser_or_db(monkeypatch):
     assert calls == []
 
 
-def test_validate_hostless_static_request_stays_on_evidence_path(monkeypatch):
-    captured = []
-    session = selected_session()
-    client = SimpleNamespace(
-        session=AnalysisSession(session.connection_profile, None),
-        configured=False,
-    )
-
-    monkeypatch.setattr("backend.main.get_client", lambda: client)
-
-    def fake_evidence(sql, session=None):
-        captured.append(("evidence", sql, session))
-        return DatabaseEvidence(available=False, error="database_unavailable")
-
-    def fake_metadata(tables, session=None):
-        captured.append(("metadata", tables, session))
-        return MetadataEvidence(status="unavailable")
-
-    monkeypatch.setattr(
-        "backend.main.collect_statement_evidence", fake_evidence)
-    monkeypatch.setattr("backend.main.collect_metadata", fake_metadata)
+def test_validate_hostless_request_without_login_collects_no_evidence(monkeypatch):
+    """Without a login there is no evidence connection and no other credential source."""
+    opened = []
+    called = []
+    monkeypatch.setattr("backend.main.open_evidence_connection",
+                        lambda *args, **kwargs: opened.append(args) or (object(), None))
+    monkeypatch.setattr("backend.main.collect_statement_evidence",
+                        lambda *args, **kwargs: called.append("evidence"))
+    monkeypatch.setattr("backend.main.collect_metadata",
+                        lambda *args, **kwargs: called.append("metadata"))
 
     result = validate(ValidateRequest(
         sql="UPDATE users SET active = 0 WHERE id = 1;", database="selected_db"))
 
-    assert result["analysis_mode"] in {"STATIC", "STATIC_DATABASE_UNAVAILABLE"}
-    assert captured[0][0] == "evidence"
-    assert captured[0][2].selected_database == "selected_db"
-    assert captured[1][0] == "metadata"
-    assert captured[1][2].selected_database == "selected_db"
+    assert opened == [] and called == []
+    assert result["analysis_mode"] == "STATIC"
+    assert result["statements"][0]["database_evidence"]["status"] == "not_configured"
 
 
 def test_validate_propagates_selected_database_without_modifying_sql(monkeypatch):
     captured = []
-    session = selected_session()
-    client = SimpleNamespace(
-        session=AnalysisSession(session.connection_profile, None),
-        configured=False,
-    )
+    connection = FakeEvidenceConnection()
+    use_fake_evidence_connection(monkeypatch, connection)
 
-    monkeypatch.setattr("backend.main.get_client", lambda: client)
+    def fake_evidence(sql, connection=None):
+        captured.append(("evidence", sql, connection))
+        return DatabaseEvidence(available=False, error="explain_failed")
 
-    def fake_evidence(sql, session=None):
-        captured.append(("evidence", sql, session))
-        return DatabaseEvidence(available=False, error="database_unavailable")
-
-    def fake_metadata(tables, session=None):
-        captured.append(("metadata", tables, session))
+    def fake_metadata(tables, connection=None, database=None):
+        captured.append(("metadata", tables, connection, database))
         return MetadataEvidence(status="unavailable")
 
     monkeypatch.setattr(
@@ -152,14 +134,16 @@ def test_validate_propagates_selected_database_without_modifying_sql(monkeypatch
     monkeypatch.setattr("backend.main.collect_metadata", fake_metadata)
     submitted_sql = "UPDATE users SET active = 0 WHERE id = 1;"
 
-    result = validate(ValidateRequest(
-        sql=submitted_sql, database="selected_db"))
+    result = validate(local_request(submitted_sql, database="selected_db"))
 
+    profile, database = connection.opened[0]
+    assert len(connection.opened) == 1 and database == "selected_db"
+    assert (profile.host, profile.port, profile.username) == ("127.0.0.1", 3306, FAKE_LOGIN["username"])
     assert result["statements"][0]["sql"] == submitted_sql[:-1]
-    assert captured[0] == ("evidence", submitted_sql[:-1], session)
-    assert captured[1] == ("metadata", ["users"], session)
-    assert all(item[2].selected_database == "selected_db" for item in captured)
-    assert "secret-password" not in repr(session)
+    assert captured[0] == ("evidence", submitted_sql[:-1], connection)
+    assert captured[1] == ("metadata", ["users"], connection, "selected_db")
+    assert connection.close_calls == 1
+    assert FAKE_LOGIN["password"] not in repr(profile)
 
 
 def test_evidence_connection_receives_selected_database_and_never_uses_use(monkeypatch):

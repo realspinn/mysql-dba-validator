@@ -11,7 +11,6 @@ returns dictionary rows; no real MySQL, network or TLS is involved.
 
 import logging
 import socket
-from types import SimpleNamespace
 
 import pytest
 from fastapi.encoders import jsonable_encoder
@@ -20,11 +19,10 @@ from fastapi.testclient import TestClient
 import backend.main as backend_main
 import backend.metadata as backend_metadata
 import connector.server as connector_server
-from backend.db_evidence import collect_statement_evidence as real_collect_evidence
-from backend.main import ValidateRequest, validate as local_validate
-from backend.metadata import collect_metadata as real_collect_metadata
+from backend.main import validate as local_validate
 from connector.policy import CompanyTarget
 from connector.server import CompanyTargetDestination, ConnectorRuntime, create_app
+from tests.local_evidence import local_request, use_fake_evidence_connection
 
 ORIGIN = "http://127.0.0.1:8420"
 HOST = "db.company.example"
@@ -164,14 +162,10 @@ def remote_validate(monkeypatch, server, sql, *, database=DB):
 
 
 def local_validate_with(monkeypatch, server, sql):
-    """Local /api/validate with the same fake server behind the shared collectors."""
-    monkeypatch.setattr(backend_main, "get_client", lambda: SimpleNamespace(configured=True, session=None))
-    monkeypatch.setattr(backend_main, "collect_statement_evidence",
-                        lambda raw_sql, session=None: real_collect_evidence(raw_sql, connection=FakeConnection(server)))
-    monkeypatch.setattr(backend_main, "collect_metadata",
-                        lambda tables, session=None: real_collect_metadata(
-                            tables, connection=FakeConnection(server), database=DB))
-    return jsonable_encoder(local_validate(ValidateRequest(sql=sql)))
+    """Local /api/validate with the same fake server as its per-request evidence
+    connection: both paths now run the real shared collectors on one connection."""
+    use_fake_evidence_connection(monkeypatch, FakeConnection(server))
+    return jsonable_encoder(local_validate(local_request(sql, database=DB)))
 
 
 # ---------------------------------------------------------------- remote == local scoring semantics

@@ -3,12 +3,13 @@ from .m2_scoring import apply_m2_adjustment
 from .metadata_scoring import apply_m1_adjustment
 from .metadata import MetadataEvidence, collect_metadata
 from .evidence_scoring import apply_evidence_adjustments
-from .db_evidence import DatabaseEvidence, collect_statement_evidence
+from .db_evidence import DatabaseEvidence, collect_statement_evidence, evidence_status
 from .db import (
     AnalysisSession,
     ConnectionProfile,
     discover_databases,
     get_client,
+    open_evidence_connection,
     probe_connection,
     validate_database_identifier,
     validate_readonly_select,
@@ -21,8 +22,9 @@ from .parser import parse_sql
 from .version import APP_VERSION
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from fastapi import FastAPI, Request
 
 import ipaddress
@@ -41,6 +43,17 @@ app = FastAPI(
     title="MySQL DBA Validator",
     version=APP_VERSION,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def redacted_validation_error(request: Request, exc: RequestValidationError):
+    """422 without echoing request values: FastAPI's default includes each error's
+    `input` (and `ctx`), which can carry submitted credentials."""
+    detail = [
+        {"type": error.get("type"), "loc": list(error.get("loc", ())), "msg": error.get("msg")}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 def configured_cors_origins() -> list[str]:
@@ -356,11 +369,6 @@ def validate(req: ValidateRequest):
         allow_evidence_collection = (
             target_class == TargetClass.LOOPBACK_LOCAL)
 
-    # Create analysis session only for evidence-enabled targets.
-    analysis_session = None
-    if allow_evidence_collection and req.database is not None:
-        analysis_session = get_client().session.with_database(req.database)
-
     # Parse SQL into StatementFacts
     all_facts = parse_sql(req.sql)
     if len(all_facts) > MAX_STATEMENTS:
@@ -375,57 +383,68 @@ def validate(req: ValidateRequest):
         for analysis in analyses
     ]
 
+    # Local evidence uses only the login supplied with this request, on one fresh
+    # connection bound to the selected database. There is no other credential source
+    # and no fallback: without a login and database, evidence is "not_configured".
+    evidence_connection = None
+    connection_status = "not_configured"
+    connection_attempted = False
+    username = (req.username or "").strip()
+    password = req.password.get_secret_value() if req.password is not None else ""
+    if (allow_evidence_collection and req.host is not None and username and password
+            and req.database is not None):
+        connection_attempted = True
+        evidence_connection, connection_status = open_evidence_connection(
+            ConnectionProfile(host=req.host.strip(), port=req.port,
+                              username=username, password=password),
+            req.database,
+        )
+
     statements = []
     evidence_available = False
     analysis_mode = "STATIC"
     overall_score = 0
 
-    for report, analysis in zip(reports, analyses):
-        static_report = report
-        if not allow_evidence_collection:
-            # Remote targets: no evidence collection (fail-closed)
-            evidence = DatabaseEvidence(
-                available=False, error="remote_target_unavailable")
-        else:
-            try:
-                if analysis_session is None:
-                    evidence = collect_statement_evidence(report.facts.raw_sql)
-                else:
+    try:
+        for report, analysis in zip(reports, analyses):
+            static_report = report
+            if evidence_connection is None:
+                # Remote targets never reach here with a connection (fail-closed), and a
+                # local request without a usable connection reports why.
+                evidence = DatabaseEvidence(available=False, error=connection_status)
+                metadata = MetadataEvidence(status="unavailable")
+            else:
+                try:
                     evidence = collect_statement_evidence(
-                        report.facts.raw_sql,
-                        session=analysis_session,
-                    )
-            except Exception:
-                evidence = DatabaseEvidence(
-                    available=False, error="collection_failed")
-
-        if not allow_evidence_collection:
-            # Remote targets: no metadata collection (fail-closed)
-            metadata = MetadataEvidence(status="unavailable")
-        else:
-            try:
-                if analysis_session is None:
-                    metadata = collect_metadata(report.facts.tables)
-                else:
+                        report.facts.raw_sql, connection=evidence_connection)
+                except Exception:
+                    evidence = DatabaseEvidence(
+                        available=False, error="collection_failed")
+                try:
                     metadata = collect_metadata(
                         report.facts.tables,
-                        session=analysis_session,
+                        connection=evidence_connection,
+                        database=req.database,
                     )
+                except Exception:
+                    metadata = MetadataEvidence(status="unavailable")
+
+            payload = build_statement_result(static_report, analysis, evidence, metadata)
+
+            if evidence.available:
+                evidence_available = True
+                analysis_mode = "DATABASE_EVIDENCE"
+
+            statements.append(payload)
+    finally:
+        if evidence_connection is not None:
+            try:
+                evidence_connection.close()
             except Exception:
-                metadata = MetadataEvidence(status="unavailable")
+                pass
 
-        payload = build_statement_result(static_report, analysis, evidence, metadata)
-
-        if evidence.available:
-            evidence_available = True
-            analysis_mode = "DATABASE_EVIDENCE"
-
-        statements.append(payload)
-
-    if not evidence_available and target_class == TargetClass.LOOPBACK_LOCAL:
-        db_client = get_client()
-        if db_client.configured:
-            analysis_mode = "STATIC_DATABASE_UNAVAILABLE"
+    if not evidence_available and connection_attempted:
+        analysis_mode = "STATIC_DATABASE_UNAVAILABLE"
 
     aggregate_statement = max(
         statements,
@@ -532,6 +551,8 @@ def build_statement_result(static_report, analysis, evidence: DatabaseEvidence, 
         "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
         "metadata_status": metadata.status,
         "error": evidence.error,
+        # Stable, browser-safe reason (see backend.db.EVIDENCE_STATUSES).
+        "status": evidence_status(evidence),
     }
 
     return payload

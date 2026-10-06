@@ -66,12 +66,16 @@ kept in `%LOCALAPPDATA%\MySQLDBAValidator\`:
 | --- | --- |
 | `connector-targets.json` | Approved company targets: host, port, approval state, DNS snapshot. No credentials. |
 | `logs\backend.log` | Web app log, replaced on each start. |
-| `.env` (optional, you create it) | `MYSQL_*` settings for local evidence. |
+| `.env` (legacy, optional) | Not used for validation evidence. If present, only the API health check reports it. |
 
-**Optional settings.** Local evidence against a MySQL server on this machine
-needs a read-only account in `%LOCALAPPDATA%\MySQLDBAValidator\.env`. The
-packaged app reads no other `.env` file. Company targets need the CA bundle
-that signs the company MySQL certificates:
+**Local evidence.** EXPLAIN and metadata evidence for MySQL on this machine
+uses the login you enter in the page for that validation, on one connection
+to the database you selected. The login is not saved. In **v0.2.0**, local
+evidence instead read an account from `%LOCALAPPDATA%\MySQLDBAValidator\.env`;
+that changed after v0.2.0.
+
+**Optional settings.** Company targets need the CA bundle that signs the
+company MySQL certificates:
 
 ```powershell
 .\MySQL-DBA-Validator.exe --tls-ca C:\path\to\company-ca.pem
@@ -110,10 +114,20 @@ covers these steps in more detail.
 - **No generic SQL endpoint.** Evidence is limited to `SELECT 1`, bounded
   `EXPLAIN` of supported statements and fixed metadata queries.
 
-**Local-evidence exception.** Local `EXPLAIN`/metadata evidence uses the
-`MYSQL_USER`/`MYSQL_PASSWORD` from the optional `.env` file, which you store
-in plain text. Credentials typed in the page are used for the local connection
-test and database discovery.
+**Local evidence boundaries.** Local evidence opens one connection per
+validation, with the login supplied for that validation, to the loopback MySQL
+target and the selected database, and closes it when the validation ends. There
+is no other credential source: without a login and database, evidence is
+reported as not configured, and a rejected login is reported as such.
+
+- Your MySQL account's privileges are the authorization boundary. `EXPLAIN`
+  needs the same privileges as the statement it explains, so `UPDATE` and
+  `DELETE` evidence needs those privileges on the table.
+- The validator never executes the submitted SQL. It only runs `EXPLAIN` of
+  one supported statement (`SELECT`, `UPDATE`, `DELETE`) and fixed
+  `information_schema` queries, never `EXPLAIN ANALYZE`.
+- As defense in depth, the evidence connection is set to read-only
+  transactions first; if that fails, no evidence is collected.
 
 ### Verification status
 
@@ -151,8 +165,8 @@ Open `http://localhost:8420`. The connector requires an explicit
 targets and `--registry <file>` for a non-default registry. Connector details,
 including operator commands, are in [connector/README.md](connector/README.md).
 
-For local evidence from source, copy `.env.example` to `.env` in the project
-root and fill in a read-only account. `.env` is git-ignored.
+Local evidence needs no configuration file: enter a MySQL login and select a
+database in the page.
 
 Run the tests:
 

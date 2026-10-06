@@ -42,26 +42,29 @@ The program folder is never written to. Per-user data lives in:
     %LOCALAPPDATA%\MySQLDBAValidator\
         connector-targets.json   approved company targets (no credentials)
         logs\backend.log         web app log, replaced on each start
-        .env                     OPTIONAL, created by you (see below)
-
 MySQL usernames and passwords typed into the page are used for that request
 only. They are not written to disk, the target registry, the logs or browser
 storage.
 
 
-OPTIONAL: LOCAL MYSQL EVIDENCE
-------------------------------
-For EXPLAIN/metadata evidence against a MySQL server on this machine
-(127.0.0.1:3306), create %LOCALAPPDATA%\MySQLDBAValidator\.env containing:
+LOCAL MYSQL EVIDENCE
+--------------------
+For EXPLAIN/metadata evidence against MySQL on this machine (127.0.0.1:3306),
+enter your MySQL login in the page, choose "Discover databases", select a
+database and validate. Evidence uses that login, on one connection to the
+selected database that is closed when the validation ends. No configuration
+file is needed and the login is not saved.
 
-    MYSQL_HOST=127.0.0.1
-    MYSQL_PORT=3306
-    MYSQL_USER=<read-only account>
-    MYSQL_PASSWORD=<its password>
-    MYSQL_DATABASE=<database>
+Your MySQL account's privileges decide what evidence is possible: EXPLAIN
+needs the same privileges as the statement it explains (UPDATE/DELETE
+privileges for UPDATE/DELETE evidence). The validator never runs the SQL you
+submit; it only runs EXPLAIN and fixed metadata queries.
 
-Use a read-only account. This file is stored in plain text by you; the
-application does not create it. No other .env file is read.
+If evidence is missing, the result says why (for example, no login entered,
+login rejected, database not found, or missing privileges).
+
+Earlier versions (v0.2.0) read a local evidence account from a .env file in
+the data folder. That file is no longer used for validation evidence.
 
 
 OPTIONAL: COMPANY TARGETS THROUGH THE CONNECTOR

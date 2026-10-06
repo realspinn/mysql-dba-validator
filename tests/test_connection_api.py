@@ -1,10 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
 from pydantic import ValidationError
 
 from backend.db import AnalysisSession, ConnectionProfile, discover_databases
-from backend.db_evidence import DatabaseEvidence
 from backend.main import (
     ConnectionTestRequest,
     ValidateRequest,
@@ -13,7 +10,6 @@ from backend.main import (
     discover_databases_endpoint,
     validate,
 )
-from backend.metadata import MetadataEvidence
 
 
 class FakeConnection:
@@ -122,28 +118,15 @@ def test_connection_test_rejects_user_sql():
 
 
 def test_company_validation_skips_public_database_evidence_and_metadata(monkeypatch):
+    """A company-labelled request without a login gets no public-API evidence:
+    no connection is opened and no other credential source is used."""
     calls = []
-    client = SimpleNamespace(
-        session=AnalysisSession(
-            ConnectionProfile("db.example", 3306,
-                              "validator", "secret-password"),
-            "company_db",
-        ),
-        configured=True,
-    )
-
-    def fake_evidence(sql, session=None):
-        calls.append(("evidence", sql, session))
-        return DatabaseEvidence(available=False, error="database_unavailable")
-
-    def fake_metadata(tables, session=None):
-        calls.append(("metadata", tables, session))
-        return MetadataEvidence(status="unavailable")
-
-    monkeypatch.setattr("backend.main.get_client", lambda: client)
-    monkeypatch.setattr(
-        "backend.main.collect_statement_evidence", fake_evidence)
-    monkeypatch.setattr("backend.main.collect_metadata", fake_metadata)
+    monkeypatch.setattr("backend.main.open_evidence_connection",
+                        lambda *args, **kwargs: calls.append("connect") or (object(), None))
+    monkeypatch.setattr("backend.main.collect_statement_evidence",
+                        lambda *args, **kwargs: calls.append("evidence"))
+    monkeypatch.setattr("backend.main.collect_metadata",
+                        lambda *args, **kwargs: calls.append("metadata"))
 
     result = validate(ValidateRequest(
         sql="SELECT * FROM users",
@@ -152,11 +135,9 @@ def test_company_validation_skips_public_database_evidence_and_metadata(monkeypa
     ))
 
     assert result["statement_count"] >= 1
-    assert result["analysis_mode"] in {"STATIC", "STATIC_DATABASE_UNAVAILABLE"}
-    assert calls and calls[0][0] == "evidence"
-    assert any(call[0] == "metadata" for call in calls)
-    assert calls[0][2].selected_database == "company_db"
-    assert "company_db" in repr(calls[0][2])
+    assert result["analysis_mode"] == "STATIC"
+    assert calls == []
+    assert result["statements"][0]["database_evidence"]["status"] == "not_configured"
     assert "error_code" not in result
     assert "remote_target_unavailable" not in repr(result)
 

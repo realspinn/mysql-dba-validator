@@ -588,8 +588,11 @@ def test_local_flow_is_unchanged():
         test = client.post("/api/connections/test", json={
             "host": "db.company.example", "port": 3306, "username": USER, "password": SECRET})
         assert test.json()["error_code"] == "local_only_target_required"
+    # Local evidence uses only the login supplied with the request (no .env session);
+    # remote credentials still never reach the public API.
     main_source = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
-    assert "analysis_session = get_client().session.with_database(req.database)" in main_source
+    assert "evidence_connection, connection_status = open_evidence_connection(" in main_source
+    assert "get_client().session.with_database" not in main_source
 
 
 # ---------------------------------------------------------------- kept: TLS / bounded explain / states

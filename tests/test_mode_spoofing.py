@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from backend.db_evidence import DatabaseEvidence
 from backend.main import app, TargetClass, classify_target
 from backend.metadata import MetadataEvidence
+from tests.local_evidence import FAKE_LOGIN, FakeEvidenceConnection
 
 
 client = TestClient(app)
@@ -51,44 +52,46 @@ class TestModeSpoofing:
             stmt = data['statements'][0]
             assert stmt['database_evidence']['available'] == False
 
-    def test_mode_company_with_loopback_target_still_collects_evidence(self, monkeypatch):
-        """A declared company mode cannot override a loopback host classification."""
-        calls = []
+    def test_mode_company_with_loopback_target_cannot_unlock_or_suppress_evidence(self, monkeypatch):
+        """A declared company mode cannot override a loopback host classification,
+        and it cannot unlock evidence: evidence depends only on the target and login."""
+        connects = []
 
-        def fake_evidence(sql, session=None):
-            calls.append(("evidence", sql))
-            return DatabaseEvidence(available=False, error="database_unavailable")
+        def fake_open(profile, database, **_kwargs):
+            connects.append((profile.host, database))
+            return FakeEvidenceConnection(), None
 
-        def fake_metadata(tables, session=None):
-            calls.append(("metadata", tables))
-            return MetadataEvidence(status="unavailable")
-
-        monkeypatch.setattr(
-            "backend.main.collect_statement_evidence", fake_evidence)
-        monkeypatch.setattr("backend.main.collect_metadata", fake_metadata)
+        monkeypatch.setattr("backend.main.open_evidence_connection", fake_open)
+        monkeypatch.setattr("backend.main.collect_statement_evidence",
+                            lambda sql, **_kwargs: DatabaseEvidence(available=False, error="explain_failed"))
+        monkeypatch.setattr("backend.main.collect_metadata",
+                            lambda tables, **_kwargs: MetadataEvidence(status="unavailable"))
 
         assert classify_target("127.0.0.1", 3306) == TargetClass.LOOPBACK_LOCAL
 
+        # Company mode, no login: still a local request, static only, no connection.
         response = client.post('/api/validate', json={
-            'sql': 'SELECT 1',
-            'host': '127.0.0.1',
-            'port': 3306,
-            'database': None,
-            'mode': 'company',
+            'sql': 'SELECT 1', 'host': '127.0.0.1', 'port': 3306, 'database': None, 'mode': 'company',
         })
-
         assert response.status_code == 200
         data = response.json()
         assert data["statement_count"] >= 1
-        assert calls and calls[0][0] == "evidence"
-        assert any(call[0] == "metadata" for call in calls)
-        assert data["analysis_mode"] in {
-            "STATIC", "STATIC_DATABASE_UNAVAILABLE"}
-        assert "invalid_target" not in repr(data)
+        assert data["analysis_mode"] == "STATIC"
+        assert data["statements"][0]["database_evidence"]["status"] == "not_configured"
+        assert "invalid_target" not in repr(data) and "delegated_to_connector" not in repr(data)
+        assert connects == []
 
-        # Company mode is ignored for authorization; loopback classification still permits the local evidence path.
+        # Company mode with a login is refused before any connection, without echoing it.
+        refused = client.post('/api/validate', json={
+            'sql': 'SELECT 1', 'host': '127.0.0.1', 'port': 3306, 'database': 'app', 'mode': 'company',
+            'username': FAKE_LOGIN["username"], 'password': FAKE_LOGIN["password"],
+        })
+        assert refused.status_code == 422
+        assert FAKE_LOGIN["password"] not in refused.text and FAKE_LOGIN["username"] not in refused.text
+        assert connects == []
+
+        # Company mode is ignored for authorization; loopback classification still decides.
         assert classify_target("127.0.0.1", 3306) == TargetClass.LOOPBACK_LOCAL
-
 
 class TestModeFieldIgnored:
     """Test that mode field is never used for authorization."""
@@ -146,43 +149,42 @@ class TestModeFieldIgnored:
 class TestClassificationNotModeField:
     """Verify architecture: classification drives behavior, not mode."""
 
-    def test_loopback_always_permits_evidence_attempt(self, monkeypatch):
-        """Loopback classification is authoritative; mode cannot suppress the local evidence path."""
+    def test_loopback_login_permits_evidence_attempt_regardless_of_mode(self, monkeypatch):
+        """Loopback classification plus the request's own login opens the local evidence
+        path; mode is not consulted."""
+        connects = []
+
+        def fake_open(profile, database, **_kwargs):
+            connects.append((profile.host, database))
+            return FakeEvidenceConnection(), None
+
         calls = []
-
-        def fake_evidence(sql, session=None):
-            calls.append(("evidence", sql))
-            return DatabaseEvidence(available=False, error="database_unavailable")
-
-        def fake_metadata(tables, session=None):
-            calls.append(("metadata", tables))
-            return MetadataEvidence(status="unavailable")
-
-        monkeypatch.setattr(
-            "backend.main.collect_statement_evidence", fake_evidence)
-        monkeypatch.setattr("backend.main.collect_metadata", fake_metadata)
+        monkeypatch.setattr("backend.main.open_evidence_connection", fake_open)
+        monkeypatch.setattr("backend.main.collect_statement_evidence",
+                            lambda sql, **_kwargs: calls.append("evidence") or DatabaseEvidence(
+                                available=False, error="explain_failed"))
+        monkeypatch.setattr("backend.main.collect_metadata",
+                            lambda tables, **_kwargs: calls.append("metadata") or MetadataEvidence(
+                                status="unavailable"))
 
         assert classify_target("127.0.0.1", 3306) == TargetClass.LOOPBACK_LOCAL
 
-        response = client.post('/api/validate', json={
-            'sql': 'SELECT 1',
-            'host': '127.0.0.1',
-            'port': 3306,
-            'database': None,
-            'mode': 'company',
-        })
+        for extra in ({}, {"mode": "local"}):
+            connects.clear()
+            calls.clear()
+            response = client.post('/api/validate', json={
+                'sql': 'SELECT 1', 'host': '127.0.0.1', 'port': 3306, 'database': 'app',
+                'username': FAKE_LOGIN["username"], 'password': FAKE_LOGIN["password"], **extra,
+            })
+            assert response.status_code == 200
+            data = response.json()
+            assert connects == [("127.0.0.1", "app")]
+            assert calls[0] == "evidence" and "metadata" in calls
+            assert data["analysis_mode"] == "STATIC_DATABASE_UNAVAILABLE"
+            assert data["statements"][0]["database_evidence"]["status"] == "explain_failed"
+            assert FAKE_LOGIN["password"] not in response.text
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["statement_count"] >= 1
-        assert calls and calls[0][0] == "evidence"
-        assert any(call[0] == "metadata" for call in calls)
-        assert data["analysis_mode"] in {
-            "STATIC", "STATIC_DATABASE_UNAVAILABLE"}
-        assert data["statements"][0]["database_evidence"]["error"] in {
-            "database_unavailable", None}
-
-        # The request remains loopback-local even when the caller incorrectly labels it company.
+        # The request remains loopback-local whatever the caller labels it.
         assert classify_target("127.0.0.1", 3306) == TargetClass.LOOPBACK_LOCAL
 
     def test_remote_target_disables_evidence(self):

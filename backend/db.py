@@ -166,6 +166,98 @@ def probe_connection(session: AnalysisSession, read_timeout: float = 10.0) -> Di
                 pass
 
 
+# Stable, browser-safe evidence states. Only these codes ever describe why evidence is
+# missing; raw MySQL messages, hosts, usernames, SQL and credentials never leave here.
+EVIDENCE_STATUSES = (
+    "available",
+    "not_configured",
+    "unreachable",
+    "auth_failed",
+    "database_not_found",
+    "insufficient_privileges",
+    "explain_failed",
+    "unsupported_statement_type",
+    "collection_failed",
+)
+
+_MYSQL_ERRNO_STATUS = {
+    1045: "auth_failed",              # access denied (bad login)
+    1049: "database_not_found",       # unknown database
+    1044: "insufficient_privileges",  # access denied to database
+    1142: "insufficient_privileges",  # command denied on table
+    1143: "insufficient_privileges",  # column access denied
+    1227: "insufficient_privileges",  # specific privilege required
+    2003: "unreachable",              # cannot connect
+    2005: "unreachable",              # unknown host
+    2006: "unreachable",              # server has gone away
+    2013: "unreachable",              # lost connection
+}
+
+READ_ONLY_SESSION_SQL = "SET SESSION TRANSACTION READ ONLY"
+
+
+def mysql_error_status(exc: BaseException, default: str) -> str:
+    """Map a driver exception to a safe status using only its MySQL error number."""
+    args = getattr(exc, "args", ())
+    errno = args[0] if args and isinstance(args[0], int) else None
+    return _MYSQL_ERRNO_STATUS.get(errno, default)
+
+
+def open_evidence_connection(
+    profile: ConnectionProfile,
+    database: str,
+    read_timeout: float = 10.0,
+) -> tuple[Any, Optional[str]]:
+    """Open the one evidence connection for a validation request.
+
+    Uses the credentials supplied with that request and binds the selected database
+    at connect time. Before any evidence query the session is set to read-only
+    transactions (defense in depth; MySQL account privileges remain the authorization
+    boundary). If that cannot be set, the connection is closed and no evidence is
+    collected (fail closed).
+
+    Returns (connection, None) on success or (None, status) with a safe status code.
+    The caller owns the connection and must close it exactly once.
+    """
+    try:
+        import pymysql
+    except Exception:
+        return None, "collection_failed"
+
+    try:
+        connection = pymysql.connect(
+            host=profile.host,
+            user=profile.username,
+            password=profile.password,
+            database=database,
+            port=profile.port or 3306,
+            connect_timeout=5,
+            read_timeout=read_timeout,
+            autocommit=True,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+    except Exception as exc:
+        return None, mysql_error_status(exc, "unreachable")
+
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(READ_ONLY_SESSION_SQL)
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+    except Exception:
+        try:
+            connection.close()
+        except Exception:
+            pass
+        return None, "collection_failed"
+
+    return connection, None
+
+
 def discover_databases(
     session: AnalysisSession,
     max_databases: int = MAX_DISCOVERED_DATABASES,

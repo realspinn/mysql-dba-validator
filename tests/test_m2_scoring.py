@@ -8,6 +8,7 @@ from backend.parser import parse_sql
 from backend.risk_engine import score_batch
 from backend.metadata_scoring import apply_m1_adjustment
 from backend.main import ValidateRequest, validate
+from tests.local_evidence import local_request, use_fake_evidence_connection
 
 
 def report(sql="UPDATE users SET active = 0 WHERE status = 'pending';"):
@@ -237,14 +238,16 @@ def test_m2_scorer_has_no_collection_or_scoring_dependencies():
 
 
 def test_api_composes_m2_as_a_separate_metadata_factor(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: evidence(),
+        lambda sql, **_kwargs: evidence(),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: metadata(rows=99999))
+    monkeypatch.setattr("backend.main.collect_metadata",
+                        lambda tables, **_kwargs: metadata(rows=99999))
 
     statement = validate(
-        ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';")
+        local_request("UPDATE users SET active = 0 WHERE status = 'pending';")
     )["statements"][0]
 
     assert statement["static_score"] == 20

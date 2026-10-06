@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.db import EVIDENCE_STATUSES
 from backend.main import app
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -338,6 +339,29 @@ def test_discover_button_is_never_left_disabled(served_html, function_name):
     assert "discoverBtn.disabled = !validConnection()" not in served_html
     # Invalid input is still rejected when the button is clicked.
     assert "if (!validConnection()) {" in _function_body(served_html, "discoverDatabases")
+
+
+def test_page_states_the_credential_flow_without_overclaiming(served_html):
+    text = " ".join(served_html.split())
+    assert ("Your database login is used for connection, database evidence and "
+            "metadata during validation. Credentials are not saved.") in text
+    # The UI makes no claim about the database session's read-only state.
+    for claim in ("read-only session", "read only session", "read-only transaction", "read only transaction"):
+        assert claim not in text.lower(), claim
+
+
+def test_every_unavailable_evidence_status_has_a_fixed_actionable_message(served_html):
+    block = served_html[served_html.index("const EVIDENCE_STATUS_MESSAGES = {"):]
+    block = block[:block.index("};")]
+    messages = dict(re.findall(r"\n\t+(\w+): '([^']+)'", block))
+    expected = set(EVIDENCE_STATUSES) - {"available"}
+    assert set(messages) == expected
+    # Fixed text only: nothing interpolated from the response.
+    assert "+" not in block and "${" not in block
+    layer = _function_body(served_html, "evidenceLayer")
+    assert "hasOwnProperty.call(EVIDENCE_STATUS_MESSAGES, evidence.status)" in layer
+    assert "EVIDENCE_STATUS_MESSAGES[evidence.status]" in layer
+    assert "evidence.error" not in layer
 
 
 def test_sql_editor_has_an_accessible_name(served_html):

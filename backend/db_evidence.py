@@ -3,8 +3,34 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .db import AnalysisSession, get_connection
+from .db import EVIDENCE_STATUSES, AnalysisSession, get_connection, mysql_error_status
 from .parser import parse_sql
+
+# Statement-shape refusals: EXPLAIN is not attempted for these.
+_UNSUPPORTED_STATEMENT_ERRORS = (
+    "empty_sql",
+    "no_statement_detected",
+    "multiple_statements_not_supported",
+    "parse_error",
+    "unsupported_statement_type",
+    "statement_has_no_identifiable_table",
+)
+
+
+def evidence_status(evidence: "DatabaseEvidence") -> str:
+    """Return the stable, browser-safe status for an evidence result."""
+    if evidence.available:
+        return "available"
+    error = evidence.error or ""
+    if error in EVIDENCE_STATUSES:
+        return error
+    if error.startswith(_UNSUPPORTED_STATEMENT_ERRORS):
+        return "unsupported_statement_type"
+    if error in ("database_unavailable", "remote_target_unavailable"):
+        return "not_configured"
+    if error in ("explain_build_failed", ""):
+        return "explain_failed"
+    return "collection_failed"
 
 
 @dataclass
@@ -168,8 +194,9 @@ def collect_statement_evidence(
                 cur.close()
             except Exception:
                 pass
-    except Exception:
-        return DatabaseEvidence(available=False, error="explain_failed")
+    except Exception as exc:
+        # Only the MySQL error number is used; the driver message never leaves here.
+        return DatabaseEvidence(available=False, error=mysql_error_status(exc, "explain_failed"))
 
     evidence = DatabaseEvidence(
         available=bool(rows),

@@ -28,7 +28,16 @@ Only the latest release receives fixes while the project is pre-1.0.
 - Browser sessions require a single-use pairing code shown only in the
   connector console. Sessions are held in memory and cannot manage targets.
 - Evidence queries are fixed or bounded: `SELECT 1`, `EXPLAIN` and fixed
-  metadata queries. There is no generic SQL endpoint.
+  metadata queries. There is no generic SQL endpoint, and the submitted SQL is
+  never executed (never `EXPLAIN ANALYZE`).
+- Local evidence uses only the MySQL login supplied with that validation, on
+  one connection to the selected database that is closed when the validation
+  ends. The login is not saved and there is no other credential source.
+- MySQL account privileges are the authorization boundary; the validator's
+  statement restrictions are the application safety boundary. Setting the
+  evidence connection to read-only transactions is defense in depth only.
+- API responses, including request-validation errors, do not include submitted
+  credential values.
 
 ## Known limitations
 
@@ -37,6 +46,8 @@ Only the latest release receives fixes while the project is pre-1.0.
 - There is no user authentication. The tool is for a single user on their own
   machine, or a trusted self-hosted setup. It is not an internet-facing
   service.
-- Local evidence uses `MYSQL_USER`/`MYSQL_PASSWORD` from a `.env` file that
-  the user creates and stores in plain text. Use a read-only account.
+- Local evidence runs with the privileges of the login you enter. `EXPLAIN` of
+  `UPDATE`/`DELETE` needs those privileges, so prefer the least-privileged
+  account that can review the SQL. (v0.2.0 instead used a plain-text `.env`
+  account for local evidence.)
 - Release builds are not code-signed. Verify the published SHA256 checksum.

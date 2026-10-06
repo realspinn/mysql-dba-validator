@@ -1,5 +1,6 @@
 from backend.db_evidence import DatabaseEvidence
 from backend.main import ValidateRequest, validate
+from tests.local_evidence import local_request, use_fake_evidence_connection
 from backend.metadata import MetadataConfig, collect_metadata
 import pytest
 
@@ -350,6 +351,7 @@ def test_metadata_empty_result_is_available_without_false_data():
 
 
 def test_collector_backed_m1_integration_applies_additive_adjustment(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     metadata = collect_metadata(
         ["users"],
         connection=FakeConnection([[valid_table_row(100000)], [], []]),
@@ -368,7 +370,7 @@ def test_collector_backed_m1_integration_applies_additive_adjustment(monkeypatch
 
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: DatabaseEvidence(
+        lambda sql, **_kwargs: DatabaseEvidence(
             available=True,
             explain_available=True,
             estimated_rows=500,
@@ -377,10 +379,10 @@ def test_collector_backed_m1_integration_applies_additive_adjustment(monkeypatch
             tables=["users"],
         ),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: metadata)
+    monkeypatch.setattr("backend.main.collect_metadata", lambda tables, **_kwargs: metadata)
 
     statement = validate(
-        ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';")
+        local_request("UPDATE users SET active = 0 WHERE status = 'pending';")
     )["statements"][0]
 
     assert statement["static_score"] == 20
@@ -401,6 +403,7 @@ def test_collector_backed_m1_integration_applies_additive_adjustment(monkeypatch
 
 
 def test_collector_backed_metadata_reaches_m1_and_m2(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     metadata = collect_metadata(
         ["users"],
         connection=FakeConnection([
@@ -416,7 +419,7 @@ def test_collector_backed_metadata_reaches_m1_and_m2(monkeypatch):
 
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: DatabaseEvidence(
+        lambda sql, **_kwargs: DatabaseEvidence(
             available=True,
             explain_available=True,
             estimated_rows=500,
@@ -425,10 +428,10 @@ def test_collector_backed_metadata_reaches_m1_and_m2(monkeypatch):
             tables=["users"],
         ),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: metadata)
+    monkeypatch.setattr("backend.main.collect_metadata", lambda tables, **_kwargs: metadata)
 
     statement = validate(
-        ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';")
+        local_request("UPDATE users SET active = 0 WHERE status = 'pending';")
     )["statements"][0]
 
     assert statement["metadata_score_adjustment"] == 10
@@ -439,6 +442,7 @@ def test_collector_backed_metadata_reaches_m1_and_m2(monkeypatch):
 
 
 def test_collector_backed_m1_integration_rejects_rows_below_threshold(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     metadata = collect_metadata(
         ["users"],
         connection=FakeConnection([[valid_table_row(99999)], [], []]),
@@ -449,7 +453,7 @@ def test_collector_backed_m1_integration_rejects_rows_below_threshold(monkeypatc
 
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: DatabaseEvidence(
+        lambda sql, **_kwargs: DatabaseEvidence(
             available=True,
             explain_available=True,
             estimated_rows=500,
@@ -458,10 +462,10 @@ def test_collector_backed_m1_integration_rejects_rows_below_threshold(monkeypatc
             tables=["users"],
         ),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: metadata)
+    monkeypatch.setattr("backend.main.collect_metadata", lambda tables, **_kwargs: metadata)
 
     statement = validate(
-        ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';")
+        local_request("UPDATE users SET active = 0 WHERE status = 'pending';")
     )["statements"][0]
 
     assert statement["metadata_score_adjustment"] == 5
@@ -692,11 +696,12 @@ def test_invalid_reference_and_missing_configuration_are_conservative(monkeypatc
 
 
 def test_metadata_does_not_change_phase2_score_or_create_factors(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: DatabaseEvidence(available=False, error="unavailable"),
+        lambda sql, **_kwargs: DatabaseEvidence(available=False, error="unavailable"),
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: type("Metadata", (), {
+    monkeypatch.setattr("backend.main.collect_metadata", lambda tables, **_kwargs: type("Metadata", (), {
         "status": "permission_denied",
         "warnings": ["Database metadata permission was denied."],
         "table_metadata": [],
@@ -704,7 +709,7 @@ def test_metadata_does_not_change_phase2_score_or_create_factors(monkeypatch):
         "column_metadata": [],
         "available": False,
     })())
-    result = validate(ValidateRequest(sql="UPDATE users SET active = 0 WHERE status = 'pending';"))
+    result = validate(local_request("UPDATE users SET active = 0 WHERE status = 'pending';"))
     statement = result["statements"][0]
     assert statement["score"] == statement["static_score"] == 20
     assert statement["metadata_factors"] == []

@@ -7,6 +7,7 @@ from backend.recommendations import recommendations_from_gaps
 from backend import evidence as evidence_mod
 from backend.main import MAX_SQL_BYTES, MAX_STATEMENTS, ValidateRequest, validate
 from types import SimpleNamespace
+from tests.local_evidence import local_request, use_fake_evidence_connection
 
 
 def test_minimal_assessment():
@@ -73,9 +74,10 @@ def test_single_statement_aggregate_matches_final_statement(monkeypatch):
 
 
 def test_mixed_batch_aggregate_uses_maximum_final_score(monkeypatch):
+    use_fake_evidence_connection(monkeypatch)
     monkeypatch.setattr(
         "backend.main.collect_statement_evidence",
-        lambda sql: DatabaseEvidence(
+        lambda sql, **_kwargs: DatabaseEvidence(
             available=True,
             explain_available=True,
             estimated_rows=500,
@@ -112,10 +114,10 @@ def test_mixed_batch_aggregate_uses_maximum_final_score(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr("backend.main.collect_metadata", lambda tables: metadata)
+    monkeypatch.setattr("backend.main.collect_metadata", lambda tables, **_kwargs: metadata)
 
-    result = validate(ValidateRequest(
-        sql="SELECT * FROM users; "
+    result = validate(local_request(
+        "SELECT * FROM users; "
         "UPDATE users SET active = 0 WHERE status = 'pending'; "
         "DROP TABLE users;"
     ))
