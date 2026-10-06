@@ -191,7 +191,9 @@ def main() -> int:
     before = tree(app_dir)
 
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
-    path = os.pathsep.join([str(Path(system_root) / "System32"), system_root,
+    # Not the bare SystemRoot folder: an all-users Python install puts py.exe there
+    # (C:\Windows\py.exe on GitHub's Windows runners), which would make Python reachable.
+    path = os.pathsep.join([str(Path(system_root) / "System32"),
                             str(Path(system_root) / "System32" / "Wbem")])
     env = {k: v for k, v in os.environ.items()
            if k.upper() in {"SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "TEMP", "TMP", "COMPUTERNAME",
