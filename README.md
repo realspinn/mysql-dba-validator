@@ -134,6 +134,12 @@ reported as not configured, and a rejected login is reported as such.
   local `UPDATE` and `DELETE` get no execution-plan evidence (status
   `plan_not_collected_read_only`). Static analysis and table metadata still
   apply, and the analysis mode is shown as "Static + database metadata".
+- Any other `SELECT` that is not one plain `SELECT` gets no plan request
+  either; it is reported as not eligible (status `plan_not_eligible`). That
+  includes every `SELECT … INTO` form (`INTO @var`, `INTO OUTFILE`,
+  `INTO DUMPFILE`, before or after `FROM`), and any `SELECT` in a script the
+  parser could only read permissively. This applies to connector validation
+  too.
 
 ### Verification status
 
@@ -224,6 +230,39 @@ The full process, including tagging and GitHub Releases, is in
   connector uses the same scoring function as local validation. If evidence
   cannot be collected, the static result is returned and unavailable evidence
   never implies the SQL is safe.
+- **Confidence is about the assessment, not the evidence.** `confidence` is
+  `HIGH`, `LIMITED` or `LOW` and comes from what the SQL itself determines:
+  `LIMITED` for writes and `CALL`, whose impact depends on rows the validator
+  cannot count, and `LOW` when the SQL could not be parsed. Database evidence
+  never raises it: no evidence the validator collects gives the number of rows
+  a statement would affect.
+
+### What a result says about database evidence
+
+Each statement result has an `evidence` object, the source of truth for what
+evidence it has:
+
+| Field | Values |
+| --- | --- |
+| `connection.state` | `not_attempted`, `connected`, `failed` (with a `reason` such as `auth_failed` or `unreachable`) |
+| `plan.state` | `collected`, `not_collected_read_only` (local `UPDATE`/`DELETE`), `not_eligible` (a `SELECT` that is not one plain `SELECT`), `not_supported` (no plan for this statement), `failed`, `not_attempted` |
+| `metadata.state` | `collected` (with `tables: [{name, found}]`), `failed` (with a `reason` such as `timeout` or `permission_denied`), `not_applicable` (no table), `not_attempted` |
+| `overall` | `static_only`, `collected`, `partial` (some evidence collected, some failed), `unavailable` (nothing collected: the connection failed, or it succeeded but every requested evidence failed), `not_applicable` |
+
+`collected` means MySQL returned that evidence, not that it is complete:
+execution-plan rows and table rows are estimates, and `found: false` means
+`information_schema.TABLES` returned no row for that name in the schema it was
+looked up in (the selected database unless the SQL names another). The
+`tables` names are the parser's table references, so they can include names
+that are not tables. The response's
+`evidence_summary` counts these states across the batch and sets `partial`
+when some evidence was collected and some failed. `analysis_mode` remains as
+a compatibility label derived from these states (for example,
+`DATABASE_EVIDENCE` means at least one plan was collected, not that all
+evidence was; `STATIC_DATABASE_UNAVAILABLE`, shown as "Static + database
+evidence unavailable", does not by itself mean the connection failed:
+`connection.state` says that). Local and remote results use the same states with the same
+meaning; only how evidence is collected differs.
 
 ## Running beyond one machine
 

@@ -501,7 +501,9 @@ def test_anything_but_a_verified_plain_select_gets_no_plan_request(mysql, sql):
     for statement in data["statements"]:
         assert statement["database_evidence"]["available"] is False
         assert statement["database_evidence"]["status"] in {
-            "plan_not_collected_read_only", "unsupported_statement_type"}
+            "plan_not_collected_read_only", "plan_not_eligible", "unsupported_statement_type"}
+        assert statement["evidence"]["plan"]["state"] in {
+            "not_collected_read_only", "not_eligible", "not_supported"}
 
 
 @pytest.mark.parametrize("sql", [
@@ -525,7 +527,9 @@ def test_the_gate_checks_the_outgoing_sql_not_the_classification(mysql, monkeypa
                         lambda statement_sql: "EXPLAIN UPDATE users SET active = 0;")
     data = post("SELECT * FROM users WHERE id = 1").json()
     assert explains(mysql) == []
-    assert data["statements"][0]["database_evidence"]["status"] == "unsupported_statement_type"
+    # A SELECT whose outgoing plan request is not a plain SELECT is "not eligible".
+    assert data["statements"][0]["database_evidence"]["status"] == "plan_not_eligible"
+    assert data["statements"][0]["evidence"]["plan"]["state"] == "not_eligible"
 
 
 def test_error_1792_maps_to_read_only_status_without_retry_or_new_connection(mysql):
@@ -603,7 +607,7 @@ def test_evidence_code_never_contains_a_writable_session_or_transaction():
     from pathlib import Path
 
     backend_dir = Path(backend_db.__file__).parent
-    for name in ("db.py", "db_evidence.py", "metadata.py", "main.py"):
+    for name in ("db.py", "db_evidence.py", "metadata.py", "main.py", "evidence_state.py"):
         source = (backend_dir / name).read_text(encoding="utf-8").upper()
         for forbidden in ("READ WRITE", "START TRANSACTION", "ROLLBACK", "EXPLAIN ANALYZE"):
             assert forbidden not in source, (name, forbidden)

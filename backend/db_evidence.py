@@ -18,6 +18,9 @@ from .parser import parse_sql
 # Local DML plans are deliberately not collected: the local evidence connection is
 # read-only and MySQL refuses EXPLAIN UPDATE/DELETE there.
 PLAN_NOT_COLLECTED_READ_ONLY = "plan_not_collected_read_only"
+# A SELECT the read-only plan allowlist refuses (for example SELECT ... INTO): no plan
+# request is sent for it.
+PLAN_NOT_ELIGIBLE = "plan_not_eligible"
 
 # Statement-shape refusals: EXPLAIN is not attempted for these.
 _UNSUPPORTED_STATEMENT_ERRORS = (
@@ -161,6 +164,17 @@ def _add_database_name(conn: Any, evidence: DatabaseEvidence) -> DatabaseEvidenc
     return evidence
 
 
+def select_not_eligible_for_plan(facts: Any) -> bool:
+    """True for a submitted SELECT that only parsed with the permissive fallback.
+
+    That fallback can silently drop tokens (a trailing SELECT ... INTO), so its
+    regenerated text is not known to be the submitted statement. Callers record
+    PLAN_NOT_ELIGIBLE instead of calling the collector: no plan request is sent.
+    Used by local validation and the connector alike.
+    """
+    return facts.statement_type == "SELECT" and bool(getattr(facts, "lossy_parse", False))
+
+
 def collect_statement_evidence(
     sql: str,
     connection: Any = None,
@@ -171,7 +185,8 @@ def collect_statement_evidence(
     Supported: SELECT, UPDATE, DELETE.
     Destructive or unsupported statements are refused and returned with an error
     payload rather than executed. On the local ReadOnlyEvidenceConnection only one
-    verified plain SELECT is planned; UPDATE/DELETE return plan_not_collected_read_only.
+    verified plain SELECT is planned; UPDATE/DELETE return plan_not_collected_read_only
+    and any other SELECT returns plan_not_eligible.
     """
     if not sql or not sql.strip():
         return DatabaseEvidence(available=False, error="empty_sql")
@@ -216,7 +231,7 @@ def collect_statement_evidence(
         # plain SELECT. Nothing is sent for anything else: no retry, no other connection.
         if statement_type in {"UPDATE", "DELETE"}:
             return DatabaseEvidence(available=False, error=PLAN_NOT_COLLECTED_READ_ONLY)
-        return DatabaseEvidence(available=False, error="unsupported_statement_type")
+        return DatabaseEvidence(available=False, error=PLAN_NOT_ELIGIBLE)
 
     try:
         cur = conn.cursor()

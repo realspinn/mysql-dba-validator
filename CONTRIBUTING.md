@@ -91,6 +91,13 @@ flowchart LR
 - **Evidence scoring** (`backend/evidence_scoring.py`, `metadata_scoring.py`,
   `m2_scoring.py`) applies small, bounded adjustments to the static score.
   "How scoring works" in the README describes the current rules.
+- **Evidence state** (`backend/evidence_state.py`) turns what the collectors
+  returned into each statement's `evidence` object: connection, plan and
+  metadata states. It is the source of truth for what a result says about
+  evidence. `analysis_mode`, `evidence_summary` and the evidence sentences in
+  reasons are derived from it, never set separately, and it never changes
+  scores or confidence. A new kind of evidence gets its own state there, with
+  its "collected", "deliberately not collected" and "failed" cases kept apart.
 - **Remote/company evidence** goes only through the local connector. The
   browser refers to a target by its `target_id`. It cannot supply a host. An
   operator registers and approves targets in the connector's console, never

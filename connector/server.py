@@ -26,7 +26,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, f
 
 from backend.analyzer import analyze_batch
 from backend.db import validate_database_identifier
-from backend.db_evidence import DatabaseEvidence, collect_statement_evidence
+from backend.db_evidence import (
+    PLAN_NOT_ELIGIBLE,
+    DatabaseEvidence,
+    collect_statement_evidence,
+    select_not_eligible_for_plan,
+)
 from backend.metadata import MetadataEvidence, collect_metadata
 from backend.parser import parse_sql
 from backend.risk_engine import score_statement
@@ -1834,7 +1839,8 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
             if not sql_text:
                 raise ValueError("invalid_sql")
 
-            from backend.main import build_statement_result
+            from backend.evidence_state import CONNECTED
+            from backend.main import batch_result, build_statement_result
             all_facts = parse_sql(sql_text)
             if len(all_facts) > 16:
                 raise HTTPException(status_code=400, detail=_safe_json_error(
@@ -1844,21 +1850,26 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
             reports = [score_statement(analysis, batch_size=len(
                 analyses)) for analysis in analyses]
             statements = []
-            evidence_available = False
 
             for report, analysis in zip(reports, analyses):
                 # Evidence collection on the already-validated connection. A collector
                 # failure degrades to "evidence unavailable" (same as local); it never
                 # turns a usable static result into a 500.
                 try:
-                    evidence = collect_statement_evidence(
-                        report.facts.raw_sql, connection=connection)
+                    if select_not_eligible_for_plan(report.facts):
+                        # Same SELECT eligibility rule as local: a lossy parse (for
+                        # example a trailing SELECT ... INTO) gets no plan request.
+                        evidence = DatabaseEvidence(available=False, error=PLAN_NOT_ELIGIBLE)
+                    else:
+                        evidence = collect_statement_evidence(
+                            report.facts.raw_sql, connection=connection)
                 except Exception:
                     evidence = DatabaseEvidence(available=False, error="collection_failed")
                 if payload.database is None:
                     # Never let collect_metadata fall back to the local .env database:
                     # remote metadata only ever uses the discovered, bound database.
-                    metadata = MetadataEvidence(status="unavailable")
+                    # Without one, metadata is not requested.
+                    metadata = None
                 else:
                     try:
                         metadata = collect_metadata(
@@ -1866,26 +1877,13 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
                     except Exception:
                         metadata = MetadataEvidence(status="unavailable")
 
-                # Same scoring pipeline and payload as local /api/validate.
-                statements.append(build_statement_result(report, analysis, evidence, metadata))
-                if evidence.available:
-                    evidence_available = True
+                # Same scoring pipeline, payload and evidence states as local
+                # /api/validate; the connection is live, so it is "connected".
+                statements.append(build_statement_result(report, analysis, evidence, metadata, CONNECTED))
 
-            # A live connection exists, so "no evidence" is reported the way local
-            # validation reports a configured database that yielded none.
-            analysis_mode = "DATABASE_EVIDENCE" if evidence_available else "STATIC_DATABASE_UNAVAILABLE"
-            aggregate_statement = max(
-                statements, key=lambda statement: statement["score"], default=None)
-            overall_score = aggregate_statement["score"] if aggregate_statement else 0
-            overall_risk_level = aggregate_statement["risk_level"] if aggregate_statement else "LOW"
-
-            return {
-                "statement_count": len(statements),
-                "overall_score": overall_score,
-                "overall_risk_level": overall_risk_level,
-                "analysis_mode": analysis_mode,
-                "statements": statements,
-            }
+            # Same response shape as local: analysis_mode and evidence_summary are
+            # derived from the statements' evidence states.
+            return batch_result(statements, CONNECTED)
         except HTTPException:
             raise
         except ValueError as exc:

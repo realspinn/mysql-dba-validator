@@ -68,7 +68,9 @@ needs the same privileges as the statement it explains. The validator never
 runs the SQL you submit; it only runs EXPLAIN of a plain SELECT and fixed
 metadata queries, on a read-only connection. UPDATE and DELETE get no
 execution plan (MySQL refuses EXPLAIN of writes on a read-only connection);
-static analysis and table metadata still apply.
+static analysis and table metadata still apply. Each result says which
+evidence it has: whether table metadata was collected (and whether each table
+was found), whether an execution plan was collected, and if not, why.
 
 If evidence is missing, the result says why (for example, no login entered,
 login rejected, database not found, or missing privileges).

@@ -47,6 +47,18 @@ BASE_SCORE = {
 }
 
 
+# Reasons that describe the static view only. When database evidence was attempted,
+# backend.evidence_state replaces them with what the evidence actually showed.
+OFFLINE_EVIDENCE_REASON = (
+    "This is offline/static analysis; actual database metadata, "
+    "row counts and execution-plan evidence are not available."
+)
+OFFLINE_ROW_IMPACT_REASON = (
+    "Row impact cannot be determined in offline analysis; "
+    "actual database row counts are not available."
+)
+
+
 # ------------------------------------------------------------------
 # RESULT MODELS
 # ------------------------------------------------------------------
@@ -393,15 +405,12 @@ def score_statement(
 
                 factors.append(
                     ScoreFactor(
-                        "Affected-row count cannot be established offline",
+                        "Affected-row count cannot be established from the SQL alone",
                         5,
                     )
                 )
 
-                reasons.append(
-                    "Row impact cannot be determined in offline analysis; "
-                    "actual database row counts are not available."
-                )
+                reasons.append(OFFLINE_ROW_IMPACT_REASON)
 
                 score += 5
 
@@ -554,10 +563,7 @@ def score_statement(
 
     if confidence == "LIMITED":
 
-        reasons.append(
-            "This is offline/static analysis; actual database metadata, "
-            "row counts and execution-plan evidence are not available."
-        )
+        reasons.append(OFFLINE_EVIDENCE_REASON)
 
     # --------------------------------------------------------------
     # FINAL SCORE

@@ -192,7 +192,10 @@ def test_served_page_keeps_database_list_limited_warning(served_html):
 
 
 def test_served_page_keeps_readable_report_labels(served_html):
-    assert "'Static + database unavailable'" in served_html
+    # The label covers a connected database whose evidence failed too, so it never
+    # says the database itself was unavailable.
+    assert "'Static + database evidence unavailable'" in served_html
+    assert "'Static + database unavailable'" not in served_html
     assert "'Database evidence'" in served_html
     assert "'Metadata-based scoring was not applied.'" in served_html
     assert "High estimated rows applied: " in served_html
@@ -358,10 +361,26 @@ def test_every_unavailable_evidence_status_has_a_fixed_actionable_message(served
     assert set(messages) == expected
     # Fixed text only: nothing interpolated from the response.
     assert "+" not in block and "${" not in block
+    # Messages are looked up by the stable codes in the evidence state, never by raw errors.
+    assert "Object.prototype.hasOwnProperty.call(messages, code)" in _function_body(served_html, "fixedMessage")
     layer = _function_body(served_html, "evidenceLayer")
-    assert "hasOwnProperty.call(EVIDENCE_STATUS_MESSAGES, evidence.status)" in layer
-    assert "EVIDENCE_STATUS_MESSAGES[evidence.status]" in layer
-    assert "evidence.error" not in layer
+    assert "fixedMessage(EVIDENCE_STATUS_MESSAGES, state.connection.reason)" in layer
+    assert "evidence.error" not in layer and "evidence.status" not in layer
+    assert "fixedMessage(EVIDENCE_STATUS_MESSAGES, plan.reason)" in _function_body(served_html, "planLine")
+
+
+def test_every_metadata_failure_reason_has_its_own_fixed_message(served_html):
+    """Metadata failures are named (timeout, permission, ...), never a generic 'Partial'."""
+    from backend.evidence_state import NO_DATABASE_SELECTED
+
+    block = served_html[served_html.index("const METADATA_REASON_MESSAGES = {"):]
+    block = block[:block.index("};")]
+    messages = dict(re.findall(r"\n\t+(\w+): '([^']+)'", block))
+    assert set(messages) == {"timeout", "permission_denied", "budget_exceeded", "invalid_reference",
+                             "unavailable", NO_DATABASE_SELECTED}
+    assert len(set(messages.values())) == len(messages)
+    assert "+" not in block and "${" not in block
+    assert "Partial'" not in _function_body(served_html, "metadataStatusLabel")
 
 
 def test_sql_editor_has_an_accessible_name(served_html):

@@ -4,10 +4,22 @@ from .metadata_scoring import apply_m1_adjustment
 from .metadata import MetadataEvidence, collect_metadata
 from .evidence_scoring import apply_evidence_adjustments
 from .db_evidence import (
-    PLAN_NOT_COLLECTED_READ_ONLY,
+    PLAN_NOT_ELIGIBLE,
     DatabaseEvidence,
     collect_statement_evidence,
     evidence_status,
+    select_not_eligible_for_plan,
+)
+from .evidence_state import (
+    CONNECTED,
+    NOT_ATTEMPTED,
+    EvidenceConnection,
+    analysis_mode as derive_analysis_mode,
+    build_evidence_state,
+    connection_failed,
+    restate_assessment,
+    restate_reasons,
+    summarize as summarize_evidence,
 )
 from .db import (
     AnalysisSession,
@@ -20,7 +32,7 @@ from .db import (
     validate_readonly_select,
 )
 from pydantic import BaseModel as PydanticBaseModel
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from .risk_engine import score_statement
 from .analyzer import analyze_batch
 from .parser import parse_sql
@@ -405,11 +417,14 @@ def validate(req: ValidateRequest):
             req.database,
         )
 
+    if evidence_connection is not None:
+        connection = CONNECTED
+    elif connection_attempted:
+        connection = connection_failed(connection_status)
+    else:
+        connection = NOT_ATTEMPTED
+
     statements = []
-    evidence_available = False
-    read_only_plan_skipped_with_metadata = False
-    analysis_mode = "STATIC"
-    overall_score = 0
 
     try:
         for report, analysis in zip(reports, analyses):
@@ -418,11 +433,14 @@ def validate(req: ValidateRequest):
                 # Remote targets never reach here with a connection (fail-closed), and a
                 # local request without a usable connection reports why.
                 evidence = DatabaseEvidence(available=False, error=connection_status)
-                metadata = MetadataEvidence(status="unavailable")
+                metadata = None
             else:
                 try:
-                    evidence = collect_statement_evidence(
-                        report.facts.raw_sql, connection=evidence_connection)
+                    if select_not_eligible_for_plan(report.facts):
+                        evidence = DatabaseEvidence(available=False, error=PLAN_NOT_ELIGIBLE)
+                    else:
+                        evidence = collect_statement_evidence(
+                            report.facts.raw_sql, connection=evidence_connection)
                 except Exception:
                     evidence = DatabaseEvidence(
                         available=False, error="collection_failed")
@@ -435,15 +453,8 @@ def validate(req: ValidateRequest):
                 except Exception:
                     metadata = MetadataEvidence(status="unavailable")
 
-            payload = build_statement_result(static_report, analysis, evidence, metadata)
-
-            if evidence.available:
-                evidence_available = True
-                analysis_mode = "DATABASE_EVIDENCE"
-            if evidence.error == PLAN_NOT_COLLECTED_READ_ONLY and metadata.status == "available":
-                read_only_plan_skipped_with_metadata = True
-
-            statements.append(payload)
+            statements.append(build_statement_result(
+                static_report, analysis, evidence, metadata, connection))
     finally:
         if evidence_connection is not None:
             try:
@@ -451,12 +462,16 @@ def validate(req: ValidateRequest):
             except Exception:
                 pass
 
-    if not evidence_available and connection_attempted:
-        # Local UPDATE/DELETE plans are deliberately not collected on the read-only
-        # connection; a database that still returned metadata is not "unavailable".
-        analysis_mode = ("STATIC_DATABASE_METADATA" if read_only_plan_skipped_with_metadata
-                         else "STATIC_DATABASE_UNAVAILABLE")
+    return batch_result(statements, connection)
 
+
+def batch_result(statements: list[dict], connection: EvidenceConnection) -> dict:
+    """The validation response for scored statements (shared with the connector).
+
+    analysis_mode is a compatibility label derived from the statements' evidence
+    states; evidence_summary and each statement's evidence are authoritative.
+    """
+    evidence_states = [statement["evidence"] for statement in statements]
     aggregate_statement = max(
         statements,
         key=lambda statement: statement["score"],
@@ -472,18 +487,30 @@ def validate(req: ValidateRequest):
         "statement_count": len(statements),
         "overall_score": overall_score,
         "overall_risk_level": overall_risk_level,
-        "analysis_mode": analysis_mode,
+        "analysis_mode": derive_analysis_mode(evidence_states),
+        "evidence_summary": summarize_evidence(connection, evidence_states),
         "statements": statements,
     }
 
 
-def build_statement_result(static_report, analysis, evidence: DatabaseEvidence, metadata: MetadataEvidence) -> dict:
+def build_statement_result(static_report, analysis, evidence: DatabaseEvidence,
+                           metadata: MetadataEvidence | None, connection: EvidenceConnection) -> dict:
     """Score one statement with collected evidence and build its response payload.
 
     Shared by local /api/validate and the connector's remote validate so equivalent
-    evidence yields identical scoring: static report -> EXPLAIN evidence
-    adjustments -> M1 metadata -> M2 -> final report. Collection is the caller's job.
+    evidence yields identical scoring and evidence semantics: static report -> EXPLAIN
+    evidence adjustments -> M1 metadata -> M2 -> final report. Collection is the
+    caller's job; metadata is None when it was not requested.
     """
+    if (static_report.facts.statement_type == "SELECT" and not evidence.available
+            and (evidence.error or "").startswith("unsupported_statement_type")):
+        # A SELECT whose regenerated text is not a SELECT (SELECT ... INTO becomes
+        # CREATE TABLE ... AS SELECT) gets no plan request: it is not eligible, which
+        # is different from a statement type that never has a plan.
+        evidence = replace(evidence, error=PLAN_NOT_ELIGIBLE)
+    state = build_evidence_state(connection, evidence, metadata, list(static_report.facts.tables))
+    if metadata is None:
+        metadata = MetadataEvidence(status="unavailable")
     evidence_result = apply_evidence_adjustments(static_report, evidence)
     phase2_report = evidence_result.report
 
@@ -537,13 +564,13 @@ def build_statement_result(static_report, analysis, evidence: DatabaseEvidence, 
         "metadata_factors": [asdict(factor) for factor in metadata_factors],
         "metadata_status": metadata.status,
         "high_estimated_rows_applied": evidence_result.high_estimated_rows_applied,
-        "reasons": final_report.reasons,
+        "reasons": restate_reasons(final_report.reasons, state),
         "checklist": final_report.checklist,
     }
 
     if analysis.assessment is not None:
         try:
-            payload["v2_assessment"] = asdict(analysis.assessment)
+            payload["v2_assessment"] = asdict(restate_assessment(analysis.assessment, state))
         except Exception:
             payload["v2_assessment"] = None
 
@@ -565,6 +592,8 @@ def build_statement_result(static_report, analysis, evidence: DatabaseEvidence, 
         # Stable, browser-safe reason (see backend.db.EVIDENCE_STATUSES).
         "status": evidence_status(evidence),
     }
+    # The authoritative evidence state for this statement (backend.evidence_state).
+    payload["evidence"] = state
 
     return payload
 

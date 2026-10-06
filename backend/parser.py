@@ -90,6 +90,11 @@ class StatementFacts:
 
     parse_error: Optional[str] = None
 
+    # True when the script only parsed with the permissive fallback, which can drop
+    # tokens (for example a trailing SELECT ... INTO): raw_sql may then not be the
+    # submitted statement. Set for every statement of that script.
+    lossy_parse: bool = False
+
 
 @dataclass(frozen=True)
 class PredicateColumn:
@@ -387,6 +392,7 @@ def parse_sql(raw_sql: str) -> list[StatementFacts]:
     if not raw_sql:
         return []
 
+    lossy_parse = False
     try:
         expressions = sqlglot.parse(
             raw_sql,
@@ -402,6 +408,7 @@ def parse_sql(raw_sql: str) -> list[StatementFacts]:
                 read=DIALECT,
                 error_level=sqlglot.ErrorLevel.IGNORE,
             )
+            lossy_parse = True
 
         except Exception:
             return [
@@ -428,6 +435,7 @@ def parse_sql(raw_sql: str) -> list[StatementFacts]:
             index=index,
             statement_type=statement_type,
             category=category,
+            lossy_parse=lossy_parse,
         )
 
         # ---------------------------------------------------------

@@ -269,6 +269,29 @@ def main() -> int:
         result = as_json(body) or {}
         check("SQLGlot parsing works in the frozen build (simple SELECT is low risk)",
               status == 200 and result.get("overall_risk_level") == "LOW", body[:300])
+        statement = (result.get("statements") or [{}])[0]
+        check("evidence contract: static-only result says so (no claim of database evidence)",
+              result.get("analysis_mode") == "STATIC"
+              and statement.get("confidence") in {"HIGH", "LIMITED", "LOW"}
+              and (statement.get("evidence") or {}).get("overall") == "static_only"
+              and (result.get("evidence_summary") or {}).get("connection", {}).get("state") == "not_attempted",
+              body[:600])
+        # A local login against 127.0.0.1:3306 where no test MySQL with this login exists:
+        # the connection fails, and the result must say evidence is unavailable, claim no
+        # metadata, and never echo the login.
+        fake_login = {"host": "127.0.0.1", "port": 3306, "username": "smoke_fake_user",
+                      "password": "Smoke-Fake-Password-4417", "database": "smoke_fake_db"}
+        status, _, body = request("POST", PAGE + "/api/validate",
+                                  {"sql": "UPDATE users SET active = 0 WHERE status = 'old'", **fake_login})
+        result = as_json(body) or {}
+        evidence = ((result.get("statements") or [{}])[0]).get("evidence") or {}
+        check("evidence contract: failed local connection is 'unavailable', claims no metadata, no login echoed",
+              status == 200 and result.get("analysis_mode") == "STATIC_DATABASE_UNAVAILABLE"
+              and evidence.get("connection", {}).get("state") == "failed"
+              and evidence.get("connection", {}).get("reason") in {"unreachable", "auth_failed", "database_not_found"}
+              and evidence.get("metadata", {}).get("state") == "not_attempted"
+              and evidence.get("overall") == "unavailable"
+              and b"Smoke-Fake-Password-4417" not in body and b"smoke_fake_user" not in body, body[:800])
 
         status, _, body = request("GET", CONNECTOR + "/health")
         check("connector health ok", status == 200 and (as_json(body) or {}).get("loopback_only") is True, body[:200])

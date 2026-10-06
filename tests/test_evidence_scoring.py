@@ -48,7 +48,8 @@ def test_successful_select_explain_is_evidence_assisted_without_score_change():
         evidence(access_type="ref", key="PRIMARY", estimated_rows=1, full_table_scan=False),
     )
     assert adjusted.report.score == report.score == 0
-    assert adjusted.report.confidence == "DATABASE_EVIDENCE"
+    # Evidence never changes confidence; the evidence state reports what was collected.
+    assert adjusted.report.confidence == report.confidence == "HIGH"
     assert adjusted.materially_supports_analysis is True
 
 
@@ -60,7 +61,8 @@ def test_update_full_scan_adds_bounded_evidence_factor():
     )
     assert adjusted.report.score == 30
     assert adjusted.report.risk_level == "MEDIUM"
-    assert adjusted.report.confidence == "DATABASE_EVIDENCE"
+    # An EXPLAIN estimate is not an affected-row count: DML confidence stays LIMITED.
+    assert adjusted.report.confidence == report.confidence == "LIMITED"
     assert any(f.points == 10 and "full table scan" in f.label.lower() for f in adjusted.factors)
     assert any("EXPLAIN indicates a full table scan" in finding for finding in adjusted.report.findings)
 

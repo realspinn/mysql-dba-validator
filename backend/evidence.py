@@ -10,6 +10,9 @@ from typing import Optional, List
 
 from . import models
 
+# Static-view reason; backend.evidence_state restates it when evidence was attempted.
+NO_CONNECTION_REASON = "No database connection"
+
 
 def affected_row_count_gap(table: Optional[str], predicate: Optional[str] = None) -> models.EvidenceGap:
     """Return an EvidenceGap suggesting a SELECT COUNT(*) check for the target.
@@ -31,7 +34,7 @@ def affected_row_count_gap(table: Optional[str], predicate: Optional[str] = None
 
     return models.EvidenceGap(
         name="affected_row_count",
-        reason="No database connection",
+        reason=NO_CONNECTION_REASON,
         suggested_check=suggested,
     )
 
@@ -53,7 +56,7 @@ def execution_plan_gap(table: Optional[str], predicate: Optional[str] = None, st
 
     return models.EvidenceGap(
         name="execution_plan",
-        reason="No database connection",
+        reason=NO_CONNECTION_REASON,
         suggested_check=suggested,
     )
 

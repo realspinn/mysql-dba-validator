@@ -231,7 +231,9 @@ def test_remote_validation_matches_local_evidence_scoring(monkeypatch, name):
         assert statement["score"] == statement["static_score"] - 3
     elif name == "select":
         assert labels == {} and statement["score"] == statement["static_score"]
-        assert statement["confidence"] == "DATABASE_EVIDENCE"
+        # Evidence lives in the evidence state; confidence keeps its static meaning.
+        assert statement["confidence"] == "HIGH"
+        assert statement["evidence"]["plan"]["state"] == "collected"
     elif name == "critical_delete_no_reduction":
         assert statement["static_risk_level"] == "CRITICAL"
         assert labels == {} and statement["score"] == statement["static_score"]
@@ -242,10 +244,17 @@ def test_remote_validation_matches_local_evidence_scoring(monkeypatch, name):
         assert statement["database_evidence"]["available"] is False
         assert statement["database_evidence"]["error"] == "explain_failed"
         assert labels == {} and statement["score"] == statement["static_score"]
-        assert remote.json()["analysis_mode"] == "STATIC_DATABASE_UNAVAILABLE"
+        # The plan failed but metadata was collected: partial evidence, not "unavailable".
+        assert statement["evidence"]["plan"] == {"state": "failed", "reason": "explain_failed"}
+        assert statement["evidence"]["metadata"]["state"] == "collected"
+        assert statement["evidence"]["overall"] == "partial"
+        assert remote.json()["evidence_summary"]["partial"] is True
+        assert remote.json()["analysis_mode"] == "STATIC_DATABASE_METADATA"
 
     if name != "evidence_unavailable":
         assert remote.json()["analysis_mode"] == "DATABASE_EVIDENCE"
+    assert statement["confidence"] in {"HIGH", "LIMITED", "LOW"}
+    assert statement["evidence"]["connection"] == {"state": "connected", "reason": None}
     assert remote.json()["overall_score"] == statement["score"]
     assert remote.json()["overall_risk_level"] == statement["risk_level"]
 
@@ -301,7 +310,10 @@ def test_explain_collector_failure_keeps_static_result(monkeypatch):
     statement = body["statements"][0]
     assert statement["database_evidence"]["error"] == "collection_failed"
     assert statement["score"] == statement["static_score"] and statement["evidence_factors"] == []
-    assert body["analysis_mode"] == "STATIC_DATABASE_UNAVAILABLE"
+    # Metadata was still collected on the live connection: partial, not unavailable.
+    assert statement["evidence"]["plan"] == {"state": "failed", "reason": "collection_failed"}
+    assert statement["evidence"]["overall"] == "partial"
+    assert body["analysis_mode"] == "STATIC_DATABASE_METADATA"
 
 
 def test_metadata_collector_failure_keeps_result_usable(monkeypatch):

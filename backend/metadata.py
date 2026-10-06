@@ -65,6 +65,11 @@ class MetadataEvidence:
     indexes: list[dict[str, Any]] = field(default_factory=list)
     column_metadata: list[dict[str, Any]] = field(default_factory=list)
     query_states: list[MetadataQueryState] = field(default_factory=list)
+    # One entry per referenced table when collection succeeded: {"name", "found"}.
+    # found is True when information_schema.TABLES returned the table, False when it
+    # returned nothing (the table does not exist in that schema), None when the rows
+    # were malformed and existence cannot be stated.
+    tables: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def available(self) -> bool:
@@ -110,6 +115,16 @@ def _index_sequence_is_valid(details: list[dict[str, Any]]) -> bool:
     if any(sequence < 1 for sequence in sequences):
         return False
     return sequences == list(range(1, len(sequences) + 1))
+
+
+def _table_found(query_states: list[MetadataQueryState], schema: str, table: str) -> Optional[bool]:
+    """Whether information_schema.TABLES returned this table (None: not determinable)."""
+    for state in query_states:
+        if state.query_kind == "tables" and state.schema == schema and state.table == table:
+            if state.status != "available" or state.malformed:
+                return None
+            return state.retained_row_count > 0
+    return None
 
 
 def collect_metadata(
@@ -344,6 +359,10 @@ def collect_metadata(
         indexes=list(grouped.values()),
         column_metadata=column_metadata,
         query_states=query_states,
+        tables=[
+            {"name": reference, "found": _table_found(query_states, schema, table)}
+            for reference, (schema, table) in zip(table_references, references)
+        ],
     )
     if owns_connection:
         conn.close()

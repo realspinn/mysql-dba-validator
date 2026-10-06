@@ -19,6 +19,10 @@ from .recommendations import recommendations_from_gaps
 from .evidence import affected_row_count_gap, execution_plan_gap, generic_gap
 
 
+# Static-view reason; backend.evidence_state restates it when evidence was attempted.
+OFFLINE_EXECUTION_REASON = "Execution plan and row estimates unavailable in offline mode."
+
+
 def _looks_key_scoped(facts: StatementFacts) -> bool:
     """Conservative heuristic copied from the V1.1 risk engine logic.
 
@@ -294,7 +298,7 @@ def analyze_statement(facts: StatementFacts) -> models.StatementAnalysis:
     # Execution Risk
     if confidence != "HIGH":
         exec_level = "UNKNOWN"
-        exec_reason = "Execution plan and row estimates unavailable in offline mode."
+        exec_reason = OFFLINE_EXECUTION_REASON
     else:
         exec_level = "LOW"
         exec_reason = "Offline analysis indicates low execution risk from statement alone."

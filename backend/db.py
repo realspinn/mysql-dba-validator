@@ -179,6 +179,7 @@ EVIDENCE_STATUSES = (
     "unsupported_statement_type",
     "collection_failed",
     "plan_not_collected_read_only",
+    "plan_not_eligible",
 )
 
 _MYSQL_ERRNO_STATUS = {

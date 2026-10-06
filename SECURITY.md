@@ -40,6 +40,12 @@ Only the latest release receives fixes while the project is pre-1.0.
   the exact outgoing statement is one plain `SELECT` (no `INTO`). `UPDATE`,
   `DELETE` and everything else get no plan request; there is no writable
   evidence connection and no switch to enable one.
+- Each result reports its database evidence from what was actually collected
+  (the per-statement `evidence` object). Missing or failed evidence never
+  lowers a risk score and never changes confidence. A plan is reported only
+  for a statement the validator parsed faithfully: a `SELECT … INTO` in any
+  form, or a `SELECT` the parser could only read permissively, gets no plan
+  request and is reported as not eligible, locally and through the connector.
 - API responses, including request-validation errors, do not include submitted
   credential values.
 

@@ -99,9 +99,10 @@ def apply_evidence_adjustments(
         )
         score_adjustment += INDEXED_ACCESS_POINTS
 
+    # Confidence (HIGH/LIMITED/LOW) is never changed here: an EXPLAIN plan gives
+    # optimizer estimates, not affected-row counts. What evidence a result has is
+    # reported separately (backend.evidence_state).
     if not factors:
-        if materially_supports:
-            report = replace(report, confidence="DATABASE_EVIDENCE")
         return EvidenceAdjustmentResult(
             report,
             static_score,
@@ -115,7 +116,6 @@ def apply_evidence_adjustments(
         report,
         score=final_score,
         risk_level=_risk_level(final_score),
-        confidence="DATABASE_EVIDENCE",
         factors=report.factors,
         findings=findings,
         checklist=list(dict.fromkeys(checklist)),
