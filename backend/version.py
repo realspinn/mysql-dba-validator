@@ -5,4 +5,4 @@ Used by the public API (/api/health, OpenAPI) and by the release build
 own protocol/component version (connector.server.CONNECTOR_VERSION).
 """
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
