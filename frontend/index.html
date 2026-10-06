@@ -6,6 +6,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="color-scheme" content="light dark" />
 	<title>MySQL DBA Validator</title>
+	<link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />
 	<script>
 		// Appearance only, applied before first paint to avoid a theme flash. The only
 		// value ever stored is one of three fixed words under the 'mdv-theme' key.
@@ -208,14 +209,24 @@
 			min-width: 0
 		}
 
+		/* Brand mark: database drum whose base becomes the validation tick. Drawn
+		   with the theme's own text and accent colours, so it follows Light/Dark. */
 		.brand-mark {
-			width: 32px;
-			height: 32px;
-			flex: none;
-			padding: 6px;
-			border-radius: 8px;
-			color: var(--accent-text);
-			background: var(--accent-soft)
+			width: 34px;
+			height: 34px;
+			flex: none
+		}
+
+		.brand-mark .ink {
+			stroke: var(--text)
+		}
+
+		.brand-mark .top {
+			fill: var(--text)
+		}
+
+		.brand-mark .check {
+			stroke: var(--accent)
 		}
 
 		h1 {
@@ -1193,11 +1204,13 @@
 	<header class="topbar">
 		<div class="topbar-inner">
 			<div class="brand">
-				<svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-					stroke-linecap="round" aria-hidden="true">
-					<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
-					<path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5" />
-					<path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12" />
+				<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+					<g fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+						transform="translate(0 1)">
+						<ellipse class="ink top" cx="13" cy="7" rx="8" ry="3" />
+						<path class="ink" d="M5 7v15M21 7v7.5M5 14.5a8 3 0 0 0 16 0" />
+						<path class="check" d="M5 22a8 3 0 0 0 8 3l14-15" />
+					</g>
 				</svg>
 				<div>
 					<h1>MySQL DBA Validator</h1>

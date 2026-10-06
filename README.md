@@ -1,3 +1,5 @@
+<img src="frontend/assets/logo-mark.svg" alt="" width="48" height="48">
+
 # MySQL DBA Validator
 
 A local-first tool for reviewing MySQL SQL from database tickets before you run

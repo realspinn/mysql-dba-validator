@@ -66,6 +66,17 @@ def test_root_serves_the_intended_frontend(served_html):
     assert "<title>MySQL DBA Validator</title>" in served_html
 
 
+def test_favicon_is_a_local_self_contained_svg(served_html):
+    assert '<link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />' in served_html
+    response = TestClient(app).get("/static/assets/favicon.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    svg = response.text.replace('xmlns="http://www.w3.org/2000/svg"', "")  # namespace, not a resource
+    # No script, external reference or embedded resource: safe under the page CSP.
+    for forbidden in ("<script", "href=", "http://", "https://", "url(", "@import", "onload", "<foreignObject"):
+        assert forbidden not in svg, forbidden
+
+
 def test_served_page_contains_connector_validation_route(served_html):
     assert "CONNECTOR_URL = 'http://127.0.0.1:8765'" in served_html
     assert "'/company/targets/'" in served_html

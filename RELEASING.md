@@ -14,8 +14,13 @@ MySQL-DBA-Validator-v<version>-windows-x64/
   MySQL-DBA-Validator.exe   console launcher: web app + local connector
   README.txt                user instructions (from release/README-WINDOWS.txt)
   LICENSE.txt               if the repository has a LICENSE
-  _internal/                Python runtime, dependencies and frontend/index.html
+  _internal/                Python runtime and dependencies, plus the web page:
+    frontend/index.html     the served page
+    frontend/assets/        favicon.svg (the README logo mark is not shipped)
 ```
+
+The executable's Windows icon comes from `release/mysql-dba-validator.ico` and is
+embedded in the `.exe`; it is not a separate file in the zip.
 
 The build is a PyInstaller "onedir" build of `release/launcher.py`, using the
 spec `release/mysql-dba-validator.spec`. The launcher starts the FastAPI app

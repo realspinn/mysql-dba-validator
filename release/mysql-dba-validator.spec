@@ -19,8 +19,9 @@ a = Analysis(
     [str(ROOT / "release" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    # Only the served page.
-    datas=[(str(ROOT / "frontend" / "index.html"), "frontend")],
+    # Only the served page and its favicon.
+    datas=[(str(ROOT / "frontend" / "index.html"), "frontend"),
+           (str(ROOT / "frontend" / "assets" / "favicon.svg"), "frontend/assets")],
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
@@ -42,6 +43,9 @@ exe = EXE(
     upx=False,
     console=True,  # the connector prints pairing codes and takes operator commands here
     version=os.environ.get("MDV_VERSION_FILE") or None,
+    # Committed multi-size icon (16-256 px) made from frontend/assets/favicon.svg;
+    # used as-is, so the build needs no image-conversion dependency.
+    icon=str(ROOT / "release" / "mysql-dba-validator.ico"),
 )
 coll = COLLECT(
     exe,
