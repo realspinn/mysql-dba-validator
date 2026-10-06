@@ -3,8 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .db import EVIDENCE_STATUSES, AnalysisSession, get_connection, mysql_error_status
+from .db import (
+    EVIDENCE_STATUSES,
+    READ_ONLY_TRANSACTION_ERRNO,
+    AnalysisSession,
+    ReadOnlyEvidenceConnection,
+    get_connection,
+    mysql_errno,
+    mysql_error_status,
+    validate_readonly_select,
+)
 from .parser import parse_sql
+
+# Local DML plans are deliberately not collected: the local evidence connection is
+# read-only and MySQL refuses EXPLAIN UPDATE/DELETE there.
+PLAN_NOT_COLLECTED_READ_ONLY = "plan_not_collected_read_only"
 
 # Statement-shape refusals: EXPLAIN is not attempted for these.
 _UNSUPPORTED_STATEMENT_ERRORS = (
@@ -120,6 +133,18 @@ def _safe_explain_sql(statement_sql: str) -> str:
     return f"EXPLAIN {cleaned};"
 
 
+def _is_plain_select_explain(explain_sql: str) -> bool:
+    """Return True only when explain_sql is EXPLAIN of exactly one plain SELECT (no INTO).
+
+    Checks the exact text that would be sent, not the earlier classification: the
+    regenerated SQL can differ from the classified statement.
+    """
+    prefix, suffix = "EXPLAIN ", ";"
+    if not (explain_sql.startswith(prefix) and explain_sql.endswith(suffix)):
+        return False
+    return validate_readonly_select(explain_sql[len(prefix):-len(suffix)])
+
+
 def _add_database_name(conn: Any, evidence: DatabaseEvidence) -> DatabaseEvidence:
     if evidence.database:
         return evidence
@@ -145,7 +170,8 @@ def collect_statement_evidence(
 
     Supported: SELECT, UPDATE, DELETE.
     Destructive or unsupported statements are refused and returned with an error
-    payload rather than executed.
+    payload rather than executed. On the local ReadOnlyEvidenceConnection only one
+    verified plain SELECT is planned; UPDATE/DELETE return plan_not_collected_read_only.
     """
     if not sql or not sql.strip():
         return DatabaseEvidence(available=False, error="empty_sql")
@@ -184,6 +210,14 @@ def collect_statement_evidence(
     if conn is None:
         return DatabaseEvidence(available=False, error="database_unavailable")
 
+    read_only = isinstance(conn, ReadOnlyEvidenceConnection)
+    if read_only and not _is_plain_select_explain(explain_sql):
+        # The local read-only connection receives a plan request only for one verified
+        # plain SELECT. Nothing is sent for anything else: no retry, no other connection.
+        if statement_type in {"UPDATE", "DELETE"}:
+            return DatabaseEvidence(available=False, error=PLAN_NOT_COLLECTED_READ_ONLY)
+        return DatabaseEvidence(available=False, error="unsupported_statement_type")
+
     try:
         cur = conn.cursor()
         try:
@@ -196,6 +230,8 @@ def collect_statement_evidence(
                 pass
     except Exception as exc:
         # Only the MySQL error number is used; the driver message never leaves here.
+        if read_only and mysql_errno(exc) == READ_ONLY_TRANSACTION_ERRNO:
+            return DatabaseEvidence(available=False, error=PLAN_NOT_COLLECTED_READ_ONLY)
         return DatabaseEvidence(available=False, error=mysql_error_status(exc, "explain_failed"))
 
     evidence = DatabaseEvidence(

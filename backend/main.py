@@ -3,7 +3,12 @@ from .m2_scoring import apply_m2_adjustment
 from .metadata_scoring import apply_m1_adjustment
 from .metadata import MetadataEvidence, collect_metadata
 from .evidence_scoring import apply_evidence_adjustments
-from .db_evidence import DatabaseEvidence, collect_statement_evidence, evidence_status
+from .db_evidence import (
+    PLAN_NOT_COLLECTED_READ_ONLY,
+    DatabaseEvidence,
+    collect_statement_evidence,
+    evidence_status,
+)
 from .db import (
     AnalysisSession,
     ConnectionProfile,
@@ -402,6 +407,7 @@ def validate(req: ValidateRequest):
 
     statements = []
     evidence_available = False
+    read_only_plan_skipped_with_metadata = False
     analysis_mode = "STATIC"
     overall_score = 0
 
@@ -434,6 +440,8 @@ def validate(req: ValidateRequest):
             if evidence.available:
                 evidence_available = True
                 analysis_mode = "DATABASE_EVIDENCE"
+            if evidence.error == PLAN_NOT_COLLECTED_READ_ONLY and metadata.status == "available":
+                read_only_plan_skipped_with_metadata = True
 
             statements.append(payload)
     finally:
@@ -444,7 +452,10 @@ def validate(req: ValidateRequest):
                 pass
 
     if not evidence_available and connection_attempted:
-        analysis_mode = "STATIC_DATABASE_UNAVAILABLE"
+        # Local UPDATE/DELETE plans are deliberately not collected on the read-only
+        # connection; a database that still returned metadata is not "unavailable".
+        analysis_mode = ("STATIC_DATABASE_METADATA" if read_only_plan_skipped_with_metadata
+                         else "STATIC_DATABASE_UNAVAILABLE")
 
     aggregate_statement = max(
         statements,

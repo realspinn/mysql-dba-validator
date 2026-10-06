@@ -1947,6 +1947,7 @@
 
 		function analysisModeLabel(mode) {
 			return mode === 'DATABASE_EVIDENCE' ? 'Database evidence'
+				: mode === 'STATIC_DATABASE_METADATA' ? 'Static + database metadata'
 				: mode === 'STATIC_DATABASE_UNAVAILABLE' ? 'Static + database unavailable'
 					: 'Static analysis';
 		}
@@ -1984,7 +1985,8 @@
 			insufficient_privileges: 'Your account lacks a privilege this evidence needs. EXPLAIN requires the same privileges as the statement itself.',
 			explain_failed: 'MySQL could not produce an EXPLAIN plan for this statement.',
 			unsupported_statement_type: 'EXPLAIN evidence is collected only for SELECT, UPDATE and DELETE statements.',
-			collection_failed: 'Evidence collection failed. The static analysis is still complete.'
+			collection_failed: 'Evidence collection failed. The static analysis is still complete.',
+			plan_not_collected_read_only: 'Execution-plan evidence is not collected for UPDATE or DELETE because the evidence connection is read-only. Static analysis and table metadata still apply.'
 		};
 
 		function evidenceLayer(s) {

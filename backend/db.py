@@ -178,6 +178,7 @@ EVIDENCE_STATUSES = (
     "explain_failed",
     "unsupported_statement_type",
     "collection_failed",
+    "plan_not_collected_read_only",
 )
 
 _MYSQL_ERRNO_STATUS = {
@@ -195,19 +196,46 @@ _MYSQL_ERRNO_STATUS = {
 
 READ_ONLY_SESSION_SQL = "SET SESSION TRANSACTION READ ONLY"
 
+# ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION: MySQL refuses EXPLAIN UPDATE/DELETE in a
+# read-only session.
+READ_ONLY_TRANSACTION_ERRNO = 1792
+
+
+class ReadOnlyEvidenceConnection:
+    """The local evidence connection after its session was set to read-only transactions.
+
+    Only open_evidence_connection() creates it. The evidence collector recognises this
+    type and sends a plan request on it only for one verified plain SELECT; UPDATE,
+    DELETE and every other statement get no plan request. It exposes only what the
+    evidence and metadata collectors use, and it cannot be made writable.
+    """
+
+    def __init__(self, connection: Any):
+        self._connection = connection
+
+    def cursor(self, *args, **kwargs):
+        return self._connection.cursor(*args, **kwargs)
+
+    def close(self):
+        return self._connection.close()
+
+
+def mysql_errno(exc: BaseException) -> Optional[int]:
+    """Return the MySQL error number of a driver exception, if it has one."""
+    args = getattr(exc, "args", ())
+    return args[0] if args and isinstance(args[0], int) else None
+
 
 def mysql_error_status(exc: BaseException, default: str) -> str:
     """Map a driver exception to a safe status using only its MySQL error number."""
-    args = getattr(exc, "args", ())
-    errno = args[0] if args and isinstance(args[0], int) else None
-    return _MYSQL_ERRNO_STATUS.get(errno, default)
+    return _MYSQL_ERRNO_STATUS.get(mysql_errno(exc), default)
 
 
 def open_evidence_connection(
     profile: ConnectionProfile,
     database: str,
     read_timeout: float = 10.0,
-) -> tuple[Any, Optional[str]]:
+) -> tuple[Optional[ReadOnlyEvidenceConnection], Optional[str]]:
     """Open the one evidence connection for a validation request.
 
     Uses the credentials supplied with that request and binds the selected database
@@ -216,8 +244,8 @@ def open_evidence_connection(
     boundary). If that cannot be set, the connection is closed and no evidence is
     collected (fail closed).
 
-    Returns (connection, None) on success or (None, status) with a safe status code.
-    The caller owns the connection and must close it exactly once.
+    Returns (ReadOnlyEvidenceConnection, None) on success or (None, status) with a safe
+    status code. The caller owns the connection and must close it exactly once.
     """
     try:
         import pymysql
@@ -255,7 +283,7 @@ def open_evidence_connection(
             pass
         return None, "collection_failed"
 
-    return connection, None
+    return ReadOnlyEvidenceConnection(connection), None
 
 
 def discover_databases(

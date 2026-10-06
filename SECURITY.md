@@ -36,6 +36,10 @@ Only the latest release receives fixes while the project is pre-1.0.
 - MySQL account privileges are the authorization boundary; the validator's
   statement restrictions are the application safety boundary. Setting the
   evidence connection to read-only transactions is defense in depth only.
+- On the local read-only evidence connection, a plan request is sent only when
+  the exact outgoing statement is one plain `SELECT` (no `INTO`). `UPDATE`,
+  `DELETE` and everything else get no plan request; there is no writable
+  evidence connection and no switch to enable one.
 - API responses, including request-validation errors, do not include submitted
   credential values.
 
@@ -46,8 +50,10 @@ Only the latest release receives fixes while the project is pre-1.0.
 - There is no user authentication. The tool is for a single user on their own
   machine, or a trusted self-hosted setup. It is not an internet-facing
   service.
-- Local evidence runs with the privileges of the login you enter. `EXPLAIN` of
-  `UPDATE`/`DELETE` needs those privileges, so prefer the least-privileged
-  account that can review the SQL. (v0.2.0 instead used a plain-text `.env`
-  account for local evidence.)
+- Local evidence runs with the privileges of the login you enter, so prefer
+  the least-privileged account that can review the SQL. (v0.2.0 instead used a
+  plain-text `.env` account for local evidence.)
+- Local `UPDATE`/`DELETE` statements get no execution-plan evidence, because
+  the evidence connection is read-only and MySQL refuses `EXPLAIN` of writes
+  there. Static analysis and table metadata still apply.
 - Release builds are not code-signed. Verify the published SHA256 checksum.

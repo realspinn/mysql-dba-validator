@@ -10,9 +10,10 @@ Optional read-only evidence (`SELECT 1`, bounded `EXPLAIN`,
 security decisions. The tool supports a DBA's judgement; it does not guarantee
 that SQL is safe.
 
-**Status: v0.2.0, pre-1.0 beta**, available as a portable Windows x64
-application ([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.2.0)).
-Static validation and the local workflow are tested. The remote/company
+**Status: v0.3.1, pre-1.0 beta**, available as a portable Windows x64
+application ([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.1)).
+Static validation and the local workflow have automated tests; local database
+evidence has not yet been verified against a real MySQL server. The remote/company
 workflow through the local connector is tested locally (unit tests, a real
 connector process, and real headless Chrome), but it has **not** yet been
 verified end-to-end against real company infrastructure. Real company
@@ -22,23 +23,22 @@ VPN/LAN connectivity and company TLS, remains outstanding. See
 
 ---
 
-## Download v0.2.0 (Windows x64)
+## Download v0.3.1 (Windows x64)
 
 A portable ZIP: no installer, and no Python, pip or virtual environment is
 needed.
 
-1. From the [v0.2.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.2.0),
-   download `MySQL-DBA-Validator-v0.2.0-windows-x64.zip` and the matching
+1. From the [v0.3.1 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.1),
+   download `MySQL-DBA-Validator-v0.3.1-windows-x64.zip` and the matching
    `.sha256` file.
 2. Verify the download in PowerShell:
 
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.2.0-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MySQL-DBA-Validator-v0.3.1-windows-x64.zip -Algorithm SHA256
    ```
 
-   The result must be
-   `35e59b1bcf07116fb4fe1047f5b7e4a19ace74042572556ff8ccb19cbf90eada`,
-   the value in the `.sha256` file.
+   The result must match the SHA256 shown on the release page and in the
+   `.sha256` file.
 3. Extract the zip anywhere, for example `C:\Tools\`.
 4. Double-click `MySQL-DBA-Validator.exe`.
 
@@ -121,13 +121,16 @@ is no other credential source: without a login and database, evidence is
 reported as not configured, and a rejected login is reported as such.
 
 - Your MySQL account's privileges are the authorization boundary. `EXPLAIN`
-  needs the same privileges as the statement it explains, so `UPDATE` and
-  `DELETE` evidence needs those privileges on the table.
-- The validator never executes the submitted SQL. It only runs `EXPLAIN` of
-  one supported statement (`SELECT`, `UPDATE`, `DELETE`) and fixed
+  needs the same privileges as the statement it explains.
+- The validator never executes the submitted SQL. On the local evidence
+  connection it only runs `EXPLAIN` of one verified plain `SELECT` and fixed
   `information_schema` queries, never `EXPLAIN ANALYZE`.
 - As defense in depth, the evidence connection is set to read-only
   transactions first; if that fails, no evidence is collected.
+- MySQL refuses `EXPLAIN UPDATE`/`EXPLAIN DELETE` in a read-only session, so
+  local `UPDATE` and `DELETE` get no execution-plan evidence (status
+  `plan_not_collected_read_only`). Static analysis and table metadata still
+  apply, and the analysis mode is shown as "Static + database metadata".
 
 ### Verification status
 
@@ -135,7 +138,8 @@ reported as not configured, and a rejected login is reported as such.
 | --- | --- |
 | Parser, risk engine, API, connector security rules | Automated tests |
 | Local web app and connector in real headless Chrome | Passed, company MySQL replaced by a stand-in |
-| Windows portable release (v0.2.0) | Built by CI from the release tag; the zip audited for secret values, private keys, forbidden files and machine-specific paths; smoke-tested from the extracted zip with no Python installed; checked in real Chrome |
+| Windows portable release | Built by CI from the release tag; the zip audited for secret values, private keys, forbidden files and machine-specific paths; smoke-tested from the extracted zip with no Python installed; checked in real Chrome |
+| Local database evidence against a real MySQL server | Automated tests with a fake MySQL that models MySQL's read-only behaviour (error 1792); **not yet verified against a real MySQL server** |
 | Real company infrastructure: hosted HTTPS frontend, company MySQL, VPN/LAN connectivity, company TLS | **Not verified** |
 
 This is not a multi-user or internet-facing service. It has no user
@@ -189,7 +193,7 @@ tests/       pytest suite
 
 ```powershell
 python release\build_windows.py
-python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.2.0-windows-x64.zip
+python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.3.1-windows-x64.zip
 ```
 
 The full process, including tagging and GitHub Releases, is in
