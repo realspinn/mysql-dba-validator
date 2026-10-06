@@ -10,8 +10,8 @@ Optional read-only evidence (`SELECT 1`, bounded `EXPLAIN`,
 security decisions. The tool supports a DBA's judgement; it does not guarantee
 that SQL is safe.
 
-**Status: v0.3.1, pre-1.0 beta**, available as a portable Windows x64
-application ([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.1)).
+**Status: v0.3.2, pre-1.0 beta**, available as a portable Windows x64
+application ([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.2)).
 Static validation and the local workflow have automated tests; local database
 evidence has not yet been verified against a real MySQL server. The remote/company
 workflow through the local connector is tested locally (unit tests, a real
@@ -23,18 +23,18 @@ VPN/LAN connectivity and company TLS, remains outstanding. See
 
 ---
 
-## Download v0.3.1 (Windows x64)
+## Download v0.3.2 (Windows x64)
 
 A portable ZIP: no installer, and no Python, pip or virtual environment is
 needed.
 
-1. From the [v0.3.1 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.1),
-   download `MySQL-DBA-Validator-v0.3.1-windows-x64.zip` and the matching
+1. From the [v0.3.2 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.3.2),
+   download `MySQL-DBA-Validator-v0.3.2-windows-x64.zip` and the matching
    `.sha256` file.
 2. Verify the download in PowerShell:
 
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.3.1-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MySQL-DBA-Validator-v0.3.2-windows-x64.zip -Algorithm SHA256
    ```
 
    The result must match the SHA256 shown on the release page and in the
@@ -42,22 +42,25 @@ needed.
 3. Extract the zip anywhere, for example `C:\Tools\`.
 4. Double-click `MySQL-DBA-Validator.exe`.
 
-A console window opens and your browser opens the local web page at
-`http://127.0.0.1:8420`. Keep the console window open while you use the page.
-Close it, or press Ctrl+C in it, to stop everything.
+Your browser opens the local web page at `http://127.0.0.1:8420`; no other
+window opens. To stop, close the page: the app stops on its own about 15
+minutes after the last page of it was closed. Double-clicking again while it is
+running just opens the page.
 
 The executable is not code-signed, so Windows SmartScreen may warn on first
 run. Only choose "Run anyway" if you downloaded the zip from this repository's
 release page and its SHA256 matches.
 
-**What starts.** The executable starts two loopback-only services:
+**What starts.** The zip has two executables:
 
-- the web page and validation API on `127.0.0.1:8420`;
-- the local connector on `127.0.0.1:8765`, used only for approved
-  remote/company targets.
-
-The console window is the connector's terminal. It shows the browser pairing
-code and accepts operator commands; type `help` there.
+- `MySQL-DBA-Validator.exe` starts only the web page and validation API on
+  `127.0.0.1:8420`, with no console window: static validation and local MySQL
+  evidence.
+- `MySQL-DBA-Validator Console.exe` starts the same web page and API plus the
+  local connector on `127.0.0.1:8765`, used only for approved remote/company
+  targets. Its console window is the connector's terminal. It shows the
+  browser pairing code and accepts operator commands; type `help` there.
+  Close the window, or press Ctrl+C in it, to stop.
 
 **Where data goes.** The program folder is never written to. Per-user data is
 kept in `%LOCALAPPDATA%\MySQLDBAValidator\`:
@@ -74,14 +77,14 @@ to the database you selected. The login is not saved. In **v0.2.0**, local
 evidence instead read an account from `%LOCALAPPDATA%\MySQLDBAValidator\.env`;
 that changed after v0.2.0.
 
-**Optional settings.** Company targets need the CA bundle that signs the
-company MySQL certificates:
+**Optional settings.** Company targets use the Console version and need the CA
+bundle that signs the company MySQL certificates:
 
 ```powershell
-.\MySQL-DBA-Validator.exe --tls-ca C:\path\to\company-ca.pem
+& ".\MySQL-DBA-Validator Console.exe" --tls-ca C:\path\to\company-ca.pem
 ```
 
-Run `.\MySQL-DBA-Validator.exe --help` for all options. The zip's `README.txt`
+Run `& ".\MySQL-DBA-Validator Console.exe" --help` for all options. The zip's `README.txt`
 covers these steps in more detail.
 
 ---
@@ -193,7 +196,7 @@ tests/       pytest suite
 
 ```powershell
 python release\build_windows.py
-python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.3.1-windows-x64.zip
+python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.3.2-windows-x64.zip
 ```
 
 The full process, including tagging and GitHub Releases, is in

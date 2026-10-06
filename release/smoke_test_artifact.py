@@ -5,10 +5,10 @@
 What it does:
 
 * extracts the ZIP into a fresh temporary folder whose path contains spaces;
-* runs MySQL-DBA-Validator.exe with a minimal environment: PATH is only the
-  Windows system folders (no Python), no PYTHON* variables, LOCALAPPDATA pointed
-  at a temporary folder, and a working directory containing a decoy .env that
-  must NOT be read;
+* runs "MySQL-DBA-Validator Console.exe" with a minimal environment: PATH is only
+  the Windows system folders (no Python), no PYTHON* variables, LOCALAPPDATA
+  pointed at a temporary folder, and a working directory containing a decoy .env
+  that must NOT be read;
 * checks the page, the public API (static validation), the connector, origin
   enforcement, single-use pairing with the code printed in the console, the
   approved-target list, a company discovery request that must fail closed (no
@@ -16,7 +16,11 @@ What it does:
   or program folder;
 * stops the app gracefully (Ctrl+Break), restarts it, kills it hard, and checks
   that the backend child dies with it, the registry survives intact, old
-  sessions are invalid and the program folder was never written to.
+  sessions are invalid and the program folder was never written to;
+* runs the windowed MySQL-DBA-Validator.exe (GUI subsystem, no console): backend
+  only, no connector, heartbeat accepted only from this machine's page, idle
+  shutdown after the (shortened) timeout, a second start reusing the running app,
+  and a hard kill stopping the backend child.
 
 Fixture: before the first start, an approved target (``example.com``, a real
 public DNS name used only as a stand-in; no MySQL connection is made because no
@@ -157,6 +161,27 @@ def seed_registry(registry: Path) -> bool:
     return out.startswith("approved")
 
 
+def pe_subsystem(exe: Path) -> int:
+    """The PE optional header's Subsystem: 2 = Windows GUI (no console), 3 = console."""
+    head = exe.read_bytes()[:4096]
+    pe = int.from_bytes(head[0x3C:0x40], "little")
+    return int.from_bytes(head[pe + 92:pe + 94], "little")
+
+
+def start_windowed(exe: Path, env: dict, cwd: Path) -> subprocess.Popen:
+    return subprocess.Popen([str(exe), "--no-browser"], cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+def wait_until(predicate, timeout: float) -> bool:
+    end = time.time() + timeout
+    while time.time() < end:
+        if predicate():
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def tree(folder: Path) -> dict[str, int]:
     return {p.relative_to(folder).as_posix(): p.stat().st_size for p in folder.rglob("*") if p.is_file()}
 
@@ -186,8 +211,12 @@ def main() -> int:
     tops = [p for p in install.iterdir()]
     check("zip has exactly one top-level folder", len(tops) == 1 and tops[0].is_dir(), tops)
     app_dir = tops[0]
-    exe = app_dir / "MySQL-DBA-Validator.exe"
-    check("executable present after extraction", exe.is_file())
+    exe = app_dir / "MySQL-DBA-Validator Console.exe"
+    windowed_exe = app_dir / "MySQL-DBA-Validator.exe"
+    check("both executables present after extraction", exe.is_file() and windowed_exe.is_file())
+    check("MySQL-DBA-Validator.exe is a windowed (GUI) program; the Console version is a console program",
+          pe_subsystem(windowed_exe) == 2 and pe_subsystem(exe) == 3,
+          (pe_subsystem(windowed_exe), pe_subsystem(exe)))
     before = tree(app_dir)
 
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
@@ -313,6 +342,64 @@ def main() -> int:
     finally:
         app2.kill()
     check("hard kill of the launcher also stops the backend child (Job Object)", wait_ports_closed())
+
+    # ------------------------------------------------------------------ windowed app
+    idle_seconds = 20
+    windowed_env = dict(env, MDV_IDLE_SHUTDOWN_SECONDS=str(idle_seconds))
+    win = start_windowed(windowed_exe, windowed_env, cwd)
+    try:
+        check("windowed app starts the web app", wait_until(lambda: port_open(8420), 90))
+        status, _, body = request("GET", PAGE + "/api/health")
+        check("windowed app: API health ok and reports the release version",
+              status == 200 and (as_json(body) or {}).get("version") == version, body[:200])
+        status, _, body = request("POST", PAGE + "/api/validate", {"sql": "DELETE FROM users"})
+        check("windowed app: static validation works",
+              status == 200 and (as_json(body) or {}).get("overall_risk_level") in {"HIGH", "CRITICAL"}, body[:300])
+        check("windowed app does not start the connector", not port_open(8765))
+        own = request("POST", PAGE + "/api/heartbeat", headers={"Origin": PAGE})[0]
+        own_localhost = request("POST", PAGE + "/api/heartbeat", headers={
+            "Origin": "http://localhost:8420", "Host": "localhost:8420"})[0]
+        foreign = request("POST", PAGE + "/api/heartbeat", headers={"Origin": "http://evil.example"})[0]
+        rebound = request("POST", PAGE + "/api/heartbeat", headers={
+            "Origin": "http://evil.example:8420", "Host": "evil.example:8420"})[0]
+        no_origin = request("POST", PAGE + "/api/heartbeat")[0]
+        check("heartbeat accepted only from this machine's page",
+              (own, own_localhost, foreign, rebound, no_origin) == (204, 204, 403, 403, 403),
+              (own, own_localhost, foreign, rebound, no_origin))
+        # Heartbeats keep it alive well past the idle timeout...
+        end = time.time() + idle_seconds * 1.5
+        while time.time() < end:
+            request("POST", PAGE + "/api/heartbeat", headers={"Origin": PAGE})
+            time.sleep(4)
+        check("heartbeats keep the windowed app running past the idle timeout",
+              win.poll() is None and port_open(8420))
+        second = start_windowed(windowed_exe, windowed_env, cwd)
+        try:
+            second.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            second.kill()
+        check("a second start reuses the running app and exits", second.returncode == 0 and win.poll() is None,
+              second.returncode)
+        # ...and without them it stops on its own.
+        try:
+            win.wait(timeout=idle_seconds + 30)
+        except subprocess.TimeoutExpired:
+            pass
+        check("without heartbeats the windowed app stops on its own (idle shutdown, exit code 0)",
+              win.returncode == 0, win.returncode)
+        check("web app port released after idle shutdown", wait_ports_closed())
+        check("the windowed app wrote nothing to standard output", not win.stdout.read())
+    finally:
+        if win.poll() is None:
+            win.kill()
+    win2 = start_windowed(windowed_exe, windowed_env, cwd)
+    try:
+        started = wait_until(lambda: port_open(8420), 90)
+    finally:
+        win2.kill()
+        win2.wait(timeout=10)
+    check("hard kill of the windowed app also stops the backend child (Job Object)",
+          started and wait_ports_closed())
 
     # ------------------------------------------------------------------ persistent state + leaks
     after = tree(app_dir)

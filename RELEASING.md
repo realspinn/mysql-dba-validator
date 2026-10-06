@@ -11,7 +11,8 @@ checksum. The zip has one top-level folder:
 
 ```text
 MySQL-DBA-Validator-v<version>-windows-x64/
-  MySQL-DBA-Validator.exe   console launcher: web app + local connector
+  MySQL-DBA-Validator.exe           windowed launcher: web app only, idle shutdown
+  MySQL-DBA-Validator Console.exe   console launcher: web app + local connector
   README.txt                user instructions (from release/README-WINDOWS.txt)
   LICENSE.txt               if the repository has a LICENSE
   _internal/                Python runtime and dependencies, plus the web page:
@@ -56,8 +57,8 @@ python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v<version>-window
 6. Zips the folder, writes the SHA256 file and audits the zip.
 
 The build is not bit-for-bit reproducible. Two builds from the same commit and
-pinned inputs produce the same file set, and every file except two is
-byte-identical. The two that differ are `MySQL-DBA-Validator.exe`, which
+pinned inputs produce the same file set, and every file except three is
+byte-identical. The three that differ are the two executables, which
 PyInstaller regenerates on each build, and one `*.dist-info/RECORD` file written
 by pip. So the zip's SHA256 changes on every build. Always verify a downloaded
 release against the `.sha256` file published with that release.

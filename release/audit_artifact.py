@@ -8,8 +8,8 @@ Checks, failing (exit 1) on any finding:
 * forbidden files: .env files, private keys/certificates, connector registry
   files, logs, databases, __pycache__/.pyc outside the bundle, tests, venvs,
   pytest artifacts, the legacy page;
-* required files: the executable and the served page;
-* content, scanned in every file AND inside the executable's embedded archives
+* required files: both executables (windowed and console) and the served page;
+* content, scanned in every file AND inside each executable's embedded archives
   (PyInstaller PKG + PYZ, decompressed):
   - secret values taken from the developer's .env (keys containing PASSWORD,
     SECRET, TOKEN or KEY), plus any --forbid strings;
@@ -33,8 +33,10 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE_NAME = "MySQL-DBA-Validator.exe"
-REQUIRED = (EXE_NAME, "_internal/frontend/index.html")
+EXE_NAME = "MySQL-DBA-Validator.exe"  # windowed app
+CONSOLE_EXE_NAME = "MySQL-DBA-Validator Console.exe"  # console app with the connector
+EXE_NAMES = (EXE_NAME, CONSOLE_EXE_NAME)
+REQUIRED = (*EXE_NAMES, "_internal/frontend/index.html")
 
 FORBIDDEN_NAME_PATTERNS = [
     (re.compile(r"(^|/)\.env(\..*)?$", re.I), ".env file"),
@@ -173,7 +175,7 @@ def audit(target: Path, env_file: Path, forbid: list[str]) -> tuple[list[str], d
             findings.append(f"forbidden file (__pycache__): {rel}")
 
         blobs = [(rel, data)]
-        if rel == EXE_NAME:
+        if rel in EXE_NAMES:
             for name, blob in embedded_entries(data):
                 blobs.append((f"{rel}!{name}", blob))
                 if name.startswith("PYZ:"):

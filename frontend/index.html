@@ -2170,6 +2170,18 @@
 			});
 		});
 
+		// Tells the desktop app this page is still open, so it does not stop for being
+		// idle. Carries no data; a failure only means the app is not running.
+		const HEARTBEAT_MS = 60000;
+		function sendHeartbeat() {
+			fetch('/api/heartbeat', { method: 'POST', cache: 'no-store' }).catch(() => { });
+		}
+		sendHeartbeat();
+		setInterval(sendHeartbeat, HEARTBEAT_MS);
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'visible') sendHeartbeat();
+		});
+
 		// Initial state
 		updateContext();
 	</script>

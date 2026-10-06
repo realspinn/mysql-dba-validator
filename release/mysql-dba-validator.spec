@@ -31,24 +31,42 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
+# Committed multi-size icon (16-256 px) made from frontend/assets/favicon.svg;
+# used as-is, so the build needs no image-conversion dependency.
+ICON = str(ROOT / "release" / "mysql-dba-validator.ico")
+
+# The app users double-click: no console window; web app only (see release/launcher.py).
+app_exe = EXE(
     pyz,
     a.scripts,
-    [],
+    [("X mdv_windowed", None, "OPTION")],
     exclude_binaries=True,
     name="MySQL-DBA-Validator",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,  # the connector prints pairing codes and takes operator commands here
+    console=False,
     version=os.environ.get("MDV_VERSION_FILE") or None,
-    # Committed multi-size icon (16-256 px) made from frontend/assets/favicon.svg;
-    # used as-is, so the build needs no image-conversion dependency.
-    icon=str(ROOT / "release" / "mysql-dba-validator.ico"),
+    icon=ICON,
+)
+console_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="MySQL-DBA-Validator Console",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,  # the connector prints pairing codes and takes operator commands here
+    version=os.environ.get("MDV_CONSOLE_VERSION_FILE") or None,
+    icon=ICON,
 )
 coll = COLLECT(
-    exe,
+    app_exe,
+    console_exe,
     a.binaries,
     a.datas,
     strip=False,

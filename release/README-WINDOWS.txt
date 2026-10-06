@@ -11,9 +11,14 @@ RUN
 1. Extract the whole zip to any folder you can write to or read from, for
    example C:\Tools\ or your Desktop. Keep the folder structure intact.
 2. Double-click MySQL-DBA-Validator.exe.
-3. A console window opens and your browser opens http://127.0.0.1:8420.
-   Leave the console window open while you use the page.
-4. To stop, close the console window or press Ctrl+C in it.
+3. Your browser opens http://127.0.0.1:8420. No other window opens.
+4. To stop, close the page. The app stops on its own about 15 minutes after
+   the last page of it was closed. Double-clicking again while it is running
+   just opens the page.
+
+For approved company/remote MySQL targets, use "MySQL-DBA-Validator Console.exe"
+instead (see COMPANY TARGETS below). It opens a console window, which is the
+connector's terminal; close that window or press Ctrl+C in it to stop.
 
 Windows SmartScreen may warn about an unrecognised app because this build is
 not code-signed. Verify the SHA256 checksum published with the release before
@@ -26,11 +31,14 @@ and compare with the .sha256 file from the release page.
 
 WHAT RUNS
 ---------
-- The web page and validation API on http://127.0.0.1:8420 (this machine only).
-- The local connector on 127.0.0.1:8765 (this machine only). It is used only
-  for approved remote/company MySQL targets. The console window is the
-  connector's terminal: it shows the pairing code and accepts operator
-  commands. Type "help" there for the commands.
+- MySQL-DBA-Validator.exe: the web page and validation API on
+  http://127.0.0.1:8420 (this machine only). No console window and no
+  connector: static validation and local MySQL evidence.
+- MySQL-DBA-Validator Console.exe: the same web page and API, plus the local
+  connector on 127.0.0.1:8765 (this machine only), used only for approved
+  remote/company MySQL targets. Its console window is the connector's
+  terminal: it shows the pairing code and accepts operator commands. Type
+  "help" there for the commands.
 
 Static SQL validation needs no database and no configuration.
 
@@ -72,17 +80,17 @@ the data folder. That file is no longer used for validation evidence.
 OPTIONAL: COMPANY TARGETS THROUGH THE CONNECTOR
 -----------------------------------------------
 Company MySQL targets require the CA certificate bundle that signs the
-company servers. Start from a terminal in this folder:
+company servers. Start the Console version from a terminal in this folder:
 
-    .\MySQL-DBA-Validator.exe --tls-ca C:\path\to\company-ca.pem
+    & ".\MySQL-DBA-Validator Console.exe" --tls-ca C:\path\to\company-ca.pem
 
 Without a CA bundle the connector still starts, but every company operation is
 refused. Then, in the console window: "register <id> <host> <port> <name>",
 "approve <id>". In the page: paste the pairing code, choose the target, enter
 your own MySQL login, discover databases, validate.
 
-Other options: --registry <file>, --session-ttl <seconds>,
---allow-origin <origin>, --no-browser. Run with --help for details.
+Other Console options: --registry <file>, --session-ttl <seconds>,
+--allow-origin <origin>, --no-browser. Run it with --help for details.
 
 Note: company-infrastructure end-to-end use (real company MySQL, VPN, company
 TLS) has not yet been verified for this release.
@@ -90,8 +98,9 @@ TLS) has not yet been verified for this release.
 
 TROUBLESHOOTING
 ---------------
-- "port(s) ... already in use": the validator is already running in another
-  window, or another program uses port 8420 or 8765.
+- "port(s) ... already in use": the validator is already running (close its
+  page and wait, or close the Console window), or another program uses port
+  8420 or 8765.
 - The page does not open: browse to http://127.0.0.1:8420 yourself.
 - "cannot load target registry": the registry file is damaged. The program
   refuses to start rather than overwrite it. Move or fix the file named in the

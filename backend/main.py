@@ -27,7 +27,7 @@ from .parser import parse_sql
 from .version import APP_VERSION
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi import FastAPI, Request
@@ -590,6 +590,39 @@ def health():
             "status": db_status,
         },
     }
+
+
+HEARTBEAT_PAGE_HOSTS = ("127.0.0.1", "localhost")
+
+
+def is_own_loopback_page(request: Request) -> bool:
+    """True only for a browser request made by this server's own loopback page.
+
+    The browser sets Origin; it must be exactly this server (``http://`` + Host) on a
+    loopback name. Another website, including one that rebinds its DNS name to
+    127.0.0.1, has a different Origin and Host, and a request without Origin
+    (not from a page) is refused.
+    """
+    origin = request.headers.get("origin")
+    host = request.headers.get("host", "")
+    if not origin or origin != f"http://{host}":
+        return False
+    return host.rsplit(":", 1)[0] in HEARTBEAT_PAGE_HOSTS
+
+
+@app.post("/api/heartbeat")
+def heartbeat(request: Request):
+    """The page is still open: keeps the windowed desktop app from idling out.
+
+    Carries no data, returns none and creates no session. Without idle shutdown
+    (console version, development server) it does nothing.
+    """
+    if not is_own_loopback_page(request):
+        return Response(status_code=403)
+    on_heartbeat = getattr(request.app.state, "on_heartbeat", None)
+    if on_heartbeat is not None:
+        on_heartbeat()
+    return Response(status_code=204)
 
 
 class EvidenceRequest(PydanticBaseModel):

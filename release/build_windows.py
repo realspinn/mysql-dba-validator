@@ -57,8 +57,9 @@ def read_version() -> str:
     return match.group(1)
 
 
-def version_resource(version: str, path: Path) -> None:
-    """Windows file-properties resource for the executable."""
+def version_resource(version: str, path: Path, filename: str = "MySQL-DBA-Validator.exe",
+                     description: str = "MySQL DBA Validator") -> None:
+    """Windows file-properties resource for one executable."""
     numbers = [int(n) for n in re.findall(r"\d+", version.split("-")[0])[:3]] + [0]
     tup = tuple((numbers + [0, 0, 0, 0])[:4])
     path.write_text(f"""VSVersionInfo(
@@ -66,12 +67,12 @@ def version_resource(version: str, path: Path) -> None:
                     fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
-      StringStruct('FileDescription', 'MySQL DBA Validator'),
+      StringStruct('FileDescription', '{description}'),
       StringStruct('ProductName', 'MySQL DBA Validator'),
       StringStruct('FileVersion', '{version}'),
       StringStruct('ProductVersion', '{version}'),
-      StringStruct('OriginalFilename', 'MySQL-DBA-Validator.exe'),
-      StringStruct('InternalName', 'MySQL-DBA-Validator')])]),
+      StringStruct('OriginalFilename', '{filename}'),
+      StringStruct('InternalName', '{filename[:-4]}')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
 )
@@ -121,7 +122,11 @@ def main() -> int:
     step("Running PyInstaller")
     version_file = BUILD / "version_info.txt"
     version_resource(version, version_file)
-    env = dict(os.environ, MDV_VERSION_FILE=str(version_file), PYTHONHASHSEED="0",
+    console_version_file = BUILD / "version_info_console.txt"
+    version_resource(version, console_version_file, "MySQL-DBA-Validator Console.exe",
+                     "MySQL DBA Validator Console")
+    env = dict(os.environ, MDV_VERSION_FILE=str(version_file),
+               MDV_CONSOLE_VERSION_FILE=str(console_version_file), PYTHONHASHSEED="0",
                PYTHONDONTWRITEBYTECODE="1")
     run([str(vpython), "-m", "PyInstaller", "--noconfirm", "--clean",
          "--distpath", str(DIST), "--workpath", str(BUILD / "work"),
