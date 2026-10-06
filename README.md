@@ -2,47 +2,53 @@
 
 # MySQL DBA Validator
 
-A local-first tool for reviewing MySQL SQL from database tickets before you run
-it. Paste SQL and get the statement classification, a deterministic risk score,
-confidence, findings and a DBA review checklist. Optional read-only evidence
-(`SELECT 1`, bounded `EXPLAIN`, `information_schema` metadata) refines the
-score. No LLM makes risk or security decisions.
+Review MySQL SQL before execution. MySQL DBA Validator is a local-first tool
+for SQL from database tickets: paste SQL and get the statement classification,
+a deterministic risk score, confidence, findings and a DBA review checklist.
+Optional read-only evidence (`SELECT 1`, bounded `EXPLAIN`,
+`information_schema` metadata) refines the score. No LLM makes risk or
+security decisions. The tool supports a DBA's judgement; it does not guarantee
+that SQL is safe.
 
-**Status: 0.2.0, pre-1.0 beta.** Static validation and the local workflow are
-tested. The remote/company workflow through the local connector is tested
-locally (unit tests, a real connector process, and real headless Chrome), but
-it has **not** yet been verified end-to-end against real company
-infrastructure. Real company infrastructure validation, including a hosted
-HTTPS frontend, company MySQL, VPN/LAN connectivity and company TLS, remains
-outstanding. See [Verification status](#verification-status).
+**Status: v0.2.0, pre-1.0 beta**, available as a portable Windows x64
+application ([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.2.0)).
+Static validation and the local workflow are tested. The remote/company
+workflow through the local connector is tested locally (unit tests, a real
+connector process, and real headless Chrome), but it has **not** yet been
+verified end-to-end against real company infrastructure. Real company
+infrastructure validation, including a hosted HTTPS frontend, company MySQL,
+VPN/LAN connectivity and company TLS, remains outstanding. See
+[Verification status](#verification-status).
 
 ---
 
-## Download and run (Windows)
+## Download v0.2.0 (Windows x64)
 
-No Python, pip or virtual environment is needed.
+A portable ZIP: no installer, and no Python, pip or virtual environment is
+needed.
 
-> **Status:** no downloadable release has been published yet. Until the
-> Releases page lists one, run from source (see [Development](#development)).
-
-1. Open the repository's **Releases** page and download
-   `MySQL-DBA-Validator-v<version>-windows-x64.zip`. Download the matching
-   `.sha256` file too.
-2. Verify the download in PowerShell, and compare the result with the `.sha256` file:
+1. From the [v0.2.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.2.0),
+   download `MySQL-DBA-Validator-v0.2.0-windows-x64.zip` and the matching
+   `.sha256` file.
+2. Verify the download in PowerShell:
 
    ```powershell
    Get-FileHash .\MySQL-DBA-Validator-v0.2.0-windows-x64.zip -Algorithm SHA256
    ```
 
+   The result must be
+   `35e59b1bcf07116fb4fe1047f5b7e4a19ace74042572556ff8ccb19cbf90eada`,
+   the value in the `.sha256` file.
 3. Extract the zip anywhere, for example `C:\Tools\`.
 4. Double-click `MySQL-DBA-Validator.exe`.
 
-A console window opens and your browser opens `http://127.0.0.1:8420`. Keep
-the console window open while you use the page. Close it, or press Ctrl+C in
-it, to stop everything.
+A console window opens and your browser opens the local web page at
+`http://127.0.0.1:8420`. Keep the console window open while you use the page.
+Close it, or press Ctrl+C in it, to stop everything.
 
-The build is not code-signed, so Windows SmartScreen may warn on first run.
-Check the SHA256 before you choose "Run anyway".
+The executable is not code-signed, so Windows SmartScreen may warn on first
+run. Only choose "Run anyway" if you downloaded the zip from this repository's
+release page and its SHA256 matches.
 
 **What starts.** The executable starts two loopback-only services:
 
@@ -92,6 +98,11 @@ covers these steps in more detail.
   It cannot supply an arbitrary remote host. Targets are registered and
   approved only from the connector's console. Each connection re-checks the
   approved DNS identity and requires TLS verified against the configured CA.
+  The target registry holds destinations and their approval state, never
+  credentials.
+- **Context is not authorization.** The backend classifies every target from
+  its host and port. The deprecated `mode` field in `/api/validate` requests is ignored for
+  that decision, so declaring a remote host "local" changes nothing.
 - **Pairing.** The connector accepts pages from an explicit origin allowlist.
   A browser gets a session only by entering a single-use, five-minute pairing
   code shown in the console. Sessions live in memory and cannot manage
@@ -110,7 +121,7 @@ test and database discovery.
 | --- | --- |
 | Parser, risk engine, API, connector security rules | Automated tests |
 | Local web app and connector in real headless Chrome | Passed, company MySQL replaced by a stand-in |
-| Windows portable release | Built and smoke-tested from the extracted zip |
+| Windows portable release (v0.2.0) | Built by CI from the release tag; the zip audited for secret values, private keys, forbidden files and machine-specific paths; smoke-tested from the extracted zip with no Python installed; checked in real Chrome |
 | Real company infrastructure: hosted HTTPS frontend, company MySQL, VPN/LAN connectivity, company TLS | **Not verified** |
 
 This is not a multi-user or internet-facing service. It has no user
