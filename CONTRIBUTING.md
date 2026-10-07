@@ -15,8 +15,10 @@ anything that touches a database, read this guide and [SECURITY.md](SECURITY.md)
 
 | Document | Covers |
 | --- | --- |
-| [README.md](README.md) | What the tool does, how to use it, security model, verification status, scoring |
+| [README.md](README.md) | What the tool does, how to install and use it, summaries of architecture, security and verification |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Components and module map, request flows, what is sent to a database, scoring rules, evidence model |
 | [SECURITY.md](SECURITY.md) | Authoritative security model, known limitations, private vulnerability reporting |
+| [VERIFICATION.md](VERIFICATION.md) | What has and has not been tested, at which level, and release verification |
 | [connector/README.md](connector/README.md) | Local connector: configuration, operator console, sessions, credentials |
 | CONTRIBUTING.md (this file) | Development setup, architecture, review areas, tests, pull requests |
 | [RELEASING.md](RELEASING.md) | Maintainer-only build and release procedure |
@@ -56,67 +58,27 @@ No configuration file is needed.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph machine["User's machine: everything binds to 127.0.0.1"]
-        B["Browser<br/>frontend/index.html"]
-        API["Web app<br/>backend.main:app :8420"]
-        S["Static analysis<br/>parser → analyzer → risk_engine"]
-        C["Local connector<br/>connector/ :8765"]
-        R[("Target registry<br/>destinations only")]
-        LM[("Loopback MySQL")]
-    end
-    RM[("Approved company MySQL")]
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the components, the module map,
+the local and remote request flows, exactly what may be sent to a database,
+the scoring rules and the evidence model. Read it before changing parsing,
+scoring, evidence collection or the connector.
 
-    B -- "/api/validate: SQL + local login" --> API
-    API --> S
-    API -- "read-only connection:<br/>SELECT 1, EXPLAIN of one plain SELECT,<br/>fixed metadata queries" --> LM
-    B -- "paired session:<br/>target_id + company login" --> C
-    C --> R
-    C -- "DNS identity re-check, verified TLS:<br/>bounded EXPLAIN, fixed metadata" --> RM
-    C -. "same scoring code<br/>(build_statement_result)" .-> S
-```
+The points contributors most often need:
 
-- **Static analysis** needs no database. `backend/parser.py` turns SQL into
-  facts using SQLGlot (MySQL dialect) and does not decide anything about
-  safety. `backend/risk_engine.py` applies explicit rules to produce the score,
-  findings and checklist. `backend/analyzer.py`, `evidence.py` and
-  `recommendations.py` build the structured analysis.
-- **Local evidence** (`backend/db.py`, `db_evidence.py`, `metadata.py`) opens
-  one connection per validation to a loopback MySQL with the login typed for
-  that validation. The connection is set to read-only transactions first; if
-  that fails, no evidence is collected. A plan request is sent only when the
-  exact outgoing text is `EXPLAIN` of one plain `SELECT`. Local `UPDATE` and
-  `DELETE` get no plan by design (`plan_not_collected_read_only`).
-- **Evidence scoring** (`backend/evidence_scoring.py`, `metadata_scoring.py`,
-  `m2_scoring.py`) applies small, bounded adjustments to the static score.
-  "How scoring works" in the README describes the current rules.
-- **Evidence state** (`backend/evidence_state.py`) turns what the collectors
-  returned into each statement's `evidence` object: connection, plan and
-  metadata states. It is the source of truth for what a result says about
-  evidence. `analysis_mode`, `evidence_summary` and the evidence sentences in
-  reasons are derived from it, never set separately, and it never changes
+- **Static analysis** (`backend/parser.py`, `analyzer.py`, `risk_engine.py`)
+  needs no database. The parser produces facts and does not decide anything
+  about safety.
+- **Local evidence** (`backend/db.py`, `db_evidence.py`, `metadata.py`) uses
+  one read-only connection per validation, and a plan request is sent only
+  when the exact outgoing text is `EXPLAIN` of one plain `SELECT`.
+- **Evidence state** (`backend/evidence_state.py`) is the source of truth for
+  what a result says about evidence. `analysis_mode`, `evidence_summary` and
+  the evidence sentences in reasons are derived from it, and it never changes
   scores or confidence. A new kind of evidence gets its own state there, with
   its "collected", "deliberately not collected" and "failed" cases kept apart.
-- **Remote/company evidence** goes only through the local connector. The
-  browser refers to a target by its `target_id`. It cannot supply a host. An
-  operator registers and approves targets in the connector's console, never
-  over HTTP. Each connection re-checks the approved DNS identity and requires
-  TLS verified against a configured CA. Remote results are scored by the same
-  function as local results, but the connection rules differ. The read-only
-  session and the "plain `SELECT` only" plan rule above belong to local
-  evidence. Remote evidence is limited by the connector's own rules:
-  approved target, verified TLS, bounded `EXPLAIN` and fixed metadata queries
-  (see [connector/README.md](connector/README.md)).
-- **Credentials** are typed in the page and sent with each operation. They are
-  used for that operation and never stored. Company credentials go to the
-  connector only and never reach the web app. The target registry records
-  where the connector may connect, never who is connecting.
-
-The connector exists so company credentials and company network access stay on
-the user's machine, under an operator's explicit approval, instead of passing
-through a web API. The backend classifies every target from its host and port,
-and the browser cannot override that.
+- **Remote evidence** goes only through the local connector, to
+  operator-approved targets. It is scored by the same function as local
+  evidence, but under the connector's own connection rules.
 
 There is no endpoint that runs SQL supplied by the user, and the submitted SQL
 is never executed. The public `/api/evidence` route deliberately returns
@@ -245,7 +207,7 @@ pip check
 
 Be precise about what was verified. A unit or `TestClient` test, a test
 against a running process, and a run against real MySQL or company
-infrastructure are different levels. The README's verification status table
+infrastructure are different levels. [VERIFICATION.md](VERIFICATION.md)
 tracks them. Do not claim a level you did not reach.
 
 If you change `release/`, also run the build and smoke test described in

@@ -16,6 +16,10 @@ Only the latest release receives fixes while the project is pre-1.0.
 
 ## Security model in brief
 
+How the components and request flows fit together is described in
+[ARCHITECTURE.md](ARCHITECTURE.md). What has and has not been verified is in
+[VERIFICATION.md](VERIFICATION.md).
+
 - The web app (`127.0.0.1:8420`) and the local connector (`127.0.0.1:8765`)
   bind to loopback only.
 - Company MySQL credentials are supplied per request, used for that operation
