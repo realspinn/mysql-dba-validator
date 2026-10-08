@@ -1,0 +1,48 @@
+# Exact dependency set bundled into the macOS (Apple Silicon, arm64) app bundle.
+# release/build_macos.py installs this into a fresh, isolated build venv.
+# The same versions as release/requirements-build.txt (the Windows set), except:
+#   - added for macOS: uvloop (uvicorn[standard] installs it on macOS, not on
+#     Windows) and macholib (PyInstaller's Mach-O support);
+#   - left out (Windows only): pefile, pywin32-ctypes.
+# Every package resolves to a CPython 3.14 macOS arm64 (or universal2) wheel or a
+# pure-Python wheel; nothing is built from source.
+# Regenerate deliberately when requirements.txt or release/requirements-build.txt
+# changes, then run the full test suite and the macOS build.
+# Test-only packages (pytest, httpx, httpx2) are intentionally absent.
+
+# Runtime (from requirements.txt)
+fastapi==0.142.2
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+sqlglot==30.21.0
+python-dotenv==1.2.4
+PyMySQL==1.2.3
+cryptography==45.0.7
+pydantic==2.13.5
+
+# Runtime transitive
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+cffi==2.1.1
+click==8.5.0
+h11==0.16.0
+httptools==0.8.0
+idna==3.20
+opentelemetry-api==1.45.0
+pycparser==3.0
+pydantic_core==2.46.5
+PyYAML==6.0.3
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvloop==0.23.0  # macOS only (uvicorn[standard] on non-Windows)
+watchfiles==1.3.0
+websockets==17.2
+
+# Build tooling
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+altgraph==0.17.5
+macholib==1.16.4  # macOS only
+packaging==26.3
+setuptools==84.0.0

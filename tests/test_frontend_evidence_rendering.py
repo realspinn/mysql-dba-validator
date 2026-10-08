@@ -26,6 +26,7 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 CHROME_CANDIDATES = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 )
 
 HEADLINES = {

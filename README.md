@@ -21,6 +21,10 @@ MySQL server; the
 remote/company workflow has not yet been verified against real company
 infrastructure. See [Verification](#verification).
 
+A macOS build for Apple Silicon is being prepared for v0.4.1. It is not
+released yet and has not been verified on a Mac; see
+[VERIFICATION.md](VERIFICATION.md#macos-apple-silicon-prepared-for-v041-not-yet-verified).
+
 ---
 
 ## What it does

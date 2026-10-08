@@ -104,16 +104,125 @@ those versions.
    and attaches the zip and checksum to a **draft** release. The audit and smoke
    test are release gates: if either fails, no draft is created, and the run
    uploads only a diagnostic manifest (file names, sizes, SHA256 hashes and the
-   audit output), never the failed binaries.
+   audit output), never the failed binaries. The same tag also starts the
+   macOS workflow, which builds and tests an unsigned macOS app but attaches
+   nothing to the release; only its signed path, once enabled, adds a disk image
+   to that draft (see [macOS](#macos-apple-silicon)). It never creates a release
+   of its own.
 4. Download the draft's zip and verify it before publishing: check the
    checksum, run the audit against it with your local `.env`, and run the
    smoke test.
 5. Add release notes that include the verification status, then publish the
    draft.
 
+## macOS (Apple Silicon)
+
+Prepared for v0.4.1 and **not released**. The macOS status, step by step
+(see [VERIFICATION.md](VERIFICATION.md) for what each has actually shown):
+
+1. Implemented: launcher support, build, audit, smoke test and workflow are in
+   the repository.
+2. Tested on Windows: unit tests that simulate the macOS-specific parts.
+3. Built and smoke-tested on a GitHub-hosted Apple Silicon runner: **not yet**.
+4. Tested by hand on a real Mac: **not yet**.
+5. Signed with a Developer ID: **not yet** (needs an Apple Developer account).
+6. Notarized by Apple: **not yet**.
+7. Accepted by Gatekeeper on a real Mac: **not yet**.
+8. Published as a release: **not yet**.
+
+### Unsigned validation build (no Apple account needed)
+
+`.github/workflows/release-macos.yml`, job `build-test`, runs on a
+GitHub-hosted Apple Silicon runner (`macos-15`) for every `v*` tag and by hand
+(`workflow_dispatch`). It uses no secrets and has read-only access to the
+repository:
+
+1. checks that a tag matches `APP_VERSION`;
+2. runs the test suite, then `release/check_pytest_skips.py`, which fails the
+   job if any test skipped that is not expected to skip on macOS (only the
+   Windows Job Object test is);
+3. `python release/build_macos.py build`: an isolated venv with the exact pins in
+   `release/requirements-build-macos.txt` (wheels only), PyInstaller with
+   `release/mysql-dba-validator-macos.spec` (arm64 only), then
+   `release/audit_macos.py` on the app;
+4. `python release/build_macos.py package-unsigned`: a `ditto` zip of the app
+   (which keeps the bundle's symbolic links and permissions) and its `.sha256`;
+5. `release/audit_macos.py` and `release/smoke_test_macos.py` on that zip;
+6. keeps the zip as a workflow artifact named
+   `macos-arm64-unsigned-<commit>` for 14 days.
+
+The unsigned app is only ad hoc signed (PyInstaller does that; Apple Silicon
+needs a signature to run anything). It is a test build: Gatekeeper does not open
+it normally once downloaded, and it is never attached to a release. To try it on
+a Mac for the acceptance pass, see [VERIFICATION.md](VERIFICATION.md).
+
+The app bundle:
+
+```text
+MySQL DBA Validator.app
+  Contents/MacOS/MySQL-DBA-Validator           windowed app: web app only, idle shutdown
+  Contents/MacOS/MySQL-DBA-Validator Console   console app: web app + local connector (run from Terminal)
+  Contents/Resources/frontend/...              the served page and favicon
+```
+
+It is built from the same `release/launcher.py` as the Windows release. The app
+has no Dock icon (`LSUIElement`). There is no Job Object on macOS: the backend
+child instead watches a pipe from the launcher and stops when the launcher
+exits, however it exits. The data folder is the connector's existing default,
+`~/.local/state/MySQLDBAValidator` (or `$XDG_STATE_HOME/MySQLDBAValidator`).
+The bundle identifier is `io.github.realspinn.mysql-dba-validator`; it is the
+app's long-term identity and must not change once a signed build has shipped.
+The app declares a minimum of macOS 11, but the minimum supported version has
+not been independently verified.
+
+### Signed distribution (future; needs an Apple Developer account)
+
+Not in use. The workflow's `sign-notarize`, `verify-signed` and `publish` jobs
+are skipped unless the run is for a `v*` tag **and** the repository variable
+`MACOS_SIGNING_ENABLED` is `true`. To enable them later:
+
+1. A **Developer ID Application** certificate, exported with its private key as
+   a `.p12`, and an **App Store Connect API key** (`.p8`) that can use the
+   notary service, with its key ID and issuer ID.
+2. A GitHub **environment** named `macos-release`, with required reviewers, and
+   these environment secrets: `MACOS_CERT_P12_BASE64` (the `.p12`, base64),
+   `MACOS_CERT_PASSWORD`, `MACOS_SIGNING_IDENTITY` (`Developer ID Application:
+   <name> (<team id>)`), `NOTARY_API_KEY_P8` (the `.p8` contents),
+   `NOTARY_API_KEY_ID`, `NOTARY_API_ISSUER_ID`. None of these may ever be
+   committed or placed in the repository.
+3. The repository variable `MACOS_SIGNING_ENABLED` set to `true`.
+
+The signed path keeps the signing credentials away from third-party code:
+
+- `sign-notarize` (the only job with the secrets; actions pinned to commit
+  SHAs) takes the **already tested** unsigned app from `build-test`, checks its
+  checksum, and uses only the Python standard library and Apple's tools: no
+  `pip install`, no tests, and it never runs the app. It signs every Mach-O file
+  inside out, then the executables and the app, with the Developer ID identity,
+  Hardened Runtime and a secure timestamp, and **no entitlements**; notarizes the
+  app (as a `ditto` zip) and staples it; builds and signs the disk image;
+  notarizes and staples that; then **removes the keychain and key files** before
+  anything else, and checks `codesign`, `spctl` (`Notarized Developer ID`),
+  `stapler validate` and `hdiutil verify`.
+- `verify-signed` (no secrets) runs the smoke test and the audit on the signed
+  disk image.
+- `publish` (no signing secrets; the only job that can write releases) waits for
+  the **draft** release that the Windows workflow creates for the tag and
+  uploads the disk image and its checksum. It never creates a release and never
+  replaces an asset.
+
+The release then contains `MySQL-DBA-Validator-v<version>-macos-arm64.dmg`
+(the stapled app, `README.txt` from `release/README-MACOS.txt`, `LICENSE.txt`
+and a link to `/Applications`) and its `.dmg.sha256`. Before publishing,
+download the `.dmg` from the draft, check its SHA256, read the notary logs kept
+with the workflow run, and run the real-Mac acceptance pass in
+[VERIFICATION.md](VERIFICATION.md). Notarization means Apple's automated
+service found no known malicious content and no code-signing problems; it is
+not a review of the tool.
+
 ## Not done yet
 
 - No installer. A future installer would be named
   `MySQL-DBA-Validator-v<version>-windows-x64-setup.exe`.
-- No code signing.
-- No macOS or Linux builds.
+- No Windows code signing.
+- No Intel (x86_64) or universal macOS build, and no Linux build.

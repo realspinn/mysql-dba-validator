@@ -30,6 +30,13 @@ not search the working directory or its parents for ``.env`` files.
 Closing the console window (or Ctrl+C) stops the connector; the backend child is in
 a Windows Job Object with kill-on-close, so it stops with the launcher even if the
 launcher is killed.
+
+On macOS (the ``MySQL DBA Validator.app`` bundle) the same two roles are the
+bundle's main executable and ``Contents/MacOS/MySQL-DBA-Validator Console``. There
+is no Job Object, so the backend child watches a pipe from the launcher instead:
+when the launcher exits for any reason, including being killed or its Terminal
+window being closed, the pipe closes and the backend stops. The data folder is
+the connector's existing default (``$XDG_STATE_HOME`` or ``~/.local/state``).
 """
 
 from __future__ import annotations
@@ -61,6 +68,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # The console executable; the backend child always runs from it (window-less), because
 # the windowed executable has no standard streams for the backend log.
 CONSOLE_EXE_NAME = "MySQL-DBA-Validator Console.exe"
+# In the macOS .app bundle both executables sit in Contents/MacOS, without a suffix.
+MACOS_CONSOLE_EXE_NAME = "MySQL-DBA-Validator Console"
+# POSIX only: set for the backend child, whose stdin is then a pipe from the launcher.
+# End of file on it means the launcher is gone, so the backend stops (see watch_parent).
+PARENT_PIPE_ENV = "MDV_PARENT_PIPE"
+PARENT_EXIT_GRACE_SECONDS = 10.0
 # Set on the windowed executable at build time (PyInstaller "X" option -> sys._xoptions).
 WINDOWED_XOPTION = "mdv_windowed"
 # Idle shutdown (windowed app only). The page sends a heartbeat every 60 s and when it
@@ -159,18 +172,37 @@ def wait_for_port(port: int, child: subprocess.Popen | None, timeout: float) -> 
     return False
 
 
+def console_executable_name(platform: str | None = None) -> str:
+    """File name of the console executable next to this one (``.exe`` on Windows)."""
+    return MACOS_CONSOLE_EXE_NAME if (platform or sys.platform) == "darwin" else CONSOLE_EXE_NAME
+
+
+def uses_parent_pipe() -> bool:
+    """POSIX: the backend child is tied to the launcher by a pipe (Windows uses a Job Object)."""
+    return os.name != "nt"
+
+
+def child_stdin():
+    """The backend child's stdin: the parent pipe on POSIX, nothing on Windows."""
+    return subprocess.PIPE if uses_parent_pipe() else subprocess.DEVNULL
+
+
 def backend_command(idle_shutdown_seconds: int | None = None) -> tuple[list[str], dict[str, str]]:
     """Command that runs the backend child, plus its environment.
 
     Idle shutdown is enabled only when ``idle_shutdown_seconds`` is given (the windowed
-    app); an inherited setting is never passed on.
+    app); an inherited setting is never passed on. On POSIX the child is also told to
+    stop when the launcher's pipe closes; that setting is never inherited either.
     """
     env = dict(os.environ)
     env.pop(IDLE_SHUTDOWN_ENV, None)
+    env.pop(PARENT_PIPE_ENV, None)
     if idle_shutdown_seconds:
         env[IDLE_SHUTDOWN_ENV] = str(idle_shutdown_seconds)
+    if uses_parent_pipe():
+        env[PARENT_PIPE_ENV] = "1"
     if getattr(sys, "frozen", False):
-        return [str(Path(sys.executable).with_name(CONSOLE_EXE_NAME)), RUN_BACKEND_FLAG], env
+        return [str(Path(sys.executable).with_name(console_executable_name())), RUN_BACKEND_FLAG], env
     env["PYTHONPATH"] = str(PROJECT_ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     return [sys.executable, "-m", "release.launcher", RUN_BACKEND_FLAG], env
 
@@ -226,9 +258,30 @@ def set_console_title(title: str) -> None:
             pass
 
 
-def show_error(message: str) -> None:
+# The message reaches AppleScript only as an argument (item 2 of argv), never as script
+# text, so nothing in it is interpreted.
+MACOS_ALERT_SCRIPT = ("on run argv", "display alert (item 1 of argv) message (item 2 of argv) as critical",
+                      "end run")
+
+
+def macos_alert_command(message: str) -> list[str]:
+    command = ["/usr/bin/osascript"]
+    for line in MACOS_ALERT_SCRIPT:
+        command += ["-e", line]
+    return command + [APP_TITLE, message]
+
+
+def show_error(message: str, platform: str | None = None) -> None:
     """Show a startup problem to the user: a message box (the windowed app has no console)."""
-    if os.name == "nt":
+    if (platform or sys.platform) == "darwin":
+        # An alert that stays on screen after this process exits; the launcher does
+        # not wait for it to be dismissed.
+        try:
+            subprocess.Popen(macos_alert_command(message), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception:
+            pass
+    elif os.name == "nt":
         try:
             import ctypes
             # MB_OK | MB_ICONERROR | MB_SETFOREGROUND
@@ -292,6 +345,33 @@ def watch_idle(monitor: IdleMonitor, stop: Callable[[], None], timeout: float,
             return
 
 
+def watch_parent(stream, stop: Callable[[], None], grace: float = PARENT_EXIT_GRACE_SECONDS,
+                 force_exit: Callable[[int], None] = os._exit,
+                 start_timer: Callable[[float, Callable[[], None]], object] | None = None) -> None:
+    """Call ``stop`` once the launcher's end of the pipe on ``stream`` is closed.
+
+    The launcher never writes to the pipe, so a read returns only at end of file:
+    when the launcher has exited, however it ended. If the server has not stopped
+    ``grace`` seconds later, the process exits anyway, so no backend is left behind.
+    """
+    try:
+        while stream.read(4096):
+            pass
+    except Exception:
+        pass
+    stop()
+
+    def _force() -> None:
+        force_exit(0)
+
+    if start_timer is None:
+        timer = threading.Timer(grace, _force)
+        timer.daemon = True
+        timer.start()
+    else:
+        start_timer(grace, _force)
+
+
 def pause_if_interactive() -> None:
     """Keep a double-clicked window open long enough to read an error."""
     if sys.stdin is not None and sys.stdin.isatty():
@@ -308,20 +388,32 @@ def run_backend() -> int:
     from backend.main import app
 
     idle_timeout = idle_shutdown_seconds(os.environ)
-    if idle_timeout is None:
+    parent_pipe = os.environ.get(PARENT_PIPE_ENV) == "1" and sys.stdin is not None
+    if idle_timeout is None and not parent_pipe:
         uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT, log_level="info")
         return 0
 
     server = uvicorn.Server(uvicorn.Config(app, host=BACKEND_HOST, port=BACKEND_PORT, log_level="info"))
-    monitor = IdleMonitor()
-    app.state.on_heartbeat = monitor.touch
 
-    def stop() -> None:
-        print(f"No page heartbeat for {idle_timeout} seconds; stopping.", flush=True)
-        server.should_exit = True
+    if idle_timeout is not None:
+        monitor = IdleMonitor()
+        app.state.on_heartbeat = monitor.touch
 
-    threading.Thread(target=watch_idle, args=(monitor, stop, idle_timeout),
-                     name="idle-shutdown", daemon=True).start()
+        def stop() -> None:
+            print(f"No page heartbeat for {idle_timeout} seconds; stopping.", flush=True)
+            server.should_exit = True
+
+        threading.Thread(target=watch_idle, args=(monitor, stop, idle_timeout),
+                         name="idle-shutdown", daemon=True).start()
+
+    if parent_pipe:
+        def stop_with_launcher() -> None:
+            print("The launcher has exited; stopping.", flush=True)
+            server.should_exit = True
+
+        threading.Thread(target=watch_parent, args=(sys.stdin.buffer, stop_with_launcher),
+                         name="parent-watch", daemon=True).start()
+
     server.run()
     return 0
 
@@ -354,7 +446,7 @@ def run_app(args: argparse.Namespace, app_data: Path, env_loaded: bool) -> int:
     command, child_env = backend_command()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(log_path, "w", encoding="utf-8") as log_file:
-        child = subprocess.Popen(command, cwd=str(app_data), env=child_env, stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(command, cwd=str(app_data), env=child_env, stdin=child_stdin(),
                                  stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags)
     job = kill_with_parent(child)
     try:
@@ -401,7 +493,7 @@ def run_windowed(argv: Sequence[str]) -> int:
     unknown = [arg for arg in argv if arg != "--no-browser"]
     if unknown:
         show_error(f"Unknown option(s): {' '.join(unknown)}\n\nConnector options are accepted only by "
-                   f"{CONSOLE_EXE_NAME}.")
+                   f"{console_executable_name()}.")
         return 2
     open_browser = "--no-browser" not in argv
 
@@ -422,12 +514,14 @@ def run_windowed(argv: Sequence[str]) -> int:
     command, child_env = backend_command(
         idle_shutdown_seconds(os.environ) or DEFAULT_IDLE_SHUTDOWN_SECONDS)
     if getattr(sys, "frozen", False) and not Path(command[0]).is_file():
-        show_error(f"{APP_TITLE} {APP_VERSION} cannot start: {CONSOLE_EXE_NAME} is missing from "
-                   f"{Path(command[0]).parent}. Extract the whole release zip again.")
+        reinstall = ("Copy the app from the release disk image again." if sys.platform == "darwin"
+                     else "Extract the whole release zip again.")
+        show_error(f"{APP_TITLE} {APP_VERSION} cannot start: {console_executable_name()} is missing from "
+                   f"{Path(command[0]).parent}. {reinstall}")
         return 4
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with open(log_path, "w", encoding="utf-8") as log_file:
-        child = subprocess.Popen(command, cwd=str(app_data), env=child_env, stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(command, cwd=str(app_data), env=child_env, stdin=child_stdin(),
                                  stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags)
     job = kill_with_parent(child)
     try:

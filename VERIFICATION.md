@@ -146,7 +146,89 @@ exercised:
   target, but not against real company infrastructure.
 - Remote `UPDATE`/`DELETE` plans and the positive M1 and M2 adjustments
   against a live database.
-- Platforms other than Windows x64.
+- Platforms other than Windows x64. A macOS (Apple Silicon) release is being
+  prepared for v0.4.1; see below.
+
+## macOS (Apple Silicon), prepared for v0.4.1: not yet verified
+
+These are separate stages; each is reached only when it has actually happened.
+
+| Stage | Status |
+| --- | --- |
+| 1. Implemented in the repository | Yes: launcher support, `release/build_macos.py`, `release/audit_macos.py`, `release/smoke_test_macos.py`, `.github/workflows/release-macos.yml` |
+| 2. Tested on Windows (simulated macOS) | Yes, see below |
+| 3. Built, audited and smoke-tested on a GitHub-hosted Apple Silicon runner | **Not yet** (the workflow's `build-test` job; no credentials needed) |
+| 4. Tested by hand on a real Mac | **Not yet** |
+| 5. Signed with a Developer ID | **Not yet** (needs an Apple Developer account; not planned until resources allow) |
+| 6. Notarized by Apple | **Not yet** |
+| 7. Accepted by Gatekeeper on a real Mac | **Not yet** |
+| 8. Published as a release | **Not yet** |
+
+What the Windows testing (stage 2) covers, and what it does not:
+
+| Check | How it was tested |
+| --- | --- |
+| Launcher on macOS: console executable found in `Contents/MacOS`, backend tied to the launcher by a pipe, startup alert built without script injection | Unit tests on Windows with the platform simulated. The pipe mechanism is also tested across real processes (killing a launcher process stops its child), which uses the same OS pipe semantics but on Windows |
+| Windows launcher behaviour unchanged | Existing Windows tests pass unchanged; the Windows packaged smoke test (55 checks) passes with the new launcher |
+| Signing order and `codesign`/`notarytool` commands, no entitlements, credentials never echoed | Unit tests on Windows (no signing performed) |
+| macOS audit rules (bundle structure, version, page, signing-material names, hidden items, physical symlink containment) | Unit tests on synthetic bundles on Windows; the symbolic-link tests are skipped on Windows and run on the macOS runner |
+| Workflow trust boundary (no secrets in `build-test`, signing gated and isolated) | Unit tests on the workflow file |
+| Every pinned dependency has a CPython 3.14 macOS arm64 (or universal2) wheel | Checked against PyPI; no source builds needed |
+| Building a real `.app`, running it, macOS test suite | **Not run**: stage 3 |
+
+On the macOS runner the test suite runs in full; the job fails if any test
+skips other than the Windows Job Object test (`release/check_pytest_skips.py`),
+so the real-Chrome rendering tests and the symbolic-link tests must run there.
+
+The smoke test runs the app's executables directly. It does not go through
+LaunchServices (opening the app from Finder), so it cannot show first-launch
+Gatekeeper behaviour or what happens when a running app is opened again, and it
+only detects (does not assert) the on-screen startup alert. Those are in the
+real-Mac pass below.
+
+### Required real-Mac acceptance pass
+
+CI runs on a clean virtual Mac and cannot show what a user sees. A maintainer
+runs these on a real Apple Silicon Mac. None has been done yet.
+
+With the unsigned CI build (stage 4): download the `macos-arm64-unsigned-<commit>`
+artifact from the workflow run, check its SHA256, unzip it with
+`ditto -x -k <zip> <folder>`, and move the app to Applications. macOS blocks an
+unsigned app that was downloaded; for this test only, allow it once in System
+Settings > Privacy & Security ("Open Anyway"). Do not distribute it.
+
+- [ ] SHA256 of the download matches its `.sha256` file.
+- [ ] Opening the app opens `http://127.0.0.1:8420` in the default browser;
+      static validation works.
+- [ ] No window and no Dock icon.
+- [ ] What happens when the app is opened again while it runs (LaunchServices
+      does not start a second copy); record the behaviour. The page itself is
+      always at `http://127.0.0.1:8420`.
+- [ ] A startup error is visible: with port 8420 taken by another program, an
+      alert names the problem.
+- [ ] Closing the page: the app stops on its own about 15 minutes later, and
+      port 8420 is released.
+- [ ] Console workflow from Terminal (`.../Contents/MacOS/MySQL-DBA-Validator
+      Console`): pairing code shown, operator commands work, the page pairs, a
+      browser session cannot manage targets, company operations fail closed
+      without `--tls-ca`.
+- [ ] Closing that Terminal window, and Ctrl+C in it, both stop the web app
+      too (port 8420 released, no leftover process).
+- [ ] Local MySQL evidence against a MySQL server on the Mac: `SELECT` with
+      plan and metadata, `UPDATE`/`DELETE` with metadata and the read-only plan
+      message, a rejected login.
+- [ ] The typed MySQL password appears in no file under
+      `~/.local/state/MySQLDBAValidator` and in no output.
+- [ ] Record the macOS version used.
+
+Only with a signed and notarized build (stages 5 to 7):
+
+- [ ] The downloaded `.dmg` carries the quarantine attribute
+      (`xattr -p com.apple.quarantine <dmg>`); opening it and the app shows the
+      normal first-launch dialog for a notarized app, with no "unidentified
+      developer" or "damaged" warning and nothing to allow in System Settings.
+- [ ] `spctl --assess --type exec -vvv "/Applications/MySQL DBA Validator.app"`
+      reports `accepted` and `source=Notarized Developer ID`.
 
 ## Reproducing the checks
 

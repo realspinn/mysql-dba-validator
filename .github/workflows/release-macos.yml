@@ -1,0 +1,280 @@
+name: macOS build (Apple Silicon)
+
+# Two separate paths, in separate jobs:
+#
+# 1. build-test (runs today, needs nothing): on a GitHub-hosted Apple Silicon
+#    runner, runs the test suite, builds the UNSIGNED macOS arm64 app, audits it,
+#    packages it with ditto, audits and smoke-tests that package, and keeps it as a
+#    workflow artifact for inspection. No secrets, no signing, no notarization, no
+#    release. It is safe to run by hand (workflow_dispatch): the artifact is
+#    labelled "unsigned" and with the commit, never attached to a release.
+#
+# 2. sign-notarize -> verify-signed -> publish (future, OFF): Developer ID signing,
+#    notarization, stapling and upload to the draft release that the Windows
+#    workflow creates. These jobs run only for a v* tag AND when the repository
+#    variable MACOS_SIGNING_ENABLED is "true"; until a maintainer sets that and the
+#    secrets of the protected "macos-release" environment (RELEASING.md), they are
+#    skipped. The signing job never installs packages, runs tests or executes the
+#    app, so no third-party code runs where the signing credentials exist; its
+#    actions are pinned to commit SHAs.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: macos-15            # GitHub-hosted, Apple Silicon (arm64)
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          architecture: arm64
+
+      - name: Runner is Apple Silicon
+        run: |
+          test "$(uname -m)" = "arm64"
+          python -c "import platform, sys; assert sys.platform == 'darwin' and platform.machine() == 'arm64'"
+          sw_vers
+
+      - name: Tag matches backend/version.py
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'backend'); import version; print(version.APP_VERSION)")
+          if [ "v$version" != "${{ github.ref_name }}" ]; then
+            echo "tag ${{ github.ref_name }} does not match APP_VERSION $version"; exit 1
+          fi
+
+      - name: Test suite
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pytest -q -rs --junitxml="$RUNNER_TEMP/pytest-macos.xml"
+          python -m pip check
+
+      - name: No unexpected skipped tests
+        run: python release/check_pytest_skips.py "$RUNNER_TEMP/pytest-macos.xml" --platform macos
+
+      - name: Build and audit the unsigned app
+        run: python release/build_macos.py build
+
+      - name: Package the unsigned app (ditto keeps symlinks and permissions)
+        run: python release/build_macos.py package-unsigned
+
+      - name: Audit the unsigned package
+        run: build/release-macos/venv/bin/python release/audit_macos.py dist/macos/*-macos-arm64-unsigned.zip
+
+      - name: Smoke-test the unsigned package
+        run: python release/smoke_test_macos.py dist/macos/*-macos-arm64-unsigned.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-unsigned-${{ github.sha }}
+          path: |
+            dist/macos/*-macos-arm64-unsigned.zip
+            dist/macos/*-macos-arm64-unsigned.zip.sha256
+          retention-days: 14
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ future signed path (OFF)
+
+  sign-notarize:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v') && vars.MACOS_SIGNING_ENABLED == 'true'
+    runs-on: macos-15
+    environment: macos-release   # protected: the only place the signing secrets exist
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Standard library only: nothing is installed with pip in this job.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.14"
+          architecture: arm64
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: macos-arm64-unsigned-${{ github.sha }}
+          path: unsigned
+
+      - name: Unpack the tested unsigned app
+        run: |
+          set -euo pipefail
+          cd unsigned && shasum -a 256 -c ./*.sha256 && cd ..
+          mkdir -p dist/macos
+          ditto -x -k unsigned/*-macos-arm64-unsigned.zip dist/macos
+
+      - name: Import the signing certificate into a temporary keychain
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keychain="$RUNNER_TEMP/mdv-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+          echo "::add-mask::$keychain_password"
+          cert="$RUNNER_TEMP/mdv-signing.p12"
+          printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$cert"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$cert"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -q "Developer ID Application"
+
+      - name: Sign the app (Developer ID, Hardened Runtime, secure timestamp)
+        env:
+          MDV_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: python -I release/build_macos.py sign
+
+      - name: Write the notary API key
+        env:
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$NOTARY_API_KEY_P8" > "$RUNNER_TEMP/mdv-notary-key.p8"
+
+      - name: Notarize and staple the app
+        env:
+          MDV_NOTARY_KEY_PATH: ${{ runner.temp }}/mdv-notary-key.p8
+          MDV_NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          MDV_NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          python -I release/build_macos.py notarize app
+          python -I release/build_macos.py staple app
+
+      - name: Build and sign the disk image
+        env:
+          MDV_CODESIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: python -I release/build_macos.py dmg
+
+      - name: Notarize and staple the disk image
+        env:
+          MDV_NOTARY_KEY_PATH: ${{ runner.temp }}/mdv-notary-key.p8
+          MDV_NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          MDV_NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          python -I release/build_macos.py notarize dmg
+          python -I release/build_macos.py staple dmg
+
+      # Immediately after the last use, and again if anything above failed.
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/mdv-signing.keychain-db" 2> /dev/null || true
+          rm -f "$RUNNER_TEMP/mdv-signing.p12" "$RUNNER_TEMP/mdv-notary-key.p8"
+
+      - name: Verify signatures, notarization, stapling and Gatekeeper assessment
+        run: |
+          python -I release/build_macos.py verify
+          python -I release/build_macos.py checksum
+
+      - name: Nothing but the release files leaves this job
+        run: |
+          set -eu
+          found="$(find . "$RUNNER_TEMP" \( -name '*.p12' -o -name '*.p8' -o -name '*.keychain*' \) -print 2> /dev/null || true)"
+          if [ -n "$found" ]; then
+            echo "signing material found:"; echo "$found"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: macos-arm64-signed
+          path: |
+            dist/macos/*-macos-arm64.dmg
+            dist/macos/*-macos-arm64.dmg.sha256
+            dist/macos/macos-verification.txt
+            dist/macos/notary/*.json
+          if-no-files-found: error
+
+  verify-signed:
+    # Runs the signed build (smoke test) and audits it, without any signing secret.
+    needs: sign-notarize
+    runs-on: macos-15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.14"
+          architecture: arm64
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: macos-arm64-signed
+          path: signed
+
+      - name: Smoke-test and audit the signed disk image
+        run: |
+          set -euo pipefail
+          cd signed && shasum -a 256 -c ./*.dmg.sha256 && cd ..
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m venv "$RUNNER_TEMP/audit-venv"
+          "$RUNNER_TEMP/audit-venv/bin/python" -m pip install --disable-pip-version-check -q --only-binary :all: \
+            -r release/requirements-build-macos.txt
+          python release/smoke_test_macos.py signed/*-macos-arm64.dmg
+          "$RUNNER_TEMP/audit-venv/bin/python" release/audit_macos.py signed/*-macos-arm64.dmg
+
+  publish:
+    # Upload to the draft release the Windows workflow creates for this tag. This job
+    # has write access to releases but none of the signing secrets.
+    needs: verify-signed
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: macos-arm64-signed
+          path: macos-release
+
+      - name: Wait for the draft release, then upload the disk image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Never create a release here: only the Windows workflow does, as a draft.
+          # Without --clobber, gh refuses to replace an asset that already exists.
+          for attempt in $(seq 1 60); do
+            if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null); then
+              break
+            fi
+            sleep 30
+          done
+          if [ "${draft:-}" != "true" ]; then
+            echo "No draft release for $TAG (missing or already published); not uploading."; exit 1
+          fi
+          gh release upload "$TAG" macos-release/*.dmg macos-release/*.dmg.sha256

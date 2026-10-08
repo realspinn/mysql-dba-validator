@@ -135,6 +135,7 @@ def test_backend_command_enables_idle_shutdown_only_when_asked(monkeypatch):
 
 
 def test_frozen_backend_always_runs_from_the_console_executable(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")  # the Windows release (macOS: tests/test_release_macos.py)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "MySQL-DBA-Validator.exe"))
     command, _env = launcher.backend_command(900)
@@ -263,6 +264,7 @@ def test_windowed_port_taken_by_another_program_is_a_visible_error(windowed, mon
 
 
 def test_windowed_missing_console_executable_is_a_visible_error(windowed, monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")  # the Windows release (macOS: tests/test_release_macos.py)
     monkeypatch.setattr(launcher, "port_in_use", lambda port: False)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "MySQL-DBA-Validator.exe"))
@@ -312,6 +314,10 @@ def test_windowed_backend_failure_and_unexpected_exit_are_visible(monkeypatch, t
     assert kwargs["env"][launcher.IDLE_SHUTDOWN_ENV] == str(launcher.DEFAULT_IDLE_SHUTDOWN_SECONDS)
     if os.name == "nt":
         assert kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert kwargs["stdin"] == subprocess.DEVNULL  # Windows: the Job Object ties the child to the launcher
+    else:
+        assert kwargs["stdin"] == subprocess.PIPE  # POSIX: the parent pipe does
+        assert kwargs["env"][launcher.PARENT_PIPE_ENV] == "1"
 
     monkeypatch.setattr(launcher, "wait_for_port", lambda port, child, timeout: True)
     assert launcher.run_windowed([]) == 1
