@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import dotenv
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from backend.version import APP_VERSION
@@ -560,3 +562,68 @@ def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tm
     assert "source checkout path found in _internal/checkout.pyd" in text
     assert "build user's home folder found in _internal/leak.pyd" in text
     assert len(findings) == 5
+
+
+# ----------------------------------------------------------------------------- release workflow
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# A stand-in for "python" that records each call and fails the one named in FAKE_FAIL.
+FAKE_PYTHON = """
+import os, sys
+args = sys.argv[1:]
+kind = "pytest" if args[:2] == ["-m", "pytest"] else " ".join(args[:3])
+with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as log:
+    log.write(kind + "\\n")
+sys.exit(1 if kind == os.environ.get("FAKE_FAIL") else 0)
+"""
+
+
+def _powershell() -> str | None:
+    return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _run_windows_test_step(tmp_path: Path, fail: str) -> tuple[int, list[str]]:
+    """Run the workflow's "Test suite" script the way the runner runs a pwsh step."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release-windows.yml").read_text(encoding="utf-8"))
+    job = workflow["jobs"]["windows-x64"]
+    assert job["defaults"]["run"]["shell"] == "pwsh"
+    step = next(s for s in job["steps"] if s.get("name") == "Test suite")
+    assert "shell" not in step and "continue-on-error" not in step
+    # GitHub's pwsh wrapper: stop on cmdlet errors, then exit with the last exit code.
+    script = tmp_path / "step.ps1"
+    script.write_text("$ErrorActionPreference = 'stop'\n" + step["run"]
+                      + "\nif ((Test-Path -LiteralPath variable:\\LASTEXITCODE)) { exit $LASTEXITCODE }\n",
+                      encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "fake_python.py").write_text(FAKE_PYTHON, encoding="utf-8")
+    if os.name == "nt":
+        (bin_dir / "python.cmd").write_text(f'@"{sys.executable}" "{bin_dir / "fake_python.py"}" %*\n',
+                                            encoding="utf-8")
+    else:
+        fake = bin_dir / "python"
+        fake.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{bin_dir / "fake_python.py"}" "$@"\n',
+                        encoding="utf-8")
+        fake.chmod(0o755)
+    log = tmp_path / "calls.txt"
+    log.touch()
+    env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+               FAKE_LOG=str(log), FAKE_FAIL=fail)
+    proc = subprocess.run([_powershell(), "-NoProfile", "-NonInteractive", "-Command", f". '{script}'"],
+                          cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+    return proc.returncode, log.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.skipif(_powershell() is None, reason="needs PowerShell to run the workflow step")
+@pytest.mark.parametrize("fail, code, calls", [
+    ("none", 0, ["-m pip install", "pytest", "-m pip check"]),
+    ("pytest", 1, ["-m pip install", "pytest"]),
+    ("-m pip install", 1, ["-m pip install"]),
+    ("-m pip check", 1, ["-m pip install", "pytest", "-m pip check"]),
+])
+def test_windows_test_step_fails_when_any_command_fails(tmp_path, fail, code, calls):
+    """A failing pytest (or install) must fail the step even though later commands succeed."""
+    returncode, made = _run_windows_test_step(tmp_path, fail)
+    assert returncode == code
+    assert made == calls
