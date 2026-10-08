@@ -367,17 +367,21 @@ def watch_idle(monitor: IdleMonitor, stop: Callable[[], None], timeout: float,
             return
 
 
-def watch_parent(stream, stop: Callable[[], None], grace: float = PARENT_EXIT_GRACE_SECONDS,
+def watch_parent(fd: int, stop: Callable[[], None], grace: float = PARENT_EXIT_GRACE_SECONDS,
                  force_exit: Callable[[int], None] = os._exit,
                  start_timer: Callable[[float, Callable[[], None]], object] | None = None) -> None:
-    """Call ``stop`` once the launcher's end of the pipe on ``stream`` is closed.
+    """Call ``stop`` once the launcher's end of the pipe on file descriptor ``fd`` is closed.
 
     The launcher never writes to the pipe, so a read returns only at end of file:
     when the launcher has exited, however it ended. If the server has not stopped
     ``grace`` seconds later, the process exits anyway, so no backend is left behind.
+    The read is on the descriptor itself, not ``sys.stdin``: this thread may still be
+    waiting when the backend stops on its own (idle shutdown, or terminated by the
+    launcher), and a daemon thread blocked in a buffered read holds that object's lock,
+    which makes the interpreter abort (SIGABRT) when it shuts down.
     """
     try:
-        while stream.read(4096):
+        while os.read(fd, 4096):
             pass
     except Exception:
         pass
@@ -433,7 +437,7 @@ def run_backend() -> int:
             print("The launcher has exited; stopping.", flush=True)
             server.should_exit = True
 
-        threading.Thread(target=watch_parent, args=(sys.stdin.buffer, stop_with_launcher),
+        threading.Thread(target=watch_parent, args=(sys.stdin.fileno(), stop_with_launcher),
                          name="parent-watch", daemon=True).start()
 
     server.run()

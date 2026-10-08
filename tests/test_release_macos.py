@@ -76,12 +76,15 @@ def test_windows_keeps_the_job_object_and_no_pipe():
 
 
 def test_watch_parent_stops_at_end_of_file_and_forces_exit_after_the_grace_period():
-    import io
-
     stopped, timers, exits = [], [], []
-    stream = io.BytesIO(b"ignored bytes")
-    launcher.watch_parent(stream, lambda: stopped.append(True), grace=7.5, force_exit=exits.append,
-                          start_timer=lambda seconds, action: timers.append((seconds, action)))
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"ignored bytes")
+    os.close(write_fd)
+    try:
+        launcher.watch_parent(read_fd, lambda: stopped.append(True), grace=7.5, force_exit=exits.append,
+                              start_timer=lambda seconds, action: timers.append((seconds, action)))
+    finally:
+        os.close(read_fd)
     assert stopped == [True]
     assert [seconds for seconds, _ in timers] == [7.5] and exits == []
     timers[0][1]()  # the grace period passes without the server stopping
@@ -89,12 +92,13 @@ def test_watch_parent_stops_at_end_of_file_and_forces_exit_after_the_grace_perio
 
 
 def test_watch_parent_stops_when_the_pipe_read_fails():
-    class Broken:
-        def read(self, _size):
-            raise OSError("pipe broken")
-
+    read_fd, write_fd = os.pipe()
     stopped = []
-    launcher.watch_parent(Broken(), lambda: stopped.append(True), start_timer=lambda *_: None)
+    try:  # reading the write end fails (EBADF)
+        launcher.watch_parent(write_fd, lambda: stopped.append(True), start_timer=lambda *_: None)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
     assert stopped == [True]
 
 
@@ -103,7 +107,7 @@ CHILD = textwrap.dedent("""
     sys.path.insert(0, sys.argv[1])
     from release.launcher import watch_parent
     stopped = threading.Event()
-    threading.Thread(target=watch_parent, args=(sys.stdin.buffer, stopped.set),
+    threading.Thread(target=watch_parent, args=(sys.stdin.fileno(), stopped.set),
                      kwargs={"start_timer": lambda *_: None}, daemon=True).start()
     print("stopped" if stopped.wait(30) else "still running", flush=True)
 """)
@@ -157,11 +161,11 @@ def test_backend_with_the_parent_pipe_stops_when_the_launcher_closes_it(monkeypa
     monkeypatch.setenv(launcher.PARENT_PIPE_ENV, "1")
     monkeypatch.delenv(launcher.IDLE_SHUTDOWN_ENV, raising=False)
     read_fd, write_fd = os.pipe()
-    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(buffer=os.fdopen(read_fd, "rb")))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(fileno=lambda: read_fd))
     # The real watcher, minus its force-exit timer (which would end the test process).
     real_watch = launcher.watch_parent
     monkeypatch.setattr(launcher, "watch_parent",
-                        lambda stream, stop: real_watch(stream, stop, start_timer=lambda *_: None))
+                        lambda fd, stop: real_watch(fd, stop, start_timer=lambda *_: None))
     FakeServer.instances.clear()
     result = {}
     worker = threading.Thread(target=lambda: result.setdefault("code", launcher.run_backend()))
@@ -170,8 +174,46 @@ def test_backend_with_the_parent_pipe_stops_when_the_launcher_closes_it(monkeypa
     assert worker.is_alive() and calls == []  # serving through uvicorn.Server, not uvicorn.run
     os.close(write_fd)  # the launcher is gone
     worker.join(timeout=15)
+    os.close(read_fd)
     assert not worker.is_alive() and result["code"] == 0
     assert FakeServer.instances[-1].should_exit is True
+
+
+IDLE_BACKEND = textwrap.dedent("""
+    import sys, time, types
+    sys.path.insert(0, sys.argv[1])
+
+    class Server:  # uvicorn.Server stand-in: serves until told to stop
+        def __init__(self, config):
+            self.should_exit = False
+
+        def run(self):
+            while not self.should_exit:
+                time.sleep(0.05)
+
+    sys.modules["uvicorn"] = types.SimpleNamespace(Server=Server, Config=lambda app, **kwargs: kwargs)
+    from release import launcher
+    sys.exit(launcher.run_backend())
+""")
+
+
+def test_backend_stops_cleanly_on_idle_while_the_launcher_still_holds_the_pipe(tmp_path):
+    """The windowed app's idle shutdown: the backend ends on its own while its parent-pipe
+    watcher is still waiting on the open pipe. It must exit 0, not abort (SIGABRT) at
+    interpreter shutdown, as a watcher blocked in a buffered stdin read made it do."""
+    env = dict(os.environ, **{launcher.PARENT_PIPE_ENV: "1", launcher.IDLE_SHUTDOWN_ENV: "1"})
+    child = subprocess.Popen([sys.executable, "-c", IDLE_BACKEND, str(ROOT)], cwd=tmp_path, env=env,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:  # the launcher stays alive: the pipe is never closed while the backend runs
+        output = child.stdout.read().decode(errors="replace")
+        code = child.wait(timeout=60)
+    finally:
+        child.stdin.close()
+        if child.poll() is None:
+            child.kill()
+    assert "No page heartbeat for 1 seconds; stopping." in output
+    assert "Fatal Python error" not in output, output
+    assert code == 0, output
 
 
 def test_backend_without_parent_pipe_or_idle_shutdown_is_unchanged(monkeypatch):
