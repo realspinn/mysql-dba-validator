@@ -5,9 +5,13 @@ name: macOS build (Apple Silicon)
 # 1. build-test (runs today, needs nothing): on a GitHub-hosted Apple Silicon
 #    runner, runs the test suite, builds the UNSIGNED macOS arm64 app, audits it,
 #    packages it with ditto, audits and smoke-tests that package, and keeps it as a
-#    workflow artifact for inspection. No secrets, no signing, no notarization, no
-#    release. It is safe to run by hand (workflow_dispatch): the artifact is
-#    labelled "unsigned" and with the commit, never attached to a release.
+#    workflow artifact. No secrets, no signing, no notarization, no release. It is
+#    safe to run by hand (workflow_dispatch): the artifact is labelled "unsigned"
+#    and with the commit.
+#
+# publish-unsigned (for a v* tag while MACOS_SIGNING_ENABLED is not "true"):
+#    uploads exactly that tested zip (ad hoc signed only, not notarized) and its
+#    .sha256 to the draft release that the Windows workflow creates for the tag.
 #
 # 2. sign-notarize -> verify-signed -> publish (future, OFF): Developer ID signing,
 #    notarization, stapling and upload to the draft release that the Windows
@@ -87,6 +91,48 @@ jobs:
             dist/macos/*-macos-arm64-unsigned.zip.sha256
           retention-days: 14
           if-no-files-found: error
+
+  # ------------------------------------------------------------------ unsigned release (signing off)
+
+  publish-unsigned:
+    # Signing is off: upload the zip build-test built, audited and smoke-tested to
+    # the draft release for this tag. Write access to releases, no secrets.
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v') && vars.MACOS_SIGNING_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: macos-arm64-unsigned-${{ github.sha }}
+          path: macos-release
+
+      - name: Wait for the draft release, then upload the unsigned zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Only the zip named for this tag, and a checksum written for exactly that zip.
+          zip="MySQL-DBA-Validator-${TAG}-macos-arm64-unsigned.zip"
+          test -f "macos-release/$zip"
+          test -f "macos-release/$zip.sha256"
+          grep -Eqx "[0-9a-f]{64}  $zip" "macos-release/$zip.sha256"
+          (cd macos-release && shasum -a 256 -c "$zip.sha256")
+          # Never create a release here: only the Windows workflow does, as a draft.
+          # Without --clobber, gh refuses to replace an asset that already exists.
+          for attempt in $(seq 1 60); do
+            if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null); then
+              break
+            fi
+            sleep 30
+          done
+          if [ "${draft:-}" != "true" ]; then
+            echo "No draft release for $TAG (missing or already published); not uploading."; exit 1
+          fi
+          gh release upload "$TAG" "macos-release/$zip" "macos-release/$zip.sha256"
 
   # ------------------------------------------------------------------ future signed path (OFF)
 

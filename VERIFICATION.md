@@ -194,8 +194,10 @@ runs these on a real Apple Silicon Mac. None has been done yet.
 With the unsigned CI build (stage 4): download the `macos-arm64-unsigned-<commit>`
 artifact from the workflow run, check its SHA256, unzip it with
 `ditto -x -k <zip> <folder>`, and move the app to Applications. macOS blocks an
-unsigned app that was downloaded; for this test only, allow it once in System
-Settings > Privacy & Security ("Open Anyway"). Do not distribute it.
+unsigned app that was downloaded; allow it once in System Settings > Privacy &
+Security ("Open Anyway"). A tagged release can carry this unsigned zip (see
+RELEASING.md); it is not notarized, and passing CI does not mean any of these
+real-Mac checks were done.
 
 - [ ] SHA256 of the download matches its `.sha256` file.
 - [ ] Opening the app opens `http://127.0.0.1:8420` in the default browser;

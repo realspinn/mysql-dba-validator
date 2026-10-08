@@ -105,10 +105,10 @@ those versions.
    test are release gates: if either fails, no draft is created, and the run
    uploads only a diagnostic manifest (file names, sizes, SHA256 hashes and the
    audit output), never the failed binaries. The same tag also starts the
-   macOS workflow, which builds and tests an unsigned macOS app but attaches
-   nothing to the release; only its signed path, once enabled, adds a disk image
-   to that draft (see [macOS](#macos-apple-silicon)). It never creates a release
-   of its own.
+   macOS workflow, which builds and tests the macOS app and adds it to that
+   draft: the unsigned zip while signing is off, or, once signing is enabled,
+   only the signed disk image (see [macOS](#macos-apple-silicon)). It never
+   creates a release of its own.
 4. Download the draft's zip and verify it before publishing: check the
    checksum, run the audit against it with your local `.env`, and run the
    smoke test.
@@ -154,9 +154,33 @@ repository:
    `macos-arm64-unsigned-<commit>` for 14 days.
 
 The unsigned app is only ad hoc signed (PyInstaller does that; Apple Silicon
-needs a signature to run anything). It is a test build: Gatekeeper does not open
-it normally once downloaded, and it is never attached to a release. To try it on
-a Mac for the acceptance pass, see [VERIFICATION.md](VERIFICATION.md).
+needs a signature to run anything) and is not notarized, so Gatekeeper does not
+open it normally once downloaded. To try it on a Mac for the acceptance pass,
+see [VERIFICATION.md](VERIFICATION.md).
+
+### Unsigned release (while signing is off)
+
+For a `v*` tag, while `MACOS_SIGNING_ENABLED` is not `true`, the job
+`publish-unsigned` runs after `build-test` has passed. It uses no secrets. It
+downloads that job's artifact and checks it. The zip must be named for the tag
+(`MySQL-DBA-Validator-v<version>-macos-arm64-unsigned.zip`), and its `.sha256`
+must name exactly that zip and match it. It then waits for the Windows
+workflow's **draft** release for the same tag, and uploads only those two files
+without `--clobber`. If there is no draft for the tag (missing or already
+published), it uploads nothing and fails. A published release, such as v0.4.0,
+never receives it. Before publishing the draft, review the zip like the Windows
+one, and say in the release notes that the macOS app is Apple Silicon only,
+unsigned (ad hoc signed only) and not notarized, and say which real-Mac checks
+in [VERIFICATION.md](VERIFICATION.md) have and have not been done. Include these
+steps for opening it:
+
+1. Check the download: `shasum -a 256 -c <zip>.sha256` in the download folder.
+2. Unzip it with `ditto -x -k <zip> <folder>` (or by double-clicking it), and
+   move `MySQL DBA Validator.app` to Applications.
+3. Open the app. macOS blocks it, because it is not notarized. In System
+   Settings > Privacy & Security, choose "Open Anyway" once, then open it again.
+
+Developer ID signing and notarization remain the future path below.
 
 The app bundle:
 

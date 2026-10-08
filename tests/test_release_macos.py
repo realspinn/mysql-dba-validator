@@ -7,9 +7,11 @@ runner; here their inputs, ordering and safety rules are tested.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -858,7 +860,7 @@ def test_only_the_signing_job_sees_secrets_and_it_runs_no_third_party_code():
 
 def test_secret_bearing_and_downstream_jobs_pin_actions_to_commit_shas():
     jobs = _workflow()["jobs"]
-    for name in ("sign-notarize", "verify-signed", "publish"):
+    for name in ("sign-notarize", "verify-signed", "publish", "publish-unsigned"):
         for step in jobs[name]["steps"]:
             if "uses" in step:
                 assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", step["uses"]), (name, step["uses"])
@@ -888,14 +890,103 @@ def test_macos_workflow_never_creates_or_overwrites_a_release():
     body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
     assert "gh release create" not in body and "--clobber" not in body
     jobs = _workflow()["jobs"]
-    publish = jobs["publish"]
-    assert publish["permissions"] == {"contents": "write"} and "environment" not in publish
-    assert "isDraft" in _runs(publish) and "gh release upload" in _runs(publish)
+    for name in ("publish", "publish-unsigned"):
+        publish = jobs[name]
+        assert publish["permissions"] == {"contents": "write"} and "environment" not in publish
+        assert "isDraft" in _runs(publish) and "gh release upload" in _runs(publish)
     for name, job in jobs.items():
-        if name != "publish":
+        if name not in ("publish", "publish-unsigned"):
             assert job["permissions"] == {"contents": "read"}, name
 
 
 def test_windows_workflow_is_still_the_only_release_creator():
     windows = (ROOT / ".github" / "workflows" / "release-windows.yml").read_text(encoding="utf-8")
     assert "gh release create" in windows and "--draft" in windows
+
+
+def test_unsigned_release_runs_only_for_a_tag_while_signing_is_off():
+    jobs = _workflow()["jobs"]
+    tag = "startsWith(github.ref, 'refs/tags/v')"
+    unsigned = jobs["publish-unsigned"]
+    # Exactly one of the two paths runs for a tag: unsigned zip or signed disk image.
+    assert unsigned["if"] == f"{tag} && vars.MACOS_SIGNING_ENABLED != 'true'"
+    assert jobs["sign-notarize"]["if"] == f"{tag} && vars.MACOS_SIGNING_ENABLED == 'true'"
+    assert jobs["publish"]["needs"] == "verify-signed"
+    # Only after build-test passed (tests, audits, smoke test), and only its artifact.
+    assert unsigned["needs"] == "build-test"
+    tested = jobs["build-test"]["steps"][-1]
+    assert tested["uses"].startswith("actions/upload-artifact")
+    assert [s["with"]["name"] for s in unsigned["steps"] if "uses" in s] == [tested["with"]["name"]]
+    assert "secrets." not in yaml.safe_dump(unsigned) and "vars." not in yaml.safe_dump(unsigned["steps"])
+    commands = "\n".join(line for line in _runs(unsigned).splitlines() if not line.lstrip().startswith("#"))
+    assert "--clobber" not in commands and "gh release create" not in commands
+
+
+UNSIGNED_ZIP = "MySQL-DBA-Validator-v9.9.9-macos-arm64-unsigned.zip"
+
+FAKE_GH = """#!/bin/sh
+echo "$*" >> calls.txt
+if [ "$1 $2" = "release view" ]; then
+  [ "$FAKE_RELEASE" = missing ] && exit 1
+  [ "$FAKE_RELEASE" = draft ] && echo true || echo false
+fi
+"""
+
+
+def _bash() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")  # Git for Windows' bash, not WSL's
+    bash = Path(git).resolve().parent.parent / "bin" / "bash.exe" if git else None
+    return str(bash) if bash and bash.is_file() else None
+
+
+def _publish_unsigned(tmp_path: Path, release: str, files: dict[str, bytes]) -> tuple[int, list[str]]:
+    """Run the publish-unsigned script with a fake gh against the given downloaded files."""
+    step = _workflow()["jobs"]["publish-unsigned"]["steps"][-1]
+    folder = tmp_path / "macos-release"
+    folder.mkdir()
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, text in (("gh", FAKE_GH), ("sleep", "#!/bin/sh\n")):
+        (bin_dir / name).write_bytes(text.encode())
+        (bin_dir / name).chmod(0o755)
+    prelude = ('export PATH="$PWD/bin:$PATH"\n'
+               'command -v shasum > /dev/null || shasum() { sha256sum "${@:3}"; }\n')  # Git for Windows
+    (tmp_path / "step.sh").write_bytes((prelude + step["run"]).encode())
+    env = dict(os.environ, TAG="v9.9.9", FAKE_RELEASE=release)
+    proc = subprocess.run([_bash(), "step.sh"], cwd=tmp_path, env=env, capture_output=True, timeout=60)
+    calls = tmp_path / "calls.txt"
+    return proc.returncode, calls.read_text().splitlines() if calls.exists() else []
+
+
+def _checksum(data: bytes, name: str = UNSIGNED_ZIP) -> bytes:
+    return f"{hashlib.sha256(data).hexdigest()}  {name}\n".encode()
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash to run the workflow script")
+def test_unsigned_release_uploads_only_the_tested_zip_to_the_tags_draft(tmp_path):
+    files = {UNSIGNED_ZIP: b"zip", UNSIGNED_ZIP + ".sha256": _checksum(b"zip"), "other.zip": b"x"}
+    code, calls = _publish_unsigned(tmp_path, "draft", files)
+    assert code == 0
+    assert calls == ["release view v9.9.9 --json isDraft --jq .isDraft",
+                     f"release upload v9.9.9 macos-release/{UNSIGNED_ZIP} macos-release/{UNSIGNED_ZIP}.sha256"]
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash to run the workflow script")
+@pytest.mark.parametrize("release, files", [
+    ("published", {UNSIGNED_ZIP: b"zip", UNSIGNED_ZIP + ".sha256": _checksum(b"zip")}),
+    ("missing", {UNSIGNED_ZIP: b"zip", UNSIGNED_ZIP + ".sha256": _checksum(b"zip")}),
+    ("draft", {UNSIGNED_ZIP.replace("9.9.9", "9.9.8"): b"zip",
+               UNSIGNED_ZIP.replace("9.9.9", "9.9.8") + ".sha256": _checksum(b"zip", UNSIGNED_ZIP.replace("9.9.9", "9.9.8"))}),
+    ("draft", {UNSIGNED_ZIP: b"zip"}),
+    ("draft", {UNSIGNED_ZIP: b"changed", UNSIGNED_ZIP + ".sha256": _checksum(b"zip")}),
+    ("draft", {UNSIGNED_ZIP: b"zip", UNSIGNED_ZIP + ".sha256": _checksum(b"zip", "other.zip")}),
+], ids=["published-release", "no-release", "zip-of-another-version", "no-checksum", "checksum-mismatch",
+        "checksum-of-another-file"])
+def test_unsigned_release_uploads_nothing_unless_everything_matches(tmp_path, release, files):
+    code, calls = _publish_unsigned(tmp_path, release, files)
+    assert code != 0
+    assert not any(call.startswith("release upload") for call in calls)
