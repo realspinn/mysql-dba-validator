@@ -157,7 +157,7 @@ These are separate stages; each is reached only when it has actually happened.
 | --- | --- |
 | 1. Implemented in the repository | Yes: launcher support, `release/build_macos.py`, `release/audit_macos.py`, `release/smoke_test_macos.py`, `.github/workflows/release-macos.yml` |
 | 2. Tested on Windows (simulated macOS) | Yes, see below |
-| 3. Built, audited and smoke-tested on a GitHub-hosted Apple Silicon runner | **Not yet** (the workflow's `build-test` job; no credentials needed) |
+| 3. Built, audited and smoke-tested on a GitHub-hosted Apple Silicon runner | Yes, by the workflow's `build-test` job (no credentials needed): run 37799047469 on `main` at `31ad995`, 2026-10-08. Test suite 861 passed, 1 expected skip; app and zip audits passed; smoke test 49/49 on the unsigned arm64 zip. That build is ad hoc signed only and not notarized; it is a workflow artifact, not a release asset |
 | 4. Tested by hand on a real Mac | **Not yet** |
 | 5. Signed with a Developer ID | **Not yet** (needs an Apple Developer account; not planned until resources allow) |
 | 6. Notarized by Apple | **Not yet** |
@@ -174,7 +174,7 @@ What the Windows testing (stage 2) covers, and what it does not:
 | macOS audit rules (bundle structure, version, page, signing-material names, hidden items, physical symlink containment) | Unit tests on synthetic bundles on Windows; the symbolic-link tests are skipped on Windows and run on the macOS runner |
 | Workflow trust boundary (no secrets in `build-test`, signing gated and isolated) | Unit tests on the workflow file |
 | Every pinned dependency has a CPython 3.14 macOS arm64 (or universal2) wheel | Checked against PyPI; no source builds needed |
-| Building a real `.app`, running it, macOS test suite | **Not run**: stage 3 |
+| Building a real `.app`, running it, macOS test suite | Not covered by Windows testing; done in stage 3 |
 
 On the macOS runner the test suite runs in full; the job fails if any test
 skips other than the Windows Job Object test (`release/check_pytest_skips.py`),

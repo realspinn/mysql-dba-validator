@@ -123,7 +123,9 @@ Prepared for v0.4.1 and **not released**. The macOS status, step by step
 1. Implemented: launcher support, build, audit, smoke test and workflow are in
    the repository.
 2. Tested on Windows: unit tests that simulate the macOS-specific parts.
-3. Built and smoke-tested on a GitHub-hosted Apple Silicon runner: **not yet**.
+3. Built, audited and smoke-tested on a GitHub-hosted Apple Silicon runner:
+   **yes**, as the unsigned validation build below (ad hoc signed only, not
+   notarized; a CI run on a virtual Mac, not a test on a real Mac).
 4. Tested by hand on a real Mac: **not yet**.
 5. Signed with a Developer ID: **not yet** (needs an Apple Developer account).
 6. Notarized by Apple: **not yet**.
