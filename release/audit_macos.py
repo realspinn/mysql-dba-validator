@@ -24,8 +24,9 @@ specific to a macOS bundle. Fails (exit 1) on any finding:
   of this project;
 * content of every file and of both executables' embedded archives: secret values
   (the developer .env, --forbid strings and the values of --forbid-env variables),
-  PEM private-key blocks, machine-specific paths, and bundled test or development
-  HTTP-client modules.
+  PEM private-key blocks, machine-specific paths (with one narrow exception for
+  upstream wheels' build paths in Mach-O content, see UPSTREAM_BUILD_PATH), and
+  bundled test or development HTTP-client modules.
 
 A .dmg is mounted read-only with hdiutil and a .zip is unpacked with ditto (both
 macOS only). Secret values are never printed; --forbid-env reads them from the
@@ -44,6 +45,7 @@ import argparse
 import hashlib
 import os
 import plistlib
+import posixpath
 import re
 import subprocess
 import sys
@@ -78,7 +80,23 @@ MACOS_FORBIDDEN_NAME_PATTERNS = [
     (re.compile(r"(^|/)(backend|connector|release|tests)/[^/]+\.py$", re.I), "project source file"),
 ]
 MACHO_MAGICS = {bytes.fromhex(m) for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca")}
-COMPILED_SUFFIXES = (".so", ".dylib")
+
+# Compiled extensions in PyPI wheels (cffi, cryptography, httptools, PyYAML, uvloop,
+# websockets, the Rust ones) are built on GitHub-hosted macOS runners and embed their
+# build paths. Our own GitHub runner has the same home folder, /Users/runner. So in
+# Mach-O content only (by magic number, never by file name), a home-folder hit is not
+# a finding when the path continues as one of:
+#   /.cargo/registry/          Rust crate sources (as in the Windows audit);
+#   /work/<name>/<name>/       another repository's GitHub Actions workspace,
+# where <name> is never this repository, and the rest of the path, normalised, stays
+# inside that prefix (PyYAML legitimately has .../pyyaml/pyyaml/pyyaml/../libyaml/...).
+# Every other home-folder hit still fails, everywhere. The source checkout path is a
+# separate rule that this never exempts. UTF-8 only; UTF-16 stays strict.
+UPSTREAM_BUILD_PATH = re.compile(rb"/+\.cargo/+registry/|/+work/+([a-z0-9][a-z0-9._-]*)/+\1/")
+PATH_REST = re.compile(rb"[\x21-\x7e]*")
+OWN_WORKSPACE_NAMES = {name.lower().encode() for name in (
+    "mysql-dba-validator", ROOT.name, ROOT.parent.name, os.environ.get("GITHUB_REPOSITORY", "").rsplit("/", 1)[-1],
+) if name}
 
 
 def read_version() -> str:
@@ -139,12 +157,33 @@ def content_rules(env_file: Path, forbid: list[str], forbid_env: list[str], find
     return rules, len(secrets)
 
 
+def upstream_build_path(lowered: bytes, end: int) -> bool:
+    """True if the home-folder path ending at ``end`` continues as an upstream wheel's build path."""
+    match = UPSTREAM_BUILD_PATH.match(lowered, end)
+    if not match or (match.group(1) or b"") in OWN_WORKSPACE_NAMES:
+        return False
+    rest = posixpath.normpath(PATH_REST.match(lowered, match.end()).group().decode("ascii") or ".")
+    return rest != ".." and not rest.startswith("../")  # never climbs out of the upstream prefix
+
+
+def contains_needle(lowered: bytes, needles: list[bytes], allow_upstream: bool) -> bool:
+    """True if any needle occurs; with allow_upstream, occurrences that are upstream build paths don't count."""
+    for needle in needles:
+        start = lowered.find(needle)
+        while start != -1:
+            if not (allow_upstream and upstream_build_path(lowered, start + len(needle))):
+                return True
+            start = lowered.find(needle, start + 1)
+    return False
+
+
 def scan(where: str, blob: bytes, rules, compiled: bool, findings: list[str]) -> None:
+    """Content rules for one file; ``compiled`` (Mach-O content) enables the upstream build-path exception."""
     if base.PRIVATE_KEY_RE.search(blob):
         findings.append(f"PEM private key block in {where}")
     lowered = blob.lower()
     for label, needles in rules:
-        if base.contains_needle(lowered, needles, compiled and label == base.HOME_LABEL):
+        if contains_needle(lowered, needles, compiled and label == base.HOME_LABEL):
             findings.append(f"{label} found in {where}")
 
 
@@ -196,8 +235,7 @@ def audit_app(app: Path, version: str, rules, findings: list[str], stats: dict, 
         if rel.startswith("Contents/MacOS/") and rel.count("/") == 2 and rel not in EXECUTABLES:
             findings.append(f"unexpected file in Contents/MacOS: {shown}")
 
-        compiled = is_macho(data) or rel.lower().endswith(COMPILED_SUFFIXES)
-        scan(shown, data, rules, compiled, findings)
+        scan(shown, data, rules, is_macho(data), findings)
         if rel in EXECUTABLES:
             if not is_macho(data):
                 findings.append(f"not a Mach-O executable: {shown}")

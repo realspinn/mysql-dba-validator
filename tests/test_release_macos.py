@@ -461,6 +461,92 @@ def test_macos_audit_allows_upstream_cargo_paths_only_in_compiled_code(tmp_path,
     assert findings == ["build user's home folder found in Contents/Resources/notes.txt"]
 
 
+# Strings found in the pinned macOS wheels (run 37766741435 flagged exactly these files).
+UPSTREAM_WHEEL_PATHS = {
+    "_cffi_backend.cpython-314-darwin.so": b"/Users/runner/work/cffi/cffi/src/c/_cffi_backend.c",
+    "cryptography/hazmat/bindings/_rust.abi3.so":
+        b"/Users/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/asn1-0.21.3/src/writer.rs\x00"
+        b"/Users/runner/work/cryptography/cryptography/src/rust/src/lib.rs\x00"
+        b"/Users/runner/work/infra/infra/artifact/lib/ossl-modules",
+    "httptools/parser/parser.cpython-314-darwin.so": b"/Users/runner/work/httptools/httptools/httptools/parser/",
+    "uvloop/loop.cpython-314-darwin.so": b"/Users/runner/work/uvloop/uvloop/uvloop/loop.pyx",
+    "websockets/speedups.cpython-314-darwin.so": b"/Users/runner/work/websockets/websockets/src/websockets/",
+    "yaml/_yaml.cpython-314-darwin.so": b"/Users/runner/work/pyyaml/pyyaml/yaml/_yaml.pyx\x00"
+                                        b"/Users/runner/work/pyyaml/pyyaml/pyyaml/../libyaml/src/.libs/libyaml.a(api.o)",
+}
+RUNNER_HOME = "/Users/runner"
+RUNNER_CHECKOUT = "/Users/runner/work/mysql-dba-validator/mysql-dba-validator"
+
+
+def test_macos_audit_allows_upstream_wheel_build_paths_only_in_macho_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit_macos.base, "machine_paths", lambda: [
+        (audit_macos.base.HOME_LABEL, RUNNER_HOME), ("source checkout path", RUNNER_CHECKOUT)])
+    # This project's own code (the embedded archive) is never exempt.
+    monkeypatch.setattr(audit_macos, "embedded_entries", lambda _data: iter([
+        ("PYZ:backend.version", f'APP_VERSION = "{VERSION}"'.encode()),
+        ("PYZ:backend.main", b"/Users/runner/work/cffi/cffi/x")]))
+    app = _audit_bundle(tmp_path)
+    frameworks = app / "Contents" / "Frameworks"
+    for rel, text in UPSTREAM_WHEEL_PATHS.items():
+        (frameworks / rel).parent.mkdir(parents=True, exist_ok=True)
+        (frameworks / rel).write_bytes(MACHO + text + b"\x00")
+    rejected = {
+        # This repository, in any case, even in the upstream workspace layout.
+        "own.so": MACHO + RUNNER_CHECKOUT.encode() + b"/backend/main.py",
+        "own_upper.so": MACHO + b"/Users/runner/work/MySQL-DBA-Validator/MySQL-DBA-Validator/build/x",
+        # Not a repository workspace: runner temp, tool cache, other home folders, one-level work paths.
+        "temp.so": MACHO + b"/Users/runner/work/_temp/build/x.c",
+        "toolcache.so": MACHO + b"/Users/runner/hostedtoolcache/Python/3.14.7/arm64/lib",
+        "documents.so": MACHO + b"/Users/runner/Documents/notes",
+        "onelevel.so": MACHO + b"/Users/runner/work/foo/bar/x.c",
+        # Crafted to look upstream but climbing out of it.
+        "escape.so": MACHO + b"/Users/runner/work/cffi/cffi/../../mysql-dba-validator/x",
+        # A real upstream path next to a genuine leak.
+        "mixed.so": MACHO + UPSTREAM_WHEEL_PATHS["yaml/_yaml.cpython-314-darwin.so"] + b"\x00/Users/runner/.ssh/id",
+        # UTF-16 stays strict, as in the Windows audit.
+        "wide.so": MACHO + "/Users/runner/work/cffi/cffi/x".encode("utf-16-le"),
+        # A .so name without Mach-O content is not compiled code.
+        "named.so": b"/Users/runner/work/cffi/cffi/x",
+    }
+    for name, data in rejected.items():
+        (frameworks / name).write_bytes(data)
+    resources = app / "Contents" / "Resources"
+    (resources / "notes.txt").write_bytes(b"/Users/runner/work/cffi/cffi/x")
+    (resources / "build.cfg").write_bytes(b"/Users/runner/.cargo/registry/src/x")
+
+    findings, _ = audit_macos.audit(app, VERSION, tmp_path / "no.env", [])
+    home = "build user's home folder found in "
+    expected = [home + f"Contents/Frameworks/{name}" for name in rejected]
+    expected += [f"source checkout path found in Contents/Frameworks/{name}" for name in ("own.so", "own_upper.so")]
+    expected += [home + "Contents/Resources/notes.txt", home + "Contents/Resources/build.cfg"]
+    expected += [home + f"{exe}!PYZ:backend.main" for exe in audit_macos.EXECUTABLES]
+    assert sorted(findings) == sorted(expected)
+
+
+@pytest.mark.parametrize("path, upstream", [
+    (b"/users/runner/work/cffi/cffi/src/c/", True),
+    (b"/users/runner/work/infra/infra/artifact/lib/ossl-modules", True),
+    (b"/users/runner/.cargo/registry/src/index.crates.io-x/pyo3/src/err.rs", True),
+    (b"/users/runner/work/mysql-dba-validator/mysql-dba-validator/backend/", False),
+    (b"/users/runner/work/cffi/other/src/", False),
+    (b"/users/runner/work/cffi/cffi", False),  # no path inside the workspace
+    (b"/users/runner/work/cffi/cffi/a/../../x", False),  # climbs out of the workspace
+    (b"/users/runner/work/cffi/cffi/../cffi/x", False),
+    (b"/users/runner/.cargo/registry/../../work/mysql-dba-validator/x", False),
+    # Real PyYAML path: ".." that stays inside its own workspace.
+    (b"/users/runner/work/pyyaml/pyyaml/pyyaml/../libyaml/src/.libs/libyaml.a(api.o)", True),
+    (b"/users/runner/workx/cffi/cffi/a", False),
+    (b"/users/runner/library/caches/x", False),
+])
+def test_upstream_build_path_rule(path, upstream):
+    assert audit_macos.upstream_build_path(path, len(b"/users/runner")) is upstream
+
+
+def test_this_repository_is_never_an_upstream_workspace():
+    assert b"mysql-dba-validator" in audit_macos.OWN_WORKSPACE_NAMES
+    assert audit_macos.ROOT.name.lower().encode() in audit_macos.OWN_WORKSPACE_NAMES
+
+
 def test_macos_audit_rejects_links_that_leave_the_bundle(tmp_path, embedded):
     app = _audit_bundle(tmp_path)
     try:
