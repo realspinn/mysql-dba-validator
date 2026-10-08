@@ -117,7 +117,8 @@ those versions.
 
 ## macOS (Apple Silicon)
 
-Prepared for v0.4.1 and **not released**. The macOS status, step by step
+Released in v0.4.1 as an unsigned build only (ad hoc signed, not notarized).
+The macOS status, step by step
 (see [VERIFICATION.md](VERIFICATION.md) for what each has actually shown):
 
 1. Implemented: launcher support, build, audit, smoke test and workflow are in
@@ -130,7 +131,8 @@ Prepared for v0.4.1 and **not released**. The macOS status, step by step
 5. Signed with a Developer ID: **not yet** (needs an Apple Developer account).
 6. Notarized by Apple: **not yet**.
 7. Accepted by Gatekeeper on a real Mac: **not yet**.
-8. Published as a release: **not yet**.
+8. Published as a release: **yes**, v0.4.1, as the unsigned zip only (ad hoc
+   signed, not notarized).
 
 ### Unsigned validation build (no Apple account needed)
 

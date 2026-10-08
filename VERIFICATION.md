@@ -146,10 +146,10 @@ exercised:
   target, but not against real company infrastructure.
 - Remote `UPDATE`/`DELETE` plans and the positive M1 and M2 adjustments
   against a live database.
-- Platforms other than Windows x64. A macOS (Apple Silicon) release is being
-  prepared for v0.4.1; see below.
+- Platforms other than Windows x64 on a real machine. The v0.4.1 macOS (Apple
+  Silicon) unsigned zip has been tested only in CI; see below.
 
-## macOS (Apple Silicon), prepared for v0.4.1: not yet verified
+## macOS (Apple Silicon), v0.4.1 unsigned: not yet verified on a Mac
 
 These are separate stages; each is reached only when it has actually happened.
 
@@ -162,7 +162,7 @@ These are separate stages; each is reached only when it has actually happened.
 | 5. Signed with a Developer ID | **Not yet** (needs an Apple Developer account; not planned until resources allow) |
 | 6. Notarized by Apple | **Not yet** |
 | 7. Accepted by Gatekeeper on a real Mac | **Not yet** |
-| 8. Published as a release | **Not yet** |
+| 8. Published as a release | Yes: v0.4.1, the unsigned zip only (ad hoc signed, not notarized), uploaded by the workflow's `publish-unsigned` job from the tag run after its build, audits and smoke test passed |
 
 What the Windows testing (stage 2) covers, and what it does not:
 

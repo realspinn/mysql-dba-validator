@@ -14,16 +14,17 @@ decisions.
 It supports a DBA's judgement. It does not guarantee that SQL is safe, and it
 never runs the SQL you submit.
 
-**Status: v0.4.0, pre-1.0**, a portable Windows x64 application
-([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.4.0)).
+**Status: v0.4.1, pre-1.0**, a portable Windows x64 application
+([release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.4.1)).
 Local database evidence has been verified by the maintainer against a real
 MySQL server; the
 remote/company workflow has not yet been verified against real company
 infrastructure. See [Verification](#verification).
 
-A macOS build for Apple Silicon is being prepared for v0.4.1. It is not
-released yet and has not been verified on a Mac; see
-[VERIFICATION.md](VERIFICATION.md#macos-apple-silicon-prepared-for-v041-not-yet-verified).
+v0.4.1 also has an unsigned macOS build for Apple Silicon (ad hoc signed only,
+not notarized). It is built, audited and smoke-tested in CI but has not been
+tested on a real Mac; see
+[VERIFICATION.md](VERIFICATION.md#macos-apple-silicon-v041-unsigned-not-yet-verified-on-a-mac).
 
 ---
 
@@ -54,13 +55,13 @@ released yet and has not been verified on a Mac; see
 
 ### 1. Download and verify
 
-1. From the [v0.4.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.4.0),
-   download `MySQL-DBA-Validator-v0.4.0-windows-x64.zip` and the matching
+1. From the [v0.4.1 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.4.1),
+   download `MySQL-DBA-Validator-v0.4.1-windows-x64.zip` and the matching
    `.sha256` file.
 2. Verify the download in PowerShell:
 
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.4.0-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MySQL-DBA-Validator-v0.4.1-windows-x64.zip -Algorithm SHA256
    ```
 
    The result must match the SHA256 shown on the release page and in the
@@ -325,7 +326,7 @@ Build a release locally:
 
 ```powershell
 python release\build_windows.py
-python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.4.0-windows-x64.zip
+python release\smoke_test_artifact.py dist\MySQL-DBA-Validator-v0.4.1-windows-x64.zip
 ```
 
 The full process, including tagging and GitHub Releases, is in
