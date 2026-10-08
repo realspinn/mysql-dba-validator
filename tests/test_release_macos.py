@@ -600,6 +600,10 @@ def test_macos_audit_rejects_links_that_leave_the_bundle(tmp_path, embedded):
     assert findings == ["symbolic link points outside the bundle: Contents/Resources/escape"]
 
 
+# The audit runs on macOS only. Windows does not follow "b" before applying "..":
+# there "escape" resolves to Contents/Resources (and cannot be opened at all), so
+# the chain this test needs does not exist.
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link resolution; the macOS audit runs on macOS")
 def test_macos_audit_follows_link_chains_physically(tmp_path, embedded):
     """"escape" -> "b/.." looks inside, but b links to the bundle root, so it really lands outside."""
     app = _audit_bundle(tmp_path)
@@ -610,18 +614,7 @@ def test_macos_audit_follows_link_chains_physically(tmp_path, embedded):
     except OSError:
         pytest.skip("symbolic links not available")
     assert os.path.normpath(os.path.join(resources, "b/..")).startswith(str(app))  # a lexical check is fooled
-    # TEMPORARY DIAGNOSTIC (remove before merge)
-    link = resources / "escape"
-    root = os.path.realpath(app)
-    print("DIAG platform", sys.platform)
-    print("DIAG bundle root", app, "| realpath", root)
-    print("DIAG readlink b", os.readlink(resources / "b"), "| realpath b", os.path.realpath(resources / "b"))
-    print("DIAG readlink escape", os.readlink(link), "| realpath escape", os.path.realpath(link))
-    print("DIAG Path.resolve escape", link.resolve())
-    print("DIAG listdir escape", sorted(os.listdir(link)))
-    print("DIAG link_stays_inside", audit_macos.link_stays_inside(app, link))
     findings, _ = audit_macos.audit(app, VERSION, tmp_path / "no.env", [])
-    print("DIAG findings", findings)
     assert findings == ["symbolic link points outside the bundle: Contents/Resources/escape"]
 
 
