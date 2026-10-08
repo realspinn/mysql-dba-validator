@@ -93,6 +93,34 @@ def listening_pid(port: int) -> int | None:
     return int(out[0]) if out else None
 
 
+def bind_result(port: int, reuse: bool) -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if reuse:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+            return "ok"
+        except OSError as exc:
+            return f"errno {exc.errno} ({exc.strerror})"
+
+
+def port_evidence() -> str:
+    """Diagnostic: who listens on 8420/8765, their TCP states, and how a bind on each fares."""
+    netstat = subprocess.run(["/usr/sbin/netstat", "-an", "-p", "tcp"], capture_output=True, text=True).stdout
+    lines = []
+    for port in (8420, 8765):
+        states = [" ".join(line.split()) for line in netstat.splitlines() if f"127.0.0.1.{port} " in line]
+        lines.append(f"  {port}: listener pid {listening_pid(port)}; plain bind {bind_result(port, False)}; "
+                     f"SO_REUSEADDR bind {bind_result(port, True)}; sockets {states or 'none'}")
+    return "\n".join(lines)
+
+
+def report_failed_start(what: str, proc: subprocess.Popen, output: str, before: str) -> None:
+    """Diagnostic for a start that failed: exit code, the app's own output and the ports before and now."""
+    print(f"diagnostic: {what}: exit code {proc.poll()}\n  output: {output[-1500:]!r}\n"
+          f"  ports just before the start:\n{before}\n  ports now:\n{port_evidence()}", flush=True)
+
+
 def osascript_alerts(text: str) -> list[int]:
     out = subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
     return [int(line.split(None, 1)[0]) for line in out.splitlines()
@@ -243,8 +271,11 @@ def main() -> int:
 
     for signum, label in ((signal.SIGHUP, "closing its Terminal window (SIGHUP)"),
                           (signal.SIGKILL, "a hard kill (SIGKILL)")):
+        before_start = port_evidence()
         app2 = MacApp(exe, env, cwd)
         started = app2.wait_ready()
+        if not started:
+            report_failed_start(f"console app restart before {label}", app2.proc, app2.output(), before_start)
         if signum == signal.SIGHUP and started:
             check("new pairing code issued on restart", app2.pairing_code() and app2.pairing_code() != code)
         app2.signal_and_wait(signum)
@@ -263,9 +294,16 @@ def main() -> int:
         return subprocess.Popen([str(windowed_exe), *args], cwd=str(cwd), env=windowed_env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
+    before_start = port_evidence()
     win = start_windowed()
     try:
-        check("windowed app starts the web app", wait_until(lambda: port_open(8420), 90))
+        if not check("windowed app starts the web app", wait_until(lambda: port_open(8420), 90)):
+            exited = win.poll() is not None
+            report_failed_start("windowed app start", win, win.stdout.read().decode(errors="replace") if exited
+                                else "(still running)", before_start)
+            print("diagnostic: on-screen alerts: " + repr([line for line in subprocess.run(
+                ["/bin/ps", "-axo", "command="], capture_output=True, text=True).stdout.splitlines()
+                if "osascript" in line]), flush=True)
         check("windowed app opens this machine's page in the default browser",
               wait_until(lambda: browser_log.is_file() and PAGE in browser_log.read_text(), 15))
         status, _, body = request("GET", PAGE + "/api/health")
