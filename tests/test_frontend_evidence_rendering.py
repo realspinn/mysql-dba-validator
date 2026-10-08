@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pymysql
@@ -39,6 +43,7 @@ HEADLINES = {
 READ_ONLY_PLAN = "Execution plan not collected because the evidence connection is read-only."
 NOT_ELIGIBLE_PLAN = ("No execution plan was requested: this statement is not eligible for planning "
                      "(for example SELECT ... INTO).")
+DUMP_DOM_DEADLINE_SECONDS = 120
 
 
 def find_chrome() -> str | None:
@@ -50,6 +55,53 @@ def find_chrome() -> str | None:
         if found:
             return found
     return None
+
+
+def dump_dom(command: list[str], work: Path,
+             deadline: float = DUMP_DOM_DEADLINE_SECONDS) -> tuple[str, str, int | None]:
+    """Run a headless browser with --dump-dom: (document, stderr, exit code, or None if it was stopped).
+
+    The document is complete when it ends with </html>: --dump-dom writes it in one
+    piece once the page has loaded. The browser is then stopped instead of waited for;
+    on a display-less macOS runner Chrome printed the whole page but never exited.
+    Output goes to files, not pipes, because helper processes inherit the handles and a
+    pipe stays open while any of them lives. A browser that exits, or reaches the
+    deadline, without a complete document leaves the caller to fail on what it got.
+    """
+    out_path, err_path = work / "dump-dom.html", work / "browser-stderr.txt"
+    with open(out_path, "wb") as out, open(err_path, "wb") as err:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                   start_new_session=os.name != "nt")
+    try:
+        end = time.monotonic() + deadline
+        while process.poll() is None and time.monotonic() < end:
+            if out_path.read_bytes().rstrip().endswith(b"</html>"):
+                break
+            time.sleep(0.2)
+        code = process.poll()
+    finally:
+        stop_browser(process)
+    return (out_path.read_text(encoding="utf-8", errors="replace"),
+            err_path.read_text(encoding="utf-8", errors="replace"), code)
+
+
+def stop_browser(process: subprocess.Popen) -> None:
+    """Stop the browser and, on POSIX, every helper in its process group."""
+    if os.name == "nt":
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=30)
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:  # the whole group is already gone
+            break
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    process.wait(timeout=30)
 
 
 def local_fixture(sql, server=None, **overrides):
@@ -147,12 +199,11 @@ def rendered(tmp_path_factory):
     work = tmp_path_factory.mktemp("render")
     harness = work / "harness.html"
     harness.write_text(page.replace("</body>", HARNESS % payload, 1), encoding="utf-8")
-    result = subprocess.run(
+    document, stderr, code = dump_dom(
         [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-         f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()],
-        capture_output=True, text=True, encoding="utf-8", timeout=120)
-    match = re.search(r'<pre id="render-out">(.*?)</pre>', result.stdout, re.S)
-    assert match, f"page did not render (exit {result.returncode}): {result.stderr[-500:]}"
+         f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()], work)
+    match = re.search(r'<pre id="render-out">(.*?)</pre>', document, re.S)
+    assert match, f"page did not render (exit {code}): {stderr[-500:]}"
     return fixtures, json.loads(html.unescape(match.group(1)))
 
 
@@ -302,3 +353,57 @@ def test_remote_dml_renders_with_the_same_contract(rendered):
     assert view["headline"] == HEADLINES["collected"]
     assert "Execution-plan evidence was collected." in view["evidence"]
     assert view["confidence"] == "LIMITED"
+
+
+# ----------------------------------------------------------------------------- browser lifecycle (no Chrome needed)
+
+# Prints a complete document, then never exits, while a helper it started holds the
+# same output open: what Chrome did on the macOS runner, plus the pipe trap.
+HANGING_BROWSER = r"""
+import pathlib, subprocess, sys, time
+helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+pathlib.Path(sys.argv[1]).write_text(str(helper.pid))
+sys.stdout.write('<html><body><pre id="render-out">{}</pre></body></html>\n')
+sys.stdout.flush()
+time.sleep(60)
+"""
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return True
+    return False
+
+
+def test_dump_dom_stops_a_browser_that_never_exits_once_the_document_is_complete(tmp_path):
+    helper_pid_file = tmp_path / "helper.pid"
+    started = time.monotonic()
+    document, _stderr, code = dump_dom([sys.executable, "-c", HANGING_BROWSER, str(helper_pid_file)], tmp_path)
+    assert time.monotonic() - started < 30
+    assert code is None  # stopped, not exited
+    assert '<pre id="render-out">{}</pre>' in document
+    helper = int(helper_pid_file.read_text())
+    if os.name == "nt":
+        os.kill(helper, signal.SIGTERM)  # Windows has no process group to stop with the browser
+    else:
+        end = time.monotonic() + 10
+        while not _gone(helper) and time.monotonic() < end:
+            time.sleep(0.1)
+        assert _gone(helper), "a helper in the browser's process group survived"
+
+
+def test_dump_dom_returns_what_a_failing_browser_produced(tmp_path):
+    document, stderr, code = dump_dom(
+        [sys.executable, "-c", "import sys; sys.stderr.write('no display'); sys.exit(3)"], tmp_path)
+    assert (document, stderr, code) == ("", "no display", 3)
+
+
+def test_dump_dom_gives_up_at_the_deadline_without_a_document(tmp_path):
+    started = time.monotonic()
+    document, _stderr, code = dump_dom(
+        [sys.executable, "-c", "import sys, time; sys.stdout.write('<html>'); sys.stdout.flush(); time.sleep(60)"],
+        tmp_path, deadline=1)
+    assert time.monotonic() - started < 30
+    assert (document, code) == ("<html>", None)  # incomplete: the rendered fixture's assertion then fails

@@ -363,6 +363,9 @@ def _audit_bundle(tmp_path: Path, version: str = VERSION) -> Path:
     }.items():
         (contents / rel).parent.mkdir(parents=True, exist_ok=True)
         (contents / rel).write_bytes(data)
+    # Executable, as PyInstaller ships them: on macOS the audit requires it.
+    for name in ("MySQL-DBA-Validator", "MySQL-DBA-Validator Console"):
+        (contents / "MacOS" / name).chmod(0o755)
     (contents / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleExecutable": "MySQL-DBA-Validator", "CFBundleShortVersionString": version,
         "CFBundleVersion": version, "LSUIElement": True}))
@@ -382,6 +385,14 @@ def test_macos_audit_passes_a_clean_bundle(tmp_path, embedded):
     findings, stats = audit_macos.audit(_audit_bundle(tmp_path), VERSION, tmp_path / "no.env", [])
     assert findings == []
     assert stats["embedded_modules"] == 4 and stats["files"] == 7
+
+
+def test_macos_audit_requires_executable_bits(tmp_path, embedded):
+    """On macOS a bundle executable without the executable bit is a finding (Windows has no such bit)."""
+    app = _audit_bundle(tmp_path)
+    (app / "Contents" / "MacOS" / "MySQL-DBA-Validator Console").chmod(0o644)
+    findings, _ = audit_macos.audit(app, VERSION, tmp_path / "no.env", [])
+    assert findings == ([] if os.name == "nt" else ["not executable: Contents/MacOS/MySQL-DBA-Validator Console"])
 
 
 @pytest.mark.parametrize("rel", [
