@@ -120,6 +120,100 @@ def test_port_in_use_detects_a_bound_loopback_port():
     assert launcher.port_in_use(port) is False
 
 
+def _listen_like_the_app(port: int = 0, host: str = "127.0.0.1") -> socket.socket:
+    """A listening socket bound as uvicorn binds the backend and the connector (SO_REUSEADDR)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen()
+    return sock
+
+
+def _run_that_closed_its_connections(port: int = 0) -> int:
+    """Serve one connection on ``port`` and stop, the server closing it first as uvicorn does
+    (``Connection: close``, shutdown): the port is left with no listener, only TIME_WAIT."""
+    with _listen_like_the_app(port) as listener:
+        port = listener.getsockname()[1]
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            conn, _ = listener.accept()
+            conn.close()
+            client.recv(1)
+    return port
+
+
+def test_port_in_use_detects_a_listener_bound_like_the_app(monkeypatch):
+    with _listen_like_the_app() as listener:
+        port = listener.getsockname()[1]
+        assert launcher.port_in_use(port) is True
+        monkeypatch.setattr(launcher, "accepts_connections", lambda *args, **kwargs: False)
+        assert launcher.port_in_use(port) is True  # the bind alone refuses it too
+        if os.name != "nt":
+            # So does a second server's own bind: two instances never share the endpoint.
+            # (On Windows SO_REUSEADDR would allow that bind; the plain probe refuses it.)
+            with pytest.raises(OSError):
+                _listen_like_the_app(port).close()
+
+
+def test_port_in_use_ignores_connections_a_previous_run_closed():
+    port = _run_that_closed_its_connections()
+    if os.name != "nt":
+        # The state macOS CI showed after a shutdown: no listener, yet a plain bind fails.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as plain, pytest.raises(OSError):
+            plain.bind(("127.0.0.1", port))
+    assert launcher.port_in_use(port) is False
+    with _listen_like_the_app(port):  # and the app's server does start there
+        assert launcher.port_in_use(port) is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX probe; Windows keeps the plain bind")
+def test_port_in_use_detects_a_server_on_the_wildcard_address():
+    with _listen_like_the_app(host="0.0.0.0") as listener:
+        assert launcher.port_in_use(listener.getsockname()[1]) is True
+
+
+class _BackendStarted(Exception):
+    """Raised instead of starting the backend child: the launcher got past its port check."""
+
+
+def _start_backend(*args, **kwargs):
+    raise _BackendStarted
+
+
+@pytest.mark.parametrize("taken", ["backend", "connector"])
+def test_console_app_refuses_a_port_another_server_listens_on(taken, monkeypatch, tmp_path, capsys):
+    free = _listen_like_the_app()
+    free_port = free.getsockname()[1]
+    free.close()  # never connected to: nothing left on it
+    with _listen_like_the_app() as listener:
+        taken_port = listener.getsockname()[1]
+        monkeypatch.setattr(launcher, "BACKEND_PORT", taken_port if taken == "backend" else free_port)
+        monkeypatch.setattr(launcher, "CONNECTOR_PORT", taken_port if taken == "connector" else free_port)
+        monkeypatch.setattr(launcher.subprocess, "Popen", _start_backend)
+        assert launcher.run_app(_args("--no-browser"), tmp_path, False) == 3
+    assert f"port(s) {taken_port} on 127.0.0.1 already in use" in capsys.readouterr().err
+
+
+def test_console_app_restarts_right_after_previous_runs_stopped(monkeypatch, tmp_path):
+    backend, connector = _run_that_closed_its_connections(), _run_that_closed_its_connections()
+    monkeypatch.setattr(launcher, "BACKEND_PORT", backend)
+    monkeypatch.setattr(launcher, "CONNECTOR_PORT", connector)
+    monkeypatch.setattr(launcher.subprocess, "Popen", _start_backend)
+    for _ in range(3):  # each time a run serves, stops, and is started again at once
+        with pytest.raises(_BackendStarted):
+            launcher.run_app(_args("--no-browser"), tmp_path, False)
+        _run_that_closed_its_connections(backend)
+        _run_that_closed_its_connections(connector)
+
+
+def test_windowed_app_restarts_right_after_a_previous_run_stopped(windowed, monkeypatch):
+    monkeypatch.setattr(launcher, "BACKEND_PORT", _run_that_closed_its_connections())
+    monkeypatch.setattr(launcher, "validator_already_running", lambda: pytest.fail("port wrongly seen in use"))
+    monkeypatch.setattr(launcher.subprocess, "Popen", _start_backend)
+    with pytest.raises(_BackendStarted):
+        launcher.run_windowed(["--no-browser"])
+    assert windowed["errors"] == []
+
+
 def test_backend_command_from_source_runs_this_module():
     command, env = launcher.backend_command()
     assert command[1:] == ["-m", "release.launcher", launcher.RUN_BACKEND_FLAG]

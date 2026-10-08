@@ -150,8 +150,30 @@ def connector_argv(args: argparse.Namespace) -> list[str]:
 
 # ----------------------------------------------------------------------------- process helpers
 
-def port_in_use(port: int, host: str = BACKEND_HOST) -> bool:
+def accepts_connections(port: int, host: str = BACKEND_HOST, timeout: float = 0.5) -> bool:
+    """True when a server answers on ``host:port``."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((host, port)) == 0
+
+
+def port_in_use(port: int, host: str = BACKEND_HOST) -> bool:
+    """True when another socket holds ``host:port``, so this app's server could not listen there.
+
+    On macOS and Linux the probe binds as that server (uvicorn) does, with SO_REUSEADDR:
+    a plain bind there also fails while connections a previous run closed are in
+    TIME_WAIT (up to a minute), although the server itself would start. SO_REUSEADDR
+    still fails on a socket listening on the same address; a server on the wildcard
+    address would not stop the bind, so a server answering on ``host:port`` counts too.
+    Windows keeps the plain bind: TIME_WAIT does not block it there, and SO_REUSEADDR
+    would let the probe bind a port that another program is listening on.
+    """
+    posix = os.name != "nt"
+    if posix and accepts_connections(port, host):
+        return True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if posix:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError:
