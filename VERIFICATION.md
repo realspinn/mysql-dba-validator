@@ -87,11 +87,50 @@ to `main` and every push to `main`; on macOS it also fails on any unexpected
 skipped test. It builds, packages and publishes nothing. The release workflows
 run the suite again for release tags, before the build (below).
 
-Status of that workflow (added after v0.6.0): it has not yet run on GitHub, and
-`main` has no required status checks, so a failing run does not block a merge.
 Windows has no skip check: the suite skips 2 tests there by design (POSIX-only
 link resolution and port probe) and 2 more where symbolic links cannot be
 created, as on the maintainer's machine.
+
+### CI on `main` and branch protection
+
+The workflow was added after v0.6.0 by pull request #1. It passed on the pull
+request (run
+[40093053323](https://github.com/realspinn/mysql-dba-validator/actions/runs/40093053323),
+commit `4fe423c`) and, after the rebase merge, on the push to `main` (run
+[40094012274](https://github.com/realspinn/mysql-dba-validator/actions/runs/40094012274),
+commit `9ddc5a80f131af7952c0e48c2b0e59a68d4f5dd8`, 2026-10-24). From the job
+logs of the `main` run:
+
+| Check | `Tests (windows-latest)` | `Tests (macos-15)` |
+| --- | --- | --- |
+| Runner, Python | Windows Server 2025 (`windows-2025-vs2026`, GitHub-hosted), Python 3.14.9 | macOS 15.7.9 (`macos-15-arm64`, GitHub-hosted Apple Silicon), Python 3.14.7 |
+| Test environment (installed from `requirements.txt`) | PyMySQL 1.2.3, sqlglot 30.24.0, cryptography 45.0.7, pytest 9.1.1 | The same versions |
+| Test suite | 1546 passed, 2 skipped (the POSIX link-resolution and port-probe tests) | 1547 passed, 1 skipped (the Windows Job Object test); skip check: 1548 tests, 1 skipped, 0 unexpected |
+| `pip check` | No broken requirements | No broken requirements |
+
+These are CI results on Python 3.14, not the maintainer's Windows 10 machine
+(Python 3.13.5) used for the local results in this document.
+
+`main` is protected by a classic branch protection rule (no rulesets apply),
+read back through the GitHub API on 2026-10-24:
+
+| Setting | Value | What it means ([GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)) |
+| --- | --- | --- |
+| Require a pull request before merging | On, 0 approvals required | Changes go through a pull request, but no approving review is needed to merge |
+| Required status checks | `Tests (windows-latest)` and `Tests (macos-15)`, both from GitHub Actions (app ID 15368) | Both checks must pass on the pull request's latest commit before it can merge. They are the names the workflow's jobs report (`Tests (${{ matrix.os }})`); renaming the job or changing the matrix leaves the required names waiting for a status that never arrives |
+| Require branches to be up to date | Off | A pull request can merge without being retested against the latest `main`; the push run on `main` then tests the merged result, after the merge |
+| Do not allow bypassing the above settings | Off | The rule does not apply to administrators: the repository owner can still push to `main` or merge without the checks |
+| Allow force pushes, allow deletions | Both off | GitHub's default for a protected branch: force pushes to `main` and deleting it are blocked |
+| Linear history, signed commits, conversation resolution, code-owner review, push restrictions, branch lock, merge queue | Not configured | |
+
+This is the configuration as GitHub reports it, not an enforcement test: no
+pull request with a failing or missing check has been tried against it, and
+pull request #1 merged after its checks passed. A passing run means the suite
+and `pip check` passed on those runners for that commit. The workflow builds,
+packages, audits and smoke-tests nothing (the release workflows do), so it is
+not evidence for a release, a real Mac, signing or notarization, any live MySQL
+server (including MySQL 8.4 and a server that offers no TLS, T4b), or company
+infrastructure, VPN and TLS.
 
 ## Release pipeline (CI, every release tag)
 
