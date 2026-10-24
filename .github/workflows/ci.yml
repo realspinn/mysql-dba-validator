@@ -1,0 +1,46 @@
+name: CI
+
+# Routine checks for pull requests to main and pushes to main: the same test
+# suite, pip check and macOS skip check that the release workflows run, on the
+# same runners. No build, packaging, signing or release; read-only token, no
+# secrets. Release tags are handled by release-windows.yml and release-macos.yml.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    # One command per step, so a failing command fails its step in pwsh and bash alike.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Test suite
+        run: python -m pytest -q -rs --junitxml="${{ runner.temp }}/pytest.xml"
+
+      - name: pip check
+        run: python -m pip check
+
+      - name: No unexpected skipped tests
+        if: runner.os == 'macOS'
+        run: python release/check_pytest_skips.py "${{ runner.temp }}/pytest.xml" --platform macos

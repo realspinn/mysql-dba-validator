@@ -81,9 +81,17 @@ section). The suite covers, among others:
   `test_frontend_evidence_rendering.py` (real Chrome; skipped if Chrome is not
   installed), `test_heartbeat.py`, `test_release_packaging.py`.
 
-The GitHub Actions workflow runs the suite only for release tags, before the
-build. It does not run on pushes or pull requests, so contributors run it
-locally.
+`.github/workflows/ci.yml` runs the suite and `pip check` on GitHub-hosted
+Windows and macOS (Apple Silicon) runners, Python 3.14, for every pull request
+to `main` and every push to `main`; on macOS it also fails on any unexpected
+skipped test. It builds, packages and publishes nothing. The release workflows
+run the suite again for release tags, before the build (below).
+
+Status of that workflow (added after v0.6.0): it has not yet run on GitHub, and
+`main` has no required status checks, so a failing run does not block a merge.
+Windows has no skip check: the suite skips 2 tests there by design (POSIX-only
+link resolution and port probe) and 2 more where symbolic links cannot be
+created, as on the maintainer's machine.
 
 ## Release pipeline (CI, every release tag)
 

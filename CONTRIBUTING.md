@@ -30,8 +30,9 @@ guide needs fixing.
 ## Development setup
 
 The project is developed and tested by hand on Windows with Python 3.14. The
-release workflows also run the full test suite on GitHub-hosted Windows and
-macOS (Apple Silicon) runners, for version tags or when started by hand. A
+CI workflow runs the full test suite on GitHub-hosted Windows and macOS (Apple
+Silicon) runners for pull requests and pushes to `main`; the release workflows
+run it again, and build the apps, for version tags or when started by hand. A
 passing macOS run is not a manual acceptance test on a real Mac; that has not
 been done yet (see VERIFICATION.md). The commands below are PowerShell, run
 from the repository root.
@@ -227,9 +228,9 @@ Changes reach `main` only through pull requests:
    from `main` and give the branch a short descriptive name, for example
    `test/parser-join-cases` or `docs/connector-options`.
 2. Make the change and its tests on that branch.
-3. Run the full test suite and `pip check` locally. The repository's GitHub
-   Actions workflow runs only for release tags, not for pull requests, so
-   your local run is the check.
+3. Run the full test suite and `pip check` locally. The CI workflow
+   (`.github/workflows/ci.yml`) runs them again on Windows and macOS for every
+   pull request to `main`; check its result on the pull request.
 4. Open a pull request against `main` and answer the questions below.
 5. A maintainer reviews it, requests DBA or security review if needed, and
    decides whether and when to merge it.
