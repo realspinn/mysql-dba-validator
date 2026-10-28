@@ -232,7 +232,9 @@ If you change `release/`, also run the build and smoke test described in
 
 Changes reach `main` only through pull requests:
 
-1. Fork the repository, or create a branch if you have write access. Branch
+1. Fork the repository. You do not need, and will not be given, access to
+   this repository to contribute; direct access is a rare exception the
+   maintainer approves ([.github/ACCESS.md](.github/ACCESS.md)). Branch
    from `main` and give the branch a short descriptive name, for example
    `test/parser-join-cases` or `docs/connector-options`.
 2. Make the change and its tests on that branch.
