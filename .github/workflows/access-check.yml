@@ -1,0 +1,46 @@
+name: Access check
+
+# Compares the repository's collaborators with the owner's allowlist in
+# .github/access-policy.json and fails when anyone else has direct access, so the
+# maintainer gets GitHub's failed-workflow notification. See .github/ACCESS.md.
+#
+# GitHub has no workflow trigger for an accepted invitation, so this runs every
+# hour. Scheduled runs always use this file and the policy as they are on the
+# default branch, so a pull request or another branch cannot change what the
+# hourly check enforces. Runs for a pull request that edits these files show the
+# effect of the edit only; they are not the authoritative check.
+#
+# Read-only: the job's token can read the repository and nothing else. It cannot
+# remove anyone, cancel invitations, approve or merge. Removing access is a
+# separate, manual step by the owner (.github/ACCESS.md). No secret is used.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/access-policy.json
+      - .github/scripts/access_check.py
+      - .github/workflows/access-check.yml
+
+permissions: {}
+
+jobs:
+  access:
+    name: Collaborators match the access policy
+    if: github.repository == 'realspinn/mysql-dba-validator'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compare collaborators with .github/access-policy.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/access_check.py
