@@ -232,16 +232,20 @@ If you change `release/`, also run the build and smoke test described in
 
 Changes reach `main` only through pull requests:
 
-1. Fork the repository. You do not need, and will not be given, access to
-   this repository to contribute; direct access is a rare exception the
-   maintainer approves ([.github/ACCESS.md](.github/ACCESS.md)). Branch
+1. Fork the repository on GitHub. Every contribution comes from a fork; you
+   do not need, and will not be given, access to this repository
+   ([.github/ACCESS.md](.github/ACCESS.md)). In your fork, branch
    from `main` and give the branch a short descriptive name, for example
    `test/parser-join-cases` or `docs/connector-options`.
 2. Make the change and its tests on that branch.
 3. Run the full test suite and `pip check` locally. The CI workflow
    (`.github/workflows/ci.yml`) runs them again on Windows and macOS for every
-   pull request to `main`; check its result on the pull request.
-4. Open a pull request against `main` and answer the questions below.
+   pull request to `main`; check its result on the pull request. Until you
+   have had a pull request merged here, a maintainer has to approve each CI
+   run before it starts.
+4. Push the branch to your fork and open a pull request from it against
+   `main`, leaving "Allow edits by maintainers" ticked. Answer the questions
+   below. To update the pull request, push more commits to the same branch.
 5. A maintainer reviews it, requests DBA or security review if needed, and
    decides whether and when to merge it.
 

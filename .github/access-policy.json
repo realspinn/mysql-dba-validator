@@ -1,7 +1,4 @@
 {
   "owner": "realspinn",
-  "approved_collaborators": [
-    {"login": "G3TECH1", "permission": "write", "approved_on": "2026-10-28",
-     "reason": "Approved direct collaborator access to contribute to the repository"}
-  ]
+  "approved_collaborators": []
 }

@@ -331,12 +331,18 @@ def test_a_removal_that_did_not_take_effect_is_reported(monkeypatch, policy_file
 
 # ----------------------------------------------------------------------------- repository files
 
-def test_the_committed_policy_approves_exactly_the_accounts_the_owner_named():
+def test_the_committed_policy_approves_no_collaborators():
+    # Contributors work from forks; only the owner has direct access (.github/ACCESS.md).
+    # An exception is the owner's own reviewed change, and this test changes with it.
     policy = access_check.load_policy(POLICY, REPO)
-    assert policy["owner"] == "realspinn"
-    # Each exception is added by the owner in a reviewed change; update this set with it.
-    assert {key: entry["login"] for key, entry in policy["approved"].items()} == {"g3tech1": "G3TECH1"}
-    assert policy["approved"]["g3tech1"]["permission"] == "write"
+    assert policy == {"owner": "realspinn", "approved": {}}
+
+
+def test_a_removed_collaborator_is_not_flagged_and_others_still_are(monkeypatch, policy_file, capsys):
+    # After a contributor moves to a fork, only the owner is listed; anyone else is flagged.
+    assert _main(monkeypatch, FakeGitHub([OWNER]), policy_file()) == 0
+    assert _main(monkeypatch, FakeGitHub([OWNER, _user("G3TECH1")]), policy_file()) == 1
+    assert "::error::G3TECH1 has write access but is not approved" in capsys.readouterr().out
 
 
 def test_the_owner_reviews_every_change_to_the_policy():
