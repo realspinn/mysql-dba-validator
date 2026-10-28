@@ -14,9 +14,13 @@ are for the owner.
 - A personal-account repository has one collaborator level, shown as `write`.
   There is no read-only or triage role, so an exception is always write access.
   Repository rulesets still let only the owner merge to `main` and create,
-  move or delete `v*` tags. A collaborator can still push
-  other branches, push tags not matching `v*`, create and edit releases, run
-  workflows, and delete or disable workflow runs.
+  move or delete `v*` tags, so no collaborator can change, delete or disable
+  a workflow file on `main`. Write access still lets a collaborator push other
+  branches (including workflow changes that run there), push tags not matching
+  `v*`, create and edit releases, disable or re-enable any workflow (including
+  the access check), delete workflow runs, and create or overwrite repository
+  Actions secrets and variables. No repository setting or ruleset limits these
+  on a personal-account repository; only removing direct access does.
 
 ## What is checked
 

@@ -49,9 +49,11 @@ from pathlib import Path
 POLICY_PATH = Path(__file__).resolve().parent.parent / "access-policy.json"
 POLICY_NAME = ".github/access-policy.json"
 PAGE_SIZE = 100
+MAX_PAGES = 50
 # A personal-account repository has only one collaborator level, shown by the API as "write".
 APPROVABLE_PERMISSIONS = {"write"}
 LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ENTRY_KEYS = {"login", "permission", "approved_on", "reason"}
 
 
@@ -103,15 +105,25 @@ def get_pages(api, path: str) -> list:
         items.extend(batch)
         if len(batch) < PAGE_SIZE:
             return items
+        if page >= MAX_PAGES:
+            raise AccessError(f"GitHub API GET {path} returned more than {MAX_PAGES} pages")
         page += 1
 
 
 # ----------------------------------------------------------------------------- policy
 
+def _no_duplicate_keys(pairs):
+    # json keeps only the last of two equal keys, which could hide an entry from a reviewer.
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def load_policy(path: Path, repo: str) -> dict:
     """{"owner": login, "approved": {lowercase login: entry}} from the policy file, strictly checked."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
     except (OSError, ValueError) as exc:
         raise AccessError(f"cannot read {POLICY_NAME}: {type(exc).__name__}") from None
     if not isinstance(data, dict) or set(data) != {"owner", "approved_collaborators"}:
@@ -134,11 +146,13 @@ def load_policy(path: Path, repo: str) -> dict:
             raise AccessError("the owner must not be listed as an approved collaborator")
         if login.lower() in approved:
             raise AccessError(f"approved collaborator {login!r} is listed twice")
-        if entry["permission"] not in APPROVABLE_PERMISSIONS:
+        if not isinstance(entry["permission"], str) or entry["permission"] not in APPROVABLE_PERMISSIONS:
             raise AccessError(f"{login}: permission must be one of {sorted(APPROVABLE_PERMISSIONS)}")
         try:
+            if not isinstance(entry["approved_on"], str) or not DATE_RE.match(entry["approved_on"]):
+                raise ValueError
             date.fromisoformat(entry["approved_on"])
-        except (TypeError, ValueError):
+        except ValueError:
             raise AccessError(f"{login}: approved_on must be a YYYY-MM-DD date") from None
         if not isinstance(entry["reason"], str) or not entry["reason"].strip():
             raise AccessError(f"{login}: reason must say what the access is for")
@@ -186,7 +200,8 @@ def invitation_notes(api, repo: str, policy: dict) -> list:
     """Information lines about pending invitations. Needs the owner's token; changes nothing."""
     notes = []
     for invitation in get_pages(api, f"/repos/{repo}/invitations"):
-        login = ((invitation or {}).get("invitee") or {}).get("login")
+        invitee = invitation.get("invitee") if isinstance(invitation, dict) else None
+        login = invitee.get("login") if isinstance(invitee, dict) else None
         if not isinstance(login, str):
             raise AccessError("a pending invitation has no invitee login")
         state = "approved" if login.lower() in policy["approved"] else "NOT approved"

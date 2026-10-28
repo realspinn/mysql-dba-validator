@@ -111,6 +111,26 @@ def test_an_unknown_collaborator_beyond_the_first_page_is_found(monkeypatch, pol
     assert _main(monkeypatch, fake, policy_file(approved)) == 1
 
 
+def test_a_collaborator_passes_only_once_the_policy_names_them(monkeypatch, policy_file):
+    fake = FakeGitHub([OWNER, _user("G3TECH1")])
+    assert _main(monkeypatch, fake, policy_file()) == 1
+    assert _main(monkeypatch, fake, policy_file([_entry("G3TECH1")])) == 0
+
+
+def test_approving_one_collaborator_does_not_approve_another(monkeypatch, policy_file, capsys):
+    fake = FakeGitHub([OWNER, _user("G3TECH1"), _user("Newcomer")])
+    assert _main(monkeypatch, fake, policy_file([_entry("G3TECH1")])) == 1
+    out = capsys.readouterr().out
+    assert "::error::Newcomer has write access but is not approved" in out
+    assert "G3TECH1 has" not in out
+
+
+def test_too_many_pages_fail_rather_than_loop(monkeypatch, policy_file, capsys):
+    fake = FakeGitHub([OWNER] + [_user(f"user{i}") for i in range(access_check.PAGE_SIZE * access_check.MAX_PAGES)])
+    assert _main(monkeypatch, fake, policy_file()) == 1
+    assert "more than 50 pages" in capsys.readouterr().out
+
+
 def test_wrong_permission_for_an_approved_collaborator_fails(monkeypatch, policy_file, capsys):
     fake = FakeGitHub([OWNER, _user("helper1", role="admin")])
     assert _main(monkeypatch, fake, policy_file([_entry("helper1")])) == 1
@@ -160,6 +180,12 @@ def test_invitations_are_not_read_unless_asked(monkeypatch, policy_file):
     fake = FakeGitHub()
     _main(monkeypatch, fake, policy_file())
     assert ("GET", f"/repos/{REPO}/invitations") not in fake.calls
+
+
+def test_a_malformed_invitation_fails_rather_than_crashes(monkeypatch, policy_file, capsys):
+    fake = FakeGitHub(invitations=[["not", "an", "invitation"]])
+    assert _main(monkeypatch, fake, policy_file(), "--invitations") == 1
+    assert "::error::a pending invitation has no invitee login" in capsys.readouterr().out
 
 
 def test_unreadable_invitations_fail_rather_than_pass(monkeypatch, policy_file, capsys):
@@ -220,6 +246,13 @@ def test_http_errors_from_the_real_client_become_access_errors(monkeypatch):
     {"owner": "realspinn", "approved_collaborators": [{"login": "helper1"}]},
     {"owner": "realspinn", "approved_collaborators": [_entry("bad login")]},
     {"owner": "realspinn", "approved_collaborators": [], "extra": True},
+    {"owner": "realspinn", "approved_collaborators": [{**_entry("helper1"), "permission": ["write"]}]},
+    {"owner": "realspinn", "approved_collaborators": [{**_entry("helper1"), "approved_on": "20261028"}]},
+    {"owner": "realspinn", "approved_collaborators": [{**_entry("helper1"), "approved_on": 20261028}]},
+    # A repeated key would make json keep only the last list, hiding entries from a reviewer.
+    '{"owner": "realspinn", "approved_collaborators": [], "approved_collaborators": []}',
+    '{"owner": "realspinn", "approved_collaborators": [{"login": "a", "login": "b", '
+    '"permission": "write", "approved_on": "2026-10-28", "reason": "x"}]}',
 ])
 def test_a_malformed_policy_fails_and_checks_nothing(monkeypatch, tmp_path, capsys, policy):
     path = tmp_path / "access-policy.json"
@@ -298,12 +331,12 @@ def test_a_removal_that_did_not_take_effect_is_reported(monkeypatch, policy_file
 
 # ----------------------------------------------------------------------------- repository files
 
-def test_the_committed_policy_is_valid_and_names_no_one_by_default():
+def test_the_committed_policy_approves_exactly_the_accounts_the_owner_named():
     policy = access_check.load_policy(POLICY, REPO)
     assert policy["owner"] == "realspinn"
-    # Exceptions are added only by the owner, each in its own reviewed change.
-    for entry in policy["approved"].values():
-        assert entry["permission"] in access_check.APPROVABLE_PERMISSIONS
+    # Each exception is added by the owner in a reviewed change; update this set with it.
+    assert {key: entry["login"] for key, entry in policy["approved"].items()} == {"g3tech1": "G3TECH1"}
+    assert policy["approved"]["g3tech1"]["permission"] == "write"
 
 
 def test_the_owner_reviews_every_change_to_the_policy():
@@ -329,3 +362,11 @@ def test_workflow_runs_hourly_and_never_from_pull_request_target():
     assert triggers["schedule"] == [{"cron": "41 * * * *"}]
     checkout = workflow["jobs"]["access"]["steps"][0]
     assert checkout["with"] == {"persist-credentials": False}
+
+
+def test_checkout_is_pinned_to_the_same_commit_as_the_release_workflow():
+    pin = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0"
+    assert pin in (ROOT / ".github" / "workflows" / "release-macos.yml").read_text(encoding="utf-8")
+    assert f"- uses: {pin}" in WORKFLOW.read_text(encoding="utf-8")
+    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["access"]["steps"]
+    assert all(re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", s["uses"]) for s in steps if "uses" in s)
