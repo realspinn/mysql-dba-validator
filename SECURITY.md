@@ -22,6 +22,12 @@ How the components and request flows fit together is described in
 
 - The web app (`127.0.0.1:8420`) and the local connector (`127.0.0.1:8765`)
   bind to loopback only.
+- The web app answers only requests whose `Host` is `127.0.0.1` or
+  `localhost` (plus exact names in `MDV_ALLOWED_HOSTS`, for a self-hosted
+  setup); any other `Host` gets HTTP 400 before a route runs. This stops a web
+  page whose DNS name is rebound to `127.0.0.1` from using the validation,
+  connection-test and discovery endpoints. *(Since v0.8.0. In v0.7.0 and
+  earlier only the heartbeat and update-check routes checked `Host`.)*
 - Company MySQL credentials are supplied per request, used for that operation
   and not persisted. There is no credential store.
 - The browser can use only connector targets approved at the connector
@@ -67,7 +73,8 @@ How the components and request flows fit together is described in
   least-privileged account. Whether a real server keeps it through every
   route (for example a connection-multiplexing proxy) has not been tested.
 - A plan request is sent only when the exact outgoing statement is one plain
-  `SELECT` with no `INTO` and no locking clause, and every word written
+  `SELECT` with no `INTO`, no locking clause and no unqualified `DUAL` (the
+  parser rewrites `FROM DUAL` as a quoted table name), and every word written
   directly before `(` in both the submitted text and the outgoing text is on a
   reviewed list of MySQL 8.4 built-in functions and reserved syntax words
   (`backend/db_evidence.py`, `PERMITTED_CALL_NAMES`). A name sqlglot happens to
