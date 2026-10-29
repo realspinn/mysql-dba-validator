@@ -403,7 +403,8 @@ def _union_distinct() -> list[dict]:
         "basis": SQL_BASIS,
         "title": "UNION removes duplicate rows",
         "observation": ("The statement uses UNION (or UNION DISTINCT), which removes duplicate "
-                        "rows from the combined result."),
+                        "rows from the rows combined up to that point; a UNION ALL that follows "
+                        "it keeps its duplicates, so the final result can still contain duplicates."),
         "action": ("If duplicate rows cannot occur, or the ticket accepts them, consider UNION "
                    "ALL, which keeps every row. If duplicates must be removed, keep UNION."),
         "reasoning": ("By default, duplicate rows are removed from results of set operations; "

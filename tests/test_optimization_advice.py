@@ -221,6 +221,14 @@ def test_the_having_advice_relies_on_the_collation_and_warns_about_string_number
                and "cannot see column types" in caveat for caveat in item["caveats"])
 
 
+def test_the_union_observation_allows_duplicates_from_a_later_union_all():
+    # DISTINCT overrides only the ALL operations to its left: SELECT 1 UNION SELECT 1
+    # UNION ALL SELECT 1 returns two rows.
+    item = advice("SELECT id FROM a UNION SELECT id FROM b UNION ALL SELECT id FROM c")["recommendations"][0]
+    assert "from the rows combined up to that point" in item["observation"]
+    assert "the final result can still contain duplicates" in item["observation"]
+
+
 def test_the_union_advice_does_not_claim_the_same_result():
     item = advice("SELECT id FROM users UNION SELECT id FROM admins")["recommendations"][0]
     assert "keep UNION" in item["action"]
