@@ -1,11 +1,13 @@
 """B1: optimization advice for an analysed SELECT, advisory only.
 
-- Four rules, each an observation from the SQL alone ("basis": "sql"): SELECT * over base
-  tables, a LIKE pattern that starts with a wildcard, a filtered column inside a function or
-  calculation, ORDER BY RAND(). Index advice needs a single base table; every rule has its
-  preconditions.
-- Statements that were not analysed, and anything but a single non-locking SELECT, get no
-  advice.
+- Seven rules, each an observation from the SQL alone ("basis": "sql"): SELECT * over base
+  tables, tables joined without a join condition, a LIKE pattern that starts with a
+  wildcard, a filtered column inside a function or calculation, a HAVING condition on a
+  grouping column, ORDER BY RAND(), and a UNION that removes duplicates. Index advice needs
+  a single base table; every rule has its preconditions, and each stays quiet when the SQL
+  cannot establish them.
+- Statements that were not analysed, and anything but a single non-locking SELECT or a UNION
+  of plain SELECTs that removes duplicates, get no advice.
 - The advice never changes the rest of the result or what is sent to the database; it
   rewrites no SQL, runs nothing and has no network access.
 """
@@ -67,11 +69,37 @@ ADVISED = [
     ("SELECT u.id FROM users u JOIN orders o ON o.user_id = u.id ORDER BY RAND() LIMIT 5", ["order_by_rand"]),
     ("SELECT id FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()",
      ["leading_wildcard_like", "column_in_expression", "order_by_rand"]),
+    # Join without a condition: comma, JOIN or STRAIGHT_JOIN with nothing linking the tables.
+    ("SELECT 1 FROM users, orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users JOIN orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users STRAIGHT_JOIN orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users u, orders o WHERE u.active = 1 AND o.paid = 1", ["join_without_condition"]),
+    ("SELECT 1 FROM a, b, c WHERE a.id = b.a_id", ["join_without_condition"]),           # c is not linked
+    ("SELECT 1 FROM a LEFT JOIN b ON b.a_id = a.id, c", ["join_without_condition"]),
+    ("SELECT 1 FROM a, b WHERE a.x = 1 OR b.y = 1", ["join_without_condition"]),
+    ("SELECT 1 FROM users u, orders o WHERE YEAR(o.created_at) = 2024", ["join_without_condition"]),
+    # HAVING on a grouping column compared with constants.
+    ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = 'open'", ["having_could_be_where"]),
+    ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING (status <> 'x' AND COUNT(*) > 1)",
+     ["having_could_be_where"]),
+    ("SELECT o.status, COUNT(*) FROM orders o JOIN users u ON u.id = o.user_id GROUP BY o.status "
+     "HAVING o.status IS NOT NULL AND o.status BETWEEN 'a' AND 'm'", ["having_could_be_where"]),
+    ("SELECT year, COUNT(*) FROM sales GROUP BY year HAVING year IN (2023, 2024) AND NOT year = -1",
+     ["having_could_be_where"]),
+    # UNION that removes duplicates, also in a chain with UNION ALL on either side.
+    ("SELECT id FROM users UNION SELECT id FROM admins", ["union_distinct"]),
+    ("SELECT id FROM users UNION DISTINCT SELECT id FROM admins", ["union_distinct"]),
+    ("SELECT id FROM a UNION ALL SELECT id FROM b UNION SELECT id FROM c", ["union_distinct"]),
+    ("SELECT id FROM a UNION SELECT id FROM b UNION ALL SELECT id FROM c", ["union_distinct"]),
+    ("SELECT id FROM users UNION SELECT id FROM admins ORDER BY id LIMIT 3", ["union_distinct"]),
+    # Only the UNION rule is checked for a UNION, not the rules for its query blocks.
+    ("SELECT id FROM users WHERE name LIKE '%a' UNION SELECT id FROM admins", ["union_distinct"]),
+    ("SELECT * FROM users UNION SELECT * FROM admins", ["union_distinct"]),
     # SELECT * is about the columns returned, so joins of base tables are included.
     ("SELECT * FROM users WHERE id = 1", ["select_star"]),
     ("SELECT u.* FROM users u", ["select_star"]),
     ("SELECT o.id, u.* FROM users u JOIN orders o ON o.user_id = u.id", ["select_star"]),
-    ("SELECT * FROM users, orders", ["select_star"]),
+    ("SELECT * FROM users, orders", ["select_star", "join_without_condition"]),
     ("SELECT `u`.* FROM shop.users AS `u`", ["select_star"]),
     # The sort is over the rows JSON_TABLE produces, so ORDER BY RAND() still applies.
     ("SELECT a FROM JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt ORDER BY RAND()", ["order_by_rand"]),
@@ -112,6 +140,45 @@ NONE_FOUND = [
     "SELECT 1 FROM DUAL ORDER BY RAND()",
     "SELECT * FROM `dual` ORDER BY RAND()",                      # reads like DUAL once regenerated
     "SELECT 1",
+    # Joined tables that are linked, or explicitly crossed.
+    "SELECT 1 FROM users u JOIN orders o ON o.user_id = u.id",
+    "SELECT 1 FROM users u, orders o WHERE o.user_id = u.id",
+    "SELECT 1 FROM shop.users, shop.orders WHERE orders.user_id = users.id",
+    "SELECT 1 FROM a, b, c WHERE a.id = b.a_id AND b.id = c.b_id",
+    "SELECT 1 FROM users JOIN orders USING (user_id)",
+    "SELECT 1 FROM users NATURAL JOIN orders",
+    "SELECT 1 FROM users CROSS JOIN calendar",                   # explicit: taken as intended
+    "SELECT 1 FROM users u, orders o WHERE o.user_id = u.id OR u.admin = 1",
+    # The link cannot be established, so nothing is said.
+    "SELECT 1 FROM users, orders WHERE user_id = id",            # unqualified columns
+    "SELECT 1 FROM users u, orders o WHERE EXISTS (SELECT 1 FROM x WHERE x.u = u.id AND x.o = o.id)",
+    "SELECT 1 FROM users u, (SELECT MAX(id) AS m FROM orders) o",  # a derived table
+    "WITH o AS (SELECT * FROM orders) SELECT 1 FROM users, o",
+    # A function over columns of both tables may be the join condition (a spatial join).
+    "SELECT 1 FROM a JOIN b ON ST_Contains(a.g, b.p)",
+    "SELECT 1 FROM a, b WHERE ST_Contains(a.g, b.p)",
+    # Not base tables (the same check as SELECT *): a table function, or DUAL.
+    "SELECT u.id FROM users u, JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt",
+    "SELECT 1 FROM users, DUAL",
+    # HAVING conditions that must stay, or whose move cannot be shown to keep the groups.
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING COUNT(*) > 1",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status WITH ROLLUP HAVING status = 'open'",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING LOWER(status) = 'open'",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status LIKE 'o%'",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = 'x' COLLATE utf8mb4_bin",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING BINARY status = 'x'",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = NOW()",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status IN (SELECT s FROM t)",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = 'a' OR COUNT(*) > 1",
+    "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING region = 'eu'",  # not grouped
+    "SELECT status, COUNT(*) AS n FROM orders GROUP BY status HAVING n > 1",     # an aggregate's alias
+    "SELECT LOWER(s) AS status, COUNT(*) FROM orders GROUP BY status HAVING status = 'x'",
+    "SELECT o.status, COUNT(*) FROM orders o GROUP BY o.status HAVING status = 'x'",  # written differently
+    "SELECT a FROM t HAVING a > 0",                              # no GROUP BY: MySQL merges it with WHERE
+    # The join and HAVING rules look at the outer query only.
+    "SELECT x FROM (SELECT * FROM a, b) d",
+    "SELECT id FROM a WHERE id IN (SELECT a_id FROM b, c)",
+    "SELECT s, n FROM (SELECT s, COUNT(*) AS n FROM t GROUP BY s HAVING s = 1) d",
     # A FULLTEXT search: neither the bare column nor an index on the expression applies.
     "SELECT id FROM docs WHERE MATCH(title) AGAINST('x')",
     "SELECT id FROM docs WHERE MATCH(title) AGAINST('x' IN BOOLEAN MODE) > 0",
@@ -148,10 +215,14 @@ def test_index_advice_needs_a_single_base_table(sql):
     assert advice(sql)["status"] == "none_found"
 
 
-def test_each_recommendation_explains_itself_without_claiming_a_speed_up():
-    sql = "SELECT * FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()"
+@pytest.mark.parametrize("sql,count", [
+    ("SELECT * FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()", 4),
+    ("SELECT u.id, COUNT(*) FROM users u, orders o GROUP BY u.id HAVING u.id > 5", 2),
+    ("SELECT id FROM users UNION SELECT id FROM admins", 1),
+])
+def test_each_recommendation_explains_itself_without_claiming_a_speed_up(sql, count):
     items = advice(sql)["recommendations"]
-    assert len(items) == 4
+    assert len(items) == count
     for item in items:
         assert set(item) == FIELDS  # no rewritten SQL, no measured result
         assert item["basis"] == "sql"
@@ -187,6 +258,34 @@ def test_every_column_inside_the_calculation_is_named(sql, names):
                                    "calculation, not as the bare column.")
 
 
+def test_the_unlinked_tables_are_named_by_alias():
+    item = advice("SELECT 1 FROM users u, orders o, refunds r WHERE o.user_id = u.id")["recommendations"][0]
+    assert item["observation"].startswith("No join condition was found linking `r` to the other tables")
+
+
+def test_the_having_advice_relies_on_the_collation_and_warns_about_string_number_comparisons():
+    item = advice("SELECT code, COUNT(*) FROM t GROUP BY code HAVING code = 1")["recommendations"][0]
+    assert "equal in each grouping column under that column's collation" in item["reasoning"]
+    assert "same value" not in item["reasoning"]
+    assert any(caveat.startswith("If the column is a string and the constant a number")
+               and "cannot see column types" in caveat for caveat in item["caveats"])
+
+
+def test_the_union_observation_allows_duplicates_from_a_later_union_all():
+    # DISTINCT overrides only the ALL operations to its left: SELECT 1 UNION SELECT 1
+    # UNION ALL SELECT 1 returns two rows.
+    item = advice("SELECT id FROM a UNION SELECT id FROM b UNION ALL SELECT id FROM c")["recommendations"][0]
+    assert "from the rows combined up to that point" in item["observation"]
+    assert "the final result can still contain duplicates" in item["observation"]
+
+
+def test_the_union_advice_does_not_claim_the_same_result():
+    item = advice("SELECT id FROM users UNION SELECT id FROM admins")["recommendations"][0]
+    assert "keep UNION" in item["action"]
+    assert any("the results are the same only when no duplicate rows occur" in caveat
+               for caveat in item["caveats"])
+
+
 # ---------------------------------------------------------------- eligibility
 
 @pytest.mark.parametrize("sql,reason", [
@@ -197,11 +296,17 @@ def test_every_column_inside_the_calculation_is_named(sql, names):
     ("SELEC id FROM users", "not analysed"),
     ("VALUES ROW(1)", "not analysed"),
     ("SELECT id FROM users WHERE name LIKE '%a' FOR UPDATE", "locking read"),
-    ("SELECT id FROM users WHERE name LIKE '%a' UNION SELECT id FROM admins", "SELECT statements only"),
-    ("EXPLAIN SELECT id FROM users WHERE name LIKE '%a'", "SELECT statements only"),
-    ("(SELECT id FROM users WHERE name LIKE '%a')", "SELECT statements only"),
-    ("UPDATE users SET a = 1 WHERE name LIKE '%a'", "SELECT statements only"),
-    ("DELETE FROM users WHERE YEAR(born) = 1990", "SELECT statements only"),
+    # A UNION is checked only when it removes duplicates and every block is a plain SELECT.
+    ("SELECT id FROM users WHERE name LIKE '%a' UNION ALL SELECT id FROM admins", "covers a single SELECT"),
+    ("SELECT id FROM a UNION ALL SELECT id FROM b UNION ALL SELECT id FROM c", "covers a single SELECT"),
+    ("(SELECT id FROM users) UNION (SELECT id FROM admins)", "covers a single SELECT"),
+    ("SELECT id FROM users INTERSECT SELECT id FROM admins", "covers a single SELECT"),
+    ("SELECT id FROM users EXCEPT SELECT id FROM admins", "covers a single SELECT"),
+    ("SELECT id FROM users UNION SELECT id FROM admins FOR UPDATE", "locking read"),
+    ("EXPLAIN SELECT id FROM users WHERE name LIKE '%a'", "covers a single SELECT"),
+    ("(SELECT id FROM users WHERE name LIKE '%a')", "covers a single SELECT"),
+    ("UPDATE users SET a = 1 WHERE name LIKE '%a'", "covers a single SELECT"),
+    ("DELETE FROM users WHERE YEAR(born) = 1990", "covers a single SELECT"),
 ])
 def test_only_an_analysed_non_locking_select_is_checked(sql, reason):
     result = advice(sql)
@@ -223,6 +328,8 @@ INDEPENDENT = [
     "SELECT id FROM users WHERE name LIKE '%son' ORDER BY RAND() LIMIT 5",
     "SELECT id FROM orders WHERE YEAR(created_at) = 2024; UPDATE orders SET a = 1 WHERE id = 1",
     "SELECT id FROM users WHERE name LIKE '%a' FOR UPDATE; DROP TABLE t; SELEC x",
+    "SELECT * FROM users, orders; SELECT s, COUNT(*) FROM t GROUP BY s HAVING s = 1; "
+    "SELECT id FROM users UNION SELECT id FROM admins",
 ]
 
 

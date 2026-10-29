@@ -16,8 +16,19 @@ The rules follow the MySQL 8.4 Reference Manual (the same text is in the 8.0 man
   Generated Column Indexes: an expression matches an index only when the index is defined
   on the identical expression.
 - Mathematical Functions (RAND() is not a constant for the optimizer) and LIMIT Query
-  Optimization (with a filesort, every row matching the query without LIMIT is selected
-  and sorted before LIMIT applies).
+  Optimization (with a filesort, all rows matching the query without LIMIT are selected,
+  and most or all of them are sorted, before LIMIT applies).
+- JOIN Clause: without a join condition, INNER JOIN and the comma both produce a Cartesian
+  product.
+- WHERE Clause Optimization: HAVING is merged with WHERE only without GROUP BY and
+  aggregate functions; SELECT Statement: HAVING is applied nearly last, with no optimization.
+- Set Operations with UNION, INTERSECT, and EXCEPT: duplicate rows are removed unless ALL is
+  given, and a DISTINCT operation overrides any ALL operation to its left. Internal Temporary
+  Tables: a UNION ALL with no global ORDER BY can be evaluated without a temporary table.
+
+A UNION is checked only when it removes duplicates and every query block is a plain SELECT,
+and only by the UNION rule; anything else but a single SELECT is not checked. The join and
+HAVING rules look at the outer query only, not inside subqueries, derived tables or CTEs.
 """
 
 from __future__ import annotations
@@ -38,6 +49,9 @@ VERIFY_WITH_EXPLAIN = (
     "the ticket needs; only timing both on representative data shows a real difference."
 )
 
+NOT_CHECKED = ("Optimization advice covers a single SELECT, or a UNION of plain SELECT "
+               "blocks that removes duplicates.")
+
 COMPARISONS = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.NullSafeEQ)
 CALCULATIONS = (exp.Func, exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.IntDiv)
 
@@ -46,8 +60,8 @@ def advise(facts: StatementFacts) -> dict:
     """The "optimization" field of one statement result."""
     if facts.analysis_status != ANALYSED:
         return _not_eligible("The statement was not analysed, so it was not checked for optimization.")
-    if facts.statement_type != "SELECT":
-        return _not_eligible("Optimization advice covers single SELECT statements only.")
+    if facts.statement_type not in ("SELECT", "UNION"):
+        return _not_eligible(NOT_CHECKED)
     if facts.locking_read:
         return _not_eligible("A locking read (FOR UPDATE, FOR SHARE) is not checked for optimization.")
     try:
@@ -55,16 +69,20 @@ def advise(facts: StatementFacts) -> dict:
         select = sqlglot.parse_one(facts.raw_sql, read=DIALECT)
     except Exception:
         return {"status": "unavailable", "recommendations": []}
+    if isinstance(select, exp.Union):
+        unions = _plain_union_chain(select)
+        if unions and any(union.args.get("distinct") for union in unions):
+            return {"status": "advised", "recommendations": _union_distinct()}
     if not isinstance(select, exp.Select):
-        return _not_eligible("Optimization advice covers single SELECT statements only.")
+        return _not_eligible(NOT_CHECKED)
 
-    recommendations = _select_star(select)
+    recommendations = _select_star(select) + _join_without_condition(select)
     # Index advice names a column of a real table only when the query reads one base table
     # (no join, subquery, CTE or derived table): otherwise the column's table is not known.
     if _reads_one_base_table(select) and select.args.get("where") is not None:
         where = select.args["where"]
         recommendations += _leading_wildcards(where) + _calculated_columns(where)
-    recommendations += _order_by_rand(select)
+    recommendations += _having_could_be_where(select) + _order_by_rand(select)
     return {"status": "advised" if recommendations else "none_found",
             "recommendations": recommendations}
 
@@ -271,4 +289,207 @@ def _order_by_rand(select: exp.Select) -> list[dict]:
         ],
         "verify": ("Check EXPLAIN for 'Using filesort' and the estimated rows, and time both "
                    "approaches on a non-production copy with representative data."),
+    }]
+
+
+def _join_without_condition(select: exp.Select) -> list[dict]:
+    """Tables in FROM that no ON, USING or cross-table comparison links to the first table.
+
+    Quiet whenever the link cannot be established from the SQL: a source that is not a named
+    table (derived table, LATERAL, table function), a CTE, a repeated name, a subquery in a
+    condition, a function over columns of more than one table, or a column without a known
+    table qualifier. An explicit CROSS JOIN is taken as intended and not reported.
+    """
+    joins = select.args.get("joins") or []
+    if not joins or not _reads_only_base_tables(select):
+        return []
+    tables = [_source(select).this, *(join.this for join in joins)]
+    names = [table.alias_or_name.lower() for table in tables]
+    if len(set(names)) != len(names):
+        return []
+
+    group = list(range(len(tables)))  # union-find over the tables
+
+    def root(i: int) -> int:
+        while group[i] != i:
+            i = group[i]
+        return i
+
+    def link(i: int, j: int) -> None:
+        group[root(i)] = root(j)
+
+    conditions = [select.args["where"]] if select.args.get("where") is not None else []
+    for position, join in enumerate(joins, start=1):
+        if join.args.get("using") or join.args.get("method") or join.args.get("kind") == "CROSS":
+            link(position, position - 1)  # USING, NATURAL or an explicit CROSS JOIN
+        elif join.args.get("on") is not None:
+            conditions.append(join.args["on"])
+    for condition in conditions:
+        if condition.find(exp.Select) is not None:
+            return []
+        for column in condition.find_all(exp.Column):
+            if column.args.get("db") or column.table.lower() not in names:
+                return []
+        for function in condition.find_all(exp.Func):  # may relate the tables, e.g. ST_Contains
+            if isinstance(function, exp.Connector):  # AND, OR, XOR are functions in sqlglot
+                continue
+            if len({column.table.lower() for column in function.find_all(exp.Column)}) > 1:
+                return []
+        for predicate in condition.find_all(exp.Predicate):
+            linked = sorted({names.index(column.table.lower()) for column in predicate.find_all(exp.Column)})
+            for other in linked[1:]:
+                link(linked[0], other)
+
+    unlinked = [table for i, table in enumerate(tables) if root(i) != root(0)]
+    if not unlinked:
+        return []
+    return [{
+        "code": "join_without_condition",
+        "basis": SQL_BASIS,
+        "title": "Tables joined without a join condition",
+        "observation": (f"No join condition was found linking {_table_names(unlinked)} to the other "
+                        "tables in FROM, so each matching row of one is combined with every "
+                        "matching row of the other."),
+        "action": ("If every combination is not intended, add the missing join condition (ON, "
+                   "USING or a WHERE comparison between the tables). If it is intended, writing "
+                   "CROSS JOIN makes that explicit."),
+        "reasoning": ("In MySQL, INNER JOIN and , (comma) are semantically equivalent in the "
+                      "absence of a join condition: both produce a Cartesian product between the "
+                      "specified tables (MySQL 8.4 manual: JOIN Clause). The number of rows "
+                      "produced is the product of the matching rows of each table."),
+        "caveats": [
+            "A cross join is correct when every combination is wanted, for example with a "
+            "calendar or a small lookup table.",
+            "Links are recognised by table names and aliases in ON, USING and WHERE; this "
+            "advice does not check that a condition matches the intended rows.",
+        ],
+        "verify": ("Compare the expected number of result rows with the row counts of the "
+                   "tables, and check the joined table's estimated rows in EXPLAIN (an estimate) "
+                   "on a non-production copy."),
+    }]
+
+
+def _table_names(tables: list[exp.Table]) -> str:
+    return ", ".join(f"`{name}`" for name in sorted({table.alias_or_name for table in tables}))
+
+
+def _having_could_be_where(select: exp.Select) -> list[dict]:
+    """Top-level HAVING conditions that compare a grouping column with constants only.
+
+    Each top-level AND condition is checked on its own. Rows in one group are equal in a
+    grouping column under its collation, so such a condition (when the constant is of the
+    column's kind) is true for all rows of a group or for none, and filtering the rows first
+    leaves the same groups. Column types are not known here, hence the string/number caveat.
+    Only plain comparisons qualify (no function, LIKE, COLLATE, BINARY or subquery), the
+    column must be written as in GROUP BY and not be a select-list alias, and WITH ROLLUP
+    (whose super-aggregate rows WHERE cannot express) is excluded.
+    """
+    group, having = select.args.get("group"), select.args.get("having")
+    if group is None or having is None or any(
+            group.args.get(key) for key in ("rollup", "cube", "grouping_sets", "totals")):
+        return []
+    grouped = {(column.table.lower(), column.name.lower())
+               for column in group.expressions if isinstance(column, exp.Column)}
+    aliases = {item.alias.lower() for item in select.expressions if isinstance(item, exp.Alias)}
+
+    def grouping_column(node: exp.Expression) -> bool:
+        node = _unwrap(node)
+        return (isinstance(node, exp.Column) and node.name.lower() not in aliases
+                and (node.table.lower(), node.name.lower()) in grouped)
+
+    def constant(node: exp.Expression) -> bool:
+        node = _unwrap(node)
+        if isinstance(node, exp.Neg):
+            node = node.this
+        return isinstance(node, (exp.Literal, exp.Null, exp.Boolean))
+
+    def plain_filter(node: exp.Expression) -> Optional[exp.Column]:
+        node = _unwrap(node)
+        if isinstance(node, exp.Not):
+            return plain_filter(node.this)
+        if isinstance(node, (*COMPARISONS, exp.Is)):
+            for column, other in ((node.this, node.expression), (node.expression, node.this)):
+                if grouping_column(column) and constant(other):
+                    return _unwrap(column)
+        if isinstance(node, exp.Between) and grouping_column(node.this) and all(
+                constant(node.args[key]) for key in ("low", "high")):
+            return _unwrap(node.this)
+        if (isinstance(node, exp.In) and grouping_column(node.this) and not node.args.get("query")
+                and node.expressions and all(constant(value) for value in node.expressions)):
+            return _unwrap(node.this)
+        return None
+
+    condition = _unwrap(having.this)
+    conjuncts = condition.flatten() if isinstance(condition, exp.And) else [condition]
+    columns = [column for column in map(plain_filter, conjuncts) if column is not None]
+    if not columns:
+        return []
+    return [{
+        "code": "having_could_be_where",
+        "basis": SQL_BASIS,
+        "title": "HAVING condition on a grouping column",
+        "observation": (f"The HAVING clause compares {_names(columns)} with a constant; the "
+                        "condition uses only grouping columns, not an aggregate."),
+        "action": ("Consider moving that condition from HAVING to WHERE, so the rows are "
+                   "filtered before they are grouped. Conditions on aggregates, such as "
+                   "COUNT(*) > 1, stay in HAVING."),
+        "reasoning": ("Rows in one group are equal in each grouping column under that column's "
+                      "collation, so comparing the column with a constant of the same kind (a "
+                      "string with a string, a number with a number) is true for all rows of a "
+                      "group or for none, and filtering the rows first leaves the same groups. "
+                      "MySQL merges HAVING with WHERE only when there "
+                      "is no GROUP BY and no aggregate function (MySQL 8.4 manual: WHERE Clause "
+                      "Optimization); otherwise HAVING is applied nearly last, with no "
+                      "optimization (SELECT Statement). In WHERE, the condition reduces the rows "
+                      "to be grouped and can be considered for index access."),
+        "caveats": [
+            "If the column is a string and the constant a number, MySQL converts each value "
+            "before comparing, and values that are equal under the collation can convert "
+            "differently; check the column's type first. This advice cannot see column types.",
+            "When the condition removes few rows, the difference may be small.",
+            "This advice does not check index definitions.",
+        ],
+        "verify": VERIFY_WITH_EXPLAIN,
+    }]
+
+
+def _plain_union_chain(node: exp.Expression) -> Optional[list[exp.Union]]:
+    """The UNION operations of a chain whose query blocks are all plain SELECTs, or None
+    (a parenthesized block, INTERSECT or EXCEPT)."""
+    if isinstance(node, exp.Select):
+        return []
+    if not isinstance(node, exp.Union):
+        return None
+    left, right = _plain_union_chain(node.this), _plain_union_chain(node.expression)
+    if left is None or right is None:
+        return None
+    return [node, *left, *right]
+
+
+def _union_distinct() -> list[dict]:
+    return [{
+        "code": "union_distinct",
+        "basis": SQL_BASIS,
+        "title": "UNION removes duplicate rows",
+        "observation": ("The statement uses UNION (or UNION DISTINCT), which removes duplicate "
+                        "rows from the rows combined up to that point; a UNION ALL that follows "
+                        "it keeps its duplicates, so the final result can still contain duplicates."),
+        "action": ("If duplicate rows cannot occur, or the ticket accepts them, consider UNION "
+                   "ALL, which keeps every row. If duplicates must be removed, keep UNION."),
+        "reasoning": ("By default, duplicate rows are removed from results of set operations; "
+                      "with ALL, duplicate-row removal does not occur, and a set operation using "
+                      "DISTINCT overrides any using ALL to its left (MySQL 8.4 manual: Set "
+                      "Operations with UNION, INTERSECT, and EXCEPT). A UNION ALL with no global "
+                      "ORDER BY can be evaluated without an internal temporary table (Internal "
+                      "Temporary Tables)."),
+        "caveats": [
+            "UNION ALL can return rows that UNION removes: the results are the same only when "
+            "no duplicate rows occur, which this advice does not check.",
+            "In a chain, changing one UNION changes which duplicates are removed, because it "
+            "also applies to every UNION ALL to its left.",
+            "With a global ORDER BY, UNION ALL may still use a temporary table.",
+        ],
+        "verify": ("On a non-production copy, compare the row counts of both forms (equal counts "
+                   "on that data do not prove duplicates can never occur), and check EXPLAIN: a "
+                   "UNION RESULT row shows that a temporary table is used."),
     }]
