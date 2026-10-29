@@ -26,11 +26,11 @@ than a recorded one.
 
 | Area | Status |
 | --- | --- |
-| Parser, risk engine, scoring adjustments, API, evidence contract, connector security rules | Automated tests at v0.5.0: 1313 passed, 4 skipped on the maintainer's Windows machine (Python 3.13.5) before tagging; in the v0.5.0 tag runs (Python 3.14), 1315 passed, 2 skipped on Windows and 1316 passed, 1 skipped on macOS. See [below](#v050-release-verification). For v0.5.1: in the tag runs (Python 3.14), 1346 passed, 2 skipped on Windows and 1347 passed, 1 skipped on macOS; see [v0.5.1 release verification](#v051-release-verification) and its [source commit](#v051-source-commit-comment-parsing-fix-c884f44). For v0.6.0: in the tag runs (Python 3.14), 1546 passed, 2 skipped on Windows and 1547 passed, 1 skipped on macOS; see [v0.6.0 release verification](#v060-release-verification) |
+| Parser, risk engine, scoring adjustments, API, evidence contract, connector security rules | Automated tests at v0.5.0: 1313 passed, 4 skipped on the maintainer's Windows machine (Python 3.13.5) before tagging; in the v0.5.0 tag runs (Python 3.14), 1315 passed, 2 skipped on Windows and 1316 passed, 1 skipped on macOS. See [below](#v050-release-verification). For v0.5.1: in the tag runs (Python 3.14), 1346 passed, 2 skipped on Windows and 1347 passed, 1 skipped on macOS; see [v0.5.1 release verification](#v051-release-verification) and its [source commit](#v051-source-commit-comment-parsing-fix-c884f44). For v0.6.0: in the tag runs (Python 3.14), 1546 passed, 2 skipped on Windows and 1547 passed, 1 skipped on macOS; see [v0.6.0 release verification](#v060-release-verification). For v0.7.0: in the tag runs, 1938 passed, 2 skipped on Windows and 1939 passed, 1 skipped on macOS (its [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.7.0)). For the v0.8.0 candidate, see [below](#unreleased-v080-candidate-local-checks) |
 | Results page rendering of every evidence state | Real headless Chrome, driven by real API responses (part of the test suite) |
 | Local web app and connector together in a browser | Real headless Chrome, with company MySQL replaced by a stand-in |
 | Windows portable release | Built by CI from the release tag, audited, smoke-tested from the extracted zip. The published v0.6.0 zip's checksum was re-checked on the maintainer's machine; its smoke test and artifact audit ran in CI only (below) |
-| Local database evidence against real MySQL | **Verified by the maintainer** with the Sakila sample database (below), on code before v0.5.0; not repeated for v0.5.0, v0.5.1, v0.6.0 or the v0.7.0 candidate. Also covered by automated tests with a fake MySQL that models MySQL's read-only behaviour (error 1792) |
+| Local database evidence against real MySQL | **Verified by the maintainer** with the Sakila sample database (below), on code before v0.5.0; not repeated for v0.5.0, v0.5.1, v0.6.0, v0.7.0 or the v0.8.0 candidate. Also covered by automated tests with a fake MySQL that models MySQL's read-only behaviour (error 1792) |
 | Remote/company workflow (local connector) end to end against a real MySQL server | **Reported by the maintainer** (manual test, recorded after the v0.4.1 release): successful on Windows against an AWS RDS for MySQL test database the maintainer created. No transcript or logs were provided for this record; see [below](#remote-workflow-against-aws-rds-for-mysql-maintainer-reported) |
 | Real company MySQL, VPN/LAN connectivity, company-issued TLS, hosted HTTPS frontend | **Not verified** |
 | Positive M1 metadata adjustment against a live large table | **Not verified.** It needs a collected `UPDATE`/`DELETE` plan. In v0.4.1 only the remote connector path collected one; since v0.5.0 neither path does (see below), so M1 does not arise in practice. Automated tests only |
@@ -85,15 +85,19 @@ section). The suite covers, among others:
   `START REPLICA` are not analysed; execution risk is not assessed without a
   plan and reports a plan's estimates as estimates; `sql` is the submitted
   text while the EXPLAIN sent is unchanged; validation logs no SQL or login.
-- **Optimization advice:** `test_optimization_advice.py`: each rule's pattern,
-  preconditions and non-matches; only an analysed, non-locking single `SELECT`
-  is checked; replacing or breaking the adviser changes nothing else in the
+- **Optimization advice:** `test_optimization_advice.py`: each of the seven
+  rules' pattern, preconditions and non-matches; only an analysed, non-locking
+  single `SELECT`, or a `UNION` of plain `SELECT` blocks that removes
+  duplicates, is checked; replacing or breaking the adviser changes nothing else in the
   result or sent to the (fake) database; no rewritten SQL, no network or
   database access, no SQL logged. The page shows it collapsed beside the result,
   and the "AI Advisor — Coming Soon" note has no control but a close button,
   which hides it until the page is reloaded and stores nothing
   (`test_frontend_evidence_rendering.py`, real Chrome). Whether the advice
   helps on a real server has not been tested.
+- **Host header:** `test_host_header.py`: a foreign `Host` gets HTTP 400 on
+  every route before any MySQL call, loopback names still work, and
+  `MDV_ALLOWED_HOSTS` accepts only exact names (a wildcard cannot open it).
 - **Update notice:** `test_update_check.py`: version comparison, every
   failure path (HTTP 403/404/429, offline, timeout, TLS, malformed or
   unexpected JSON, a non-official release page), the exact request, caching,
@@ -271,6 +275,25 @@ in the sections above are for earlier states of the tree), any CI run of this
 tree (the macOS CI result recorded for v0.5.1 applies to v0.5.1 only), a real
 Mac (including approval prompts in Terminal), MySQL 8.4, a packaged build, and
 company infrastructure, VPN and TLS.
+
+## Unreleased: v0.8.0 candidate, local checks
+
+Branch `release/v0.8.0-prep`, 2026-10-29 (not released), on `57e0614`
+(`main`, after pull requests #30 and #31): documentation and the version bump
+to 0.8.0 only. The code is that of `main`.
+
+| Check | Result | Where |
+| --- | --- | --- |
+| Full suite | 2286 passed, 4 skipped (three symbolic-link or POSIX tests that run on macOS, one POSIX probe) | Maintainer's Windows 10 machine, Python 3.13.5; sqlglot 30.17.0, FastAPI 0.141.1, pydantic 2.11.7. This environment is not the release pins: PyMySQL 2.2.8 and cryptography 45.0.7 are outside `requirements.txt` (CI installs from it) |
+| `pip check` | No broken requirements | Same machine |
+| Version | `/api/health`, the FastAPI app and `release/build_windows.py` report 0.8.0 | Same machine |
+| Web app from source (`uvicorn backend.main:app --host 127.0.0.1 --port 8420`), on the code of `main` | `/api/health` 200; the served page is byte-identical to `frontend/index.html`; one offline `/api/validate` (no login) returned the expected advice (`select_star` only for a join linked by `ST_Contains`); a foreign `Host` got 400 | Same machine, recorded by script |
+| The same running app in a browser | End-to-end UI test, offline, **reported by the maintainer** without a transcript | Same machine |
+
+Not shown by these local checks: any MySQL server (the new optimization rules
+have not been checked against one), a packaged build, a real Mac, a screen
+reader, and company infrastructure, VPN and TLS. CI, the release builds and
+the published checksums are in the v0.8.0 release notes.
 
 ## Unreleased: v0.7.0 candidate, local checks
 
@@ -649,6 +672,9 @@ section 2); no wider Performance Schema grant is to be used.
 - The positive M1 and M2 adjustments against a live database (since v0.5.0 they
   need an `UPDATE`/`DELETE` plan, which is no longer requested).
 - Every live-server check of the evidence contract revision (below).
+- Whether the optimization advice helps on a real server: none of its seven
+  rules has been checked against a real MySQL server, and the `DUAL` plan
+  refusal (v0.8.0) is tested only with fake servers.
 - The update check against the real GitHub API from a running or packaged
   app (only faked responses are tested). On macOS the packaged app may have no
   CA certificates for Python to verify GitHub with, in which case the check is

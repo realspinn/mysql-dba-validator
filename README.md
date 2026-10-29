@@ -14,7 +14,7 @@ Scoring is rule-based and deterministic; no AI or LLM makes risk decisions.
 The validator never runs the SQL you submit. It supports a DBA's judgement and
 does not guarantee that SQL is safe.
 
-**Current release: [v0.7.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.7.0)**
+**Current release: [v0.8.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.8.0)**
 (pre-1.0), a portable Windows x64 app, plus an unsigned macOS (Apple Silicon)
 build.
 
@@ -42,11 +42,12 @@ database connected, so the result is static analysis only.*
   connection. Company servers are reached only through a local connector, for
   targets an operator has approved, over verified TLS. Each result says what
   evidence was collected, not collected, or failed.
-- **Suggests what to check for performance (advisory).** For a single `SELECT`
-  it notes a `LIKE` pattern that starts with a wildcard, a filtered column inside
-  a function or calculation, and `ORDER BY RAND()`, with caveats and how to
-  verify. This advice comes from fixed rules, never changes the risk result,
-  does not rewrite the SQL and is not a full performance review.
+- **Suggests what to check for performance (advisory).** For a single `SELECT`,
+  or a `UNION` that removes duplicates, it notes patterns seen in the SQL text,
+  each with caveats and how to verify (see
+  [Optimization advice](#optimization-advice)). This advice comes from fixed
+  rules, never changes the risk result, does not rewrite or run the SQL and is
+  not a full performance review.
 - **Keeps credentials out of storage.** Logins are used for one operation and
   never saved.
 
@@ -120,13 +121,13 @@ Details: the
 ## Download and run
 
 Download from the
-[v0.7.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.7.0).
+[v0.8.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.8.0).
 Each file has a matching `.sha256` checksum file there.
 
 | Platform | File | Status |
 | --- | --- | --- |
-| Windows x64 | `MySQL-DBA-Validator-v0.7.0-windows-x64.zip` | Built, audited and smoke-tested in CI; the release notes say which checks the maintainer repeated on the published zip |
-| macOS, Apple Silicon only | `MySQL-DBA-Validator-v0.7.0-macos-arm64-unsigned.zip` | Built, audited and smoke-tested in CI only; ad hoc signed, not notarized |
+| Windows x64 | `MySQL-DBA-Validator-v0.8.0-windows-x64.zip` | Built, audited and smoke-tested in CI; the release notes say which checks the maintainer repeated on the published zip |
+| macOS, Apple Silicon only | `MySQL-DBA-Validator-v0.8.0-macos-arm64-unsigned.zip` | Built, audited and smoke-tested in CI only; ad hoc signed, not notarized |
 
 **Windows**
 
@@ -134,7 +135,7 @@ Each file has a matching `.sha256` checksum file there.
    `.sha256` file:
 
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.7.0-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MySQL-DBA-Validator-v0.8.0-windows-x64.zip -Algorithm SHA256
    ```
 
 2. Extract the zip anywhere, for example `C:\Tools\`. No installer or Python
@@ -152,10 +153,10 @@ covers local evidence, company targets and troubleshooting.
 **macOS (Apple Silicon)**
 
 Check the download with
-`shasum -a 256 -c MySQL-DBA-Validator-v0.7.0-macos-arm64-unsigned.zip.sha256`,
+`shasum -a 256 -c MySQL-DBA-Validator-v0.8.0-macos-arm64-unsigned.zip.sha256`,
 unzip it, and move `MySQL DBA Validator.app` to Applications. macOS blocks the
 first launch because the app is not notarized; the
-[release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.7.0)
+[release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.8.0)
 explain how to open it.
 
 **Update notice (since v0.7.0).** When a newer official release exists, the
@@ -180,6 +181,33 @@ version, and no SQL, login or connection details are sent. Set
 Evidence can adjust a score by small, bounded amounts. Missing evidence never
 lowers a score. The rules are in [ARCHITECTURE.md](ARCHITECTURE.md#risk-scoring)
 and the [evidence contract](docs/v2-database-evidence-contract.md).
+
+## Optimization advice
+
+Each statement card has a collapsed **Optimization advice** section. It is
+checked for a fully analysed single `SELECT` without a locking clause, and for
+a `UNION` of plain `SELECT` blocks that removes duplicates. Everything else
+(writes, `UNION ALL` only, `INTERSECT`, `EXCEPT`, `FOR UPDATE`, SQL that was
+not analysed) is shown as not checked. The rules, by their API `code`:
+
+| Rule | What it notes | What to consider | Limits |
+| --- | --- | --- | --- |
+| `select_star` | `SELECT *` or `t.*` in the outer select list, when every source is a named table | Name only the columns the ticket needs; that can allow a covering index and returns less data | `*` is fine when every column is needed; it cannot see the table's columns or indexes |
+| `column_in_expression` | A filtered column inside a function or calculation compared with a constant, such as `YEAR(created_at) = 2024` (one table, no join, subquery or CTE; not `MATCH ... AGAINST`) | Compare the bare column with a constant (a date range), or an index on the same expression | The rewrite must return exactly the same rows (whole last day for `DATETIME`, collation for `LOWER()`); a matching index may already exist; indexes slow writes |
+| `leading_wildcard_like` | A constant `LIKE` pattern that starts with `%` or `_` (one table, as above) | An anchored pattern such as `'abc%'`, or whether `FULLTEXT` search meets the need | Both change the results; on a small or already narrowed table the cost may be low |
+| `order_by_rand` | `ORDER BY RAND()` with a `FROM` other than `DUAL` alone | Fine for few matching rows; for many, a method that does not sort them all | Cost depends on the matching rows; random key values are not uniform when keys have gaps |
+| `join_without_condition` | A table in `FROM` that no `ON`, `USING`, `NATURAL` or cross-table `WHERE` comparison links to the others | Add the missing condition, or write `CROSS JOIN` if every combination is wanted | Says nothing when it cannot tell: derived tables, table functions, `DUAL`, CTEs, subqueries in a condition, a function over columns of two tables (such as `ST_Contains`), unqualified columns. It does not check that a condition is the right one |
+| `having_could_be_where` | A `HAVING` condition (one `AND` part) comparing a grouping column with constants | Move it to `WHERE`, so rows are filtered before grouping; aggregate conditions such as `COUNT(*) > 1` stay | Not with `WITH ROLLUP` or `OR`. A string column compared with a number can change the result when moved; column types are not visible, so check them |
+| `union_distinct` | A `UNION` (or `UNION DISTINCT`) of plain `SELECT` blocks | `UNION ALL` only if duplicates cannot occur or the ticket accepts them | `UNION ALL` is not equivalent when duplicates exist, and that is not checked; a `UNION` also removes duplicates from every `UNION ALL` to its left |
+
+The join, `HAVING` and `UNION` rules look at the outer query only, not inside
+subqueries, derived tables or CTE bodies. The advice names a pattern seen in
+the SQL text, not a measured cost: it does no cost-based or semantic
+optimization, cannot see indexes, column types or data, and does not promise
+that a change is faster. Each item says how to check it, with `EXPLAIN` and
+timing on a non-production copy. The rules are covered by automated tests;
+they have not been checked against a real MySQL server. Exact conditions are in
+the [evidence contract](docs/v2-database-evidence-contract.md).
 
 ## Running beyond one machine
 
@@ -215,9 +243,20 @@ account.
 
 ## Development
 
-The project is developed and tested on Windows with Python 3.14. Setup, how
-to run the web app and connector from source, and the test commands
-(`python -m pytest -q` and `pip check`, no MySQL server needed) are in
+The project is developed and tested on Windows with Python 3.14 (CI runs
+Windows and macOS). To run the web app from source, from the repository root in
+PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn backend.main:app --host 127.0.0.1 --port 8420
+```
+
+Then open `http://localhost:8420`; stop it with Ctrl+C. Run the tests with
+`python -m pytest -q` and `pip check` (no MySQL server needed). The connector
+for company targets, `--reload` for development and the other platforms are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
 ## Contributing and support
