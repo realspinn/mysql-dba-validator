@@ -236,13 +236,13 @@ def _calculated_columns_in(side: Optional[exp.Expression]) -> list[exp.Column]:
     if side is None:
         return []
     side = _unwrap(side)
+    if not isinstance(side, CALCULATIONS) or side.find(exp.Select) is not None:
+        return []
     # MATCH ... AGAINST is a full-text search: comparing the bare column does not express it,
     # and a FULLTEXT index cannot have functional key parts (MySQL 8.4 manual: CREATE INDEX),
-    # so this advice does not apply to it.
-    if (not isinstance(side, CALCULATIONS) or isinstance(side, exp.MatchAgainst)
-            or side.find(exp.Select) is not None):
-        return []
-    return list(side.find_all(exp.Column))
+    # so its columns are left out, also inside a larger calculation.
+    return [column for column in side.find_all(exp.Column)
+            if column.find_ancestor(exp.MatchAgainst) is None]
 
 
 def _order_by_rand(select: exp.Select) -> list[dict]:

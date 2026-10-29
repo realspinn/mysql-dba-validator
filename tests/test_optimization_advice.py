@@ -115,6 +115,7 @@ NONE_FOUND = [
     # A FULLTEXT search: neither the bare column nor an index on the expression applies.
     "SELECT id FROM docs WHERE MATCH(title) AGAINST('x')",
     "SELECT id FROM docs WHERE MATCH(title) AGAINST('x' IN BOOLEAN MODE) > 0",
+    "SELECT id FROM docs WHERE MATCH(title) AGAINST('x') + 1 > 0",  # inside a larger calculation
     # Not the outer SELECT list over base tables.
     "SELECT COUNT(*) FROM users",
     "SELECT id FROM users WHERE EXISTS (SELECT * FROM orders o WHERE o.user_id = users.id)",
@@ -177,6 +178,8 @@ def test_the_observation_names_only_columns_from_the_sql():
     ("SELECT id FROM people WHERE CONCAT(first_name, ' ', last_name) = 'Ann Lee'", "`first_name`, `last_name`"),
     ("SELECT id FROM orders WHERE price + tax > 100", "`price`, `tax`"),
     ("SELECT id FROM orders WHERE COALESCE(shipped_at, created_at) > '2024-01-01'", "`created_at`, `shipped_at`"),
+    # A column beside MATCH in the same calculation is still named; the MATCH column is not.
+    ("SELECT id FROM docs WHERE MATCH(title) AGAINST('x') + boost > 1", "`boost`"),
 ])
 def test_every_column_inside_the_calculation_is_named(sql, names):
     item = advice(sql)["recommendations"][0]
