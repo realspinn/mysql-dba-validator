@@ -261,6 +261,12 @@ def _is_plain_select_explain(explain_sql: str) -> bool:
         return False
     if any(isinstance(function, exp.Anonymous) for function in statement.find_all(exp.Func)):
         return False
+    # sqlglot regenerates FROM DUAL as FROM `DUAL`, and a quoted reserved word names an
+    # ordinary table (MySQL 8.4 manual: Keywords and Reserved Words), so the plan would be
+    # of a table called DUAL, not of the statement. An unqualified DUAL is never planned.
+    if any(table.name.upper() == "DUAL" and not table.args.get("db")
+           for table in statement.find_all(exp.Table)):
+        return False
     return call_names_permitted(_outgoing_call_names(body))
 
 
