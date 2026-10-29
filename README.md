@@ -188,7 +188,9 @@ Each statement card has a collapsed **Optimization advice** section. It is
 checked for a fully analysed single `SELECT` without a locking clause, and for
 a `UNION` of plain `SELECT` blocks that removes duplicates. Everything else
 (writes, `UNION ALL` only, `INTERSECT`, `EXCEPT`, `FOR UPDATE`, SQL that was
-not analysed) is shown as not checked. The rules, by their API `code`:
+not analysed) is shown as not checked. A `UNION` is checked only by
+`union_distinct`, not by the other rules for each block (`SELECT * ... UNION
+SELECT * ...` gets no `select_star`). The rules, by their API `code`:
 
 | Rule | What it notes | What to consider | Limits |
 | --- | --- | --- | --- |
