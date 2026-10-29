@@ -76,6 +76,8 @@ ADVISED = [
     ("SELECT 1 FROM users u, orders o WHERE u.active = 1 AND o.paid = 1", ["join_without_condition"]),
     ("SELECT 1 FROM a, b, c WHERE a.id = b.a_id", ["join_without_condition"]),           # c is not linked
     ("SELECT 1 FROM a LEFT JOIN b ON b.a_id = a.id, c", ["join_without_condition"]),
+    ("SELECT 1 FROM a, b WHERE a.x = 1 OR b.y = 1", ["join_without_condition"]),
+    ("SELECT 1 FROM users u, orders o WHERE YEAR(o.created_at) = 2024", ["join_without_condition"]),
     # HAVING on a grouping column compared with constants.
     ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = 'open'", ["having_could_be_where"]),
     ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING (status <> 'x' AND COUNT(*) > 1)",
@@ -152,6 +154,9 @@ NONE_FOUND = [
     "SELECT 1 FROM users u, orders o WHERE EXISTS (SELECT 1 FROM x WHERE x.u = u.id AND x.o = o.id)",
     "SELECT 1 FROM users u, (SELECT MAX(id) AS m FROM orders) o",  # a derived table
     "WITH o AS (SELECT * FROM orders) SELECT 1 FROM users, o",
+    # A function over columns of both tables may be the join condition (a spatial join).
+    "SELECT 1 FROM a JOIN b ON ST_Contains(a.g, b.p)",
+    "SELECT 1 FROM a, b WHERE ST_Contains(a.g, b.p)",
     # Not base tables (the same check as SELECT *): a table function, or DUAL.
     "SELECT u.id FROM users u, JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt",
     "SELECT 1 FROM users, DUAL",

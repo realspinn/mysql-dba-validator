@@ -546,7 +546,8 @@ derived tables and CTE bodies are not checked by them):
   or cross-table comparison in `WHERE` links to the others ("`INNER JOIN` and
   `,` … both produce a Cartesian product" without a join condition: JOIN
   Clause). An explicit `CROSS JOIN` is taken as intended. Nothing is said when
-  a source is not a base table, a CTE is used, a condition has a subquery, or a
+  a source is not a base table, a CTE is used, a condition has a subquery or a
+  function over columns of more than one table (such as `ST_Contains`), or a
   column has no known table qualifier.
 - `having_could_be_where`: each top-level `AND` condition of `HAVING` is
   checked on its own. One qualifies when it compares a grouping column, written

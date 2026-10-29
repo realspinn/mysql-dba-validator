@@ -297,8 +297,8 @@ def _join_without_condition(select: exp.Select) -> list[dict]:
 
     Quiet whenever the link cannot be established from the SQL: a source that is not a named
     table (derived table, LATERAL, table function), a CTE, a repeated name, a subquery in a
-    condition, or a column without a known table qualifier. An explicit CROSS JOIN is taken
-    as intended and not reported.
+    condition, a function over columns of more than one table, or a column without a known
+    table qualifier. An explicit CROSS JOIN is taken as intended and not reported.
     """
     joins = select.args.get("joins") or []
     if not joins or not _reads_only_base_tables(select):
@@ -329,6 +329,11 @@ def _join_without_condition(select: exp.Select) -> list[dict]:
             return []
         for column in condition.find_all(exp.Column):
             if column.args.get("db") or column.table.lower() not in names:
+                return []
+        for function in condition.find_all(exp.Func):  # may relate the tables, e.g. ST_Contains
+            if isinstance(function, exp.Connector):  # AND, OR, XOR are functions in sqlglot
+                continue
+            if len({column.table.lower() for column in function.find_all(exp.Column)}) > 1:
                 return []
         for predicate in condition.find_all(exp.Predicate):
             linked = sorted({names.index(column.table.lower()) for column in predicate.find_all(exp.Column)})
