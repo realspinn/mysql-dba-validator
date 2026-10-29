@@ -6,7 +6,10 @@ recommendation is an observation from the SQL alone ("basis": "sql"): no query i
 plan is requested, nothing is measured and no SQL is rewritten. It says what could be
 checked, never that the statement is slow or that a change makes it faster.
 
-The rules follow the MySQL 8.4 Reference Manual:
+The rules follow the MySQL 8.4 Reference Manual (the same text is in the 8.0 manual):
+- How MySQL Uses Indexes: a query that uses only columns included in some index can read
+  them from the index without the data rows (a covering index); with SELECT * that needs
+  one index that holds every column.
 - Comparison of B-Tree and Hash Indexes: LIKE can use an index only when the pattern is a
   constant that does not start with a wildcard.
 - Range Optimization: range access compares a key part with a constant. Optimizer Use of
@@ -55,7 +58,7 @@ def advise(facts: StatementFacts) -> dict:
     if not isinstance(select, exp.Select):
         return _not_eligible("Optimization advice covers single SELECT statements only.")
 
-    recommendations = []
+    recommendations = _select_star(select)
     # Index advice names a column of a real table only when the query reads one base table
     # (no join, subquery, CTE or derived table): otherwise the column's table is not known.
     if _reads_one_base_table(select) and select.args.get("where") is not None:
@@ -70,11 +73,69 @@ def _not_eligible(reason: str) -> dict:
     return {"status": "not_eligible", "reason": reason, "recommendations": []}
 
 
+def _source(select: exp.Select) -> Optional[exp.From]:
+    return select.args.get("from") or select.args.get("from_")
+
+
+def _is_dual(node: exp.Expression) -> bool:
+    """FROM DUAL names no table: there is one row. The regenerated SQL quotes it (`DUAL`), so
+    a real table named dual, which needs quoting as a reserved word, is treated the same."""
+    return (isinstance(node, exp.Table) and isinstance(node.this, exp.Identifier)
+            and not node.args.get("db") and node.name.upper() == "DUAL")
+
+
+def _is_base_table(node: exp.Expression) -> bool:
+    """A named table: not DUAL and not a table function such as JSON_TABLE, whose columns
+    are declared in the query and have no index."""
+    return isinstance(node, exp.Table) and isinstance(node.this, exp.Identifier) and not _is_dual(node)
+
+
 def _reads_one_base_table(select: exp.Select) -> bool:
-    source = select.args.get("from") or select.args.get("from_")
-    return (source is not None and isinstance(source.this, exp.Table)
+    source = _source(select)
+    return (source is not None and _is_base_table(source.this)
             and not select.args.get("joins") and not select.args.get("with")
             and sum(1 for _ in select.find_all(exp.Select)) == 1)
+
+
+def _reads_only_base_tables(select: exp.Select) -> bool:
+    """FROM and every JOIN name a table (no derived table, subquery source, table function or CTE)."""
+    source = _source(select)
+    return (source is not None and not (select.args.get("with") or select.args.get("with_"))
+            and all(_is_base_table(item.this) for item in [source, *(select.args.get("joins") or [])]))
+
+
+def _select_star(select: exp.Select) -> list[dict]:
+    # Only the outer SELECT list: COUNT(*) is not a column list, and * inside EXISTS or a
+    # derived table selects no column for the result. A derived table or CTE may itself
+    # name only some columns, so * is reported only over base tables.
+    if not _reads_only_base_tables(select) or not any(
+            isinstance(item, exp.Star) or (isinstance(item, exp.Column) and isinstance(item.this, exp.Star))
+            for item in select.expressions):
+        return []
+    return [{
+        "code": "select_star",
+        "basis": SQL_BASIS,
+        "title": "SELECT * returns every column",
+        "observation": ("The SELECT list uses * (or table.*), so every column of each table it "
+                        "covers is returned."),
+        "action": ("If the ticket needs only some columns, name them in the SELECT list instead "
+                   "of *."),
+        "reasoning": ("If a query uses from a table only columns that are included in some index, "
+                      "MySQL can read the values from the index tree without consulting the data "
+                      "rows (a covering index; MySQL 8.4 manual: How MySQL Uses Indexes). With * "
+                      "that is possible only when one index holds every column, and every row "
+                      "returned carries every column, including any large TEXT, BLOB or JSON value."),
+        "caveats": [
+            "Naming columns does not change which rows match; any difference depends on how "
+            "wide the rows are, how many are returned and which indexes exist.",
+            "If the ticket genuinely needs every column, * is a reasonable choice.",
+            "This advice does not check the table's columns or index definitions.",
+        ],
+        "verify": ("Compare EXPLAIN for the current and the changed query on a non-production "
+                   "copy ('Using index' in Extra means the values come from the index alone), "
+                   "and confirm the named columns are the ones the ticket needs; only timing both "
+                   "on representative data shows a real difference."),
+    }]
 
 
 def _names(columns: list[exp.Column]) -> str:
@@ -155,8 +216,8 @@ def _calculated_columns(where: exp.Where) -> list[dict]:
                    "indexed generated column) can be considered."),
         "reasoning": ("MySQL's range access uses an index when a key part is compared with a "
                       "constant (MySQL 8.4 manual: Range Optimization). An index on the plain "
-                      "column does not match an expression on it; only an index defined on the "
-                      "identical expression can (Optimizer Use of Generated Column Indexes)."),
+                      "column cannot narrow the rows by an expression on it; only an index defined "
+                      "on the identical expression can (Optimizer Use of Generated Column Indexes)."),
         "caveats": [
             "A rewritten condition must return exactly the same rows: a date range must cover "
             "the whole last day for DATETIME values, and replacing LOWER(column) = 'x' with "
@@ -177,12 +238,19 @@ def _calculated_columns_in(side: Optional[exp.Expression]) -> list[exp.Column]:
     side = _unwrap(side)
     if not isinstance(side, CALCULATIONS) or side.find(exp.Select) is not None:
         return []
-    return list(side.find_all(exp.Column))
+    # MATCH ... AGAINST is a full-text search: comparing the bare column does not express it,
+    # and a FULLTEXT index cannot have functional key parts (MySQL 8.4 manual: CREATE INDEX),
+    # so its columns are left out, also inside a larger calculation.
+    return [column for column in side.find_all(exp.Column)
+            if column.find_ancestor(exp.MatchAgainst) is None]
 
 
 def _order_by_rand(select: exp.Select) -> list[dict]:
     order = select.args.get("order")
-    if order is None or not any(isinstance(_unwrap(term.this), exp.Rand) for term in order.expressions):
+    # Without FROM, or with FROM DUAL alone, there is a single row and nothing to sort.
+    source = _source(select)
+    if (order is None or source is None or (_is_dual(source.this) and not select.args.get("joins"))
+            or not any(isinstance(_unwrap(term.this), exp.Rand) for term in order.expressions)):
         return []
     return [{
         "code": "order_by_rand",
@@ -194,9 +262,9 @@ def _order_by_rand(select: exp.Select) -> list[dict]:
                    "them, for example choosing random key values first."),
         "reasoning": ("For the optimizer RAND() is not a constant and cannot be used for index "
                       "optimizations (MySQL 8.4 manual: Mathematical Functions), so no index "
-                      "returns rows in this order. When a filesort is needed, every row that "
-                      "matches the query without the LIMIT clause is selected and sorted before "
-                      "LIMIT applies (LIMIT Query Optimization)."),
+                      "returns rows in this order. When a filesort is needed, all rows that match "
+                      "the query without the LIMIT clause are selected, and most or all of them "
+                      "are sorted, before LIMIT applies (LIMIT Query Optimization)."),
         "caveats": [
             "The cost depends on how many rows match the WHERE clause, not on the table size alone.",
             "Choosing random key values is not uniformly random when the key values have gaps.",

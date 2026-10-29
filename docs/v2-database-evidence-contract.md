@@ -530,10 +530,17 @@ rewrites, runs and measures nothing. `status` is `advised`, `none_found`,
 `not_eligible` (with a `reason`: not analysed, not a single SELECT, or a locking
 read) or `unavailable`. Each recommendation has `code`, `basis` (always `sql`:
 observed in the SQL; nothing from a plan or a measurement), `title`,
-`observation`, `action`, `reasoning`, `caveats` and `verify`. The rules are a
-`LIKE` pattern that starts with a wildcard and a filtered column inside a
-function or calculation (both only when the query reads one base table, with no
-join, subquery or CTE), and `ORDER BY RAND()`.
+`observation`, `action`, `reasoning`, `caveats` and `verify`. The rules are
+`SELECT *` or `table.*` in the outer select list (only when every `FROM` and
+`JOIN` source is a base table, with no CTE), a `LIKE` pattern that starts with
+a wildcard and a filtered column inside a function or calculation other than
+`MATCH ... AGAINST` (both only when the query reads one base table, with no
+join, subquery or CTE), and `ORDER BY RAND()` (only with a `FROM` clause other
+than `DUAL` alone). A base table is a named table: not `DUAL`, a derived table
+or a table function such as `JSON_TABLE`. Each
+names a pattern seen in the SQL, not a measured cost: whether a change helps
+depends on the table's columns, indexes, statistics and data, which only
+`EXPLAIN` and timing on a representative copy show.
 
 **Whole request refused.** Local `/api/validate` returns HTTP 200
 `{"error": code}` (as for `statement_limit_exceeded`); the connector returns
@@ -582,7 +589,7 @@ Tests: `tests/test_batch_contract.py`, `tests/test_batch_validation.py`,
 | No execution | Submitted SQL is never executed; no `EXPLAIN ANALYZE`; `/api/evidence` stays disabled |
 | Read-only sessions | `enforce_read_only_session()` (`backend/db.py`) runs `SET SESSION TRANSACTION READ ONLY` and requires `@@SESSION.transaction_read_only` = 1, or closes the connection. Used by `open_evidence_connection` (local), `get_connection` (legacy session path) and `ConnectorRuntime.require_read_only_session` (every company connection, including the operator `/explain` route) |
 | No write plans | `UPDATE`/`DELETE` are never sent for `EXPLAIN` on any path; the operator `/explain` route refuses `EXPLAIN_UPDATE`/`EXPLAIN_DELETE` with `plan_not_collected_read_only` before connecting. No write privilege is needed or requested |
-| Last-moment check | `db_evidence._is_plain_select_explain()` strictly re-parses the exact outgoing text: `EXPLAIN ` + exactly one `SELECT`; no `INTO`, no locking clause, no `exp.Anonymous` function; and every word directly before `(` in that text (tokens, so comments and nesting do not hide a call) is on `PERMITTED_CALL_NAMES`. The collector applies the same list to the submitted statement's tokens, so parser rewriting cannot approve a call. A connection that is not a confirmed `ReadOnlyEvidenceConnection` receives nothing, and the read-only state is read back on the same cursor immediately before the plan request |
+| Last-moment check | `db_evidence._is_plain_select_explain()` strictly re-parses the exact outgoing text: `EXPLAIN ` + exactly one `SELECT`; no `INTO`, no locking clause, no `exp.Anonymous` function, no unqualified `DUAL` (sqlglot regenerates `FROM DUAL` as ``FROM `DUAL` ``, which MySQL reads as a table named DUAL, so it gets `not_eligible`); and every word directly before `(` in that text (tokens, so comments and nesting do not hide a call) is on `PERMITTED_CALL_NAMES`. The collector applies the same list to the submitted statement's tokens, so parser rewriting cannot approve a call. A connection that is not a confirmed `ReadOnlyEvidenceConnection` receives nothing, and the read-only state is read back on the same cursor immediately before the plan request |
 | Function policy | `PERMITTED_FUNCTIONS`: reviewed MySQL 8.4 built-ins that compute a value from their arguments. `PERMITTED_SYNTAX_WORDS`: reserved words that take `(` as syntax (`IN`, `EXISTS`, `DECIMAL`, …). Excluded: anything that sleeps, waits, locks, reads files or reads/changes session state; non-deterministic and table functions; non-reserved keywords MySQL could resolve to a stored function (`ANY`, `SOME`, `AGAINST`, `DATETIME`). Quoted (`` `f`(x) ``) and qualified (`db.f(x)`) calls are refused, and so is any name that is not a plain ASCII word (`fünf(x)`, `1split(x)`) or a literal written before `(` (`9e(x)`, which sqlglot regenerates as `9e AS (x)`): the statement's call names are then unknown and it is not eligible. It relies on the manual's rule that an unqualified built-in name resolves to the built-in. Cost: some legitimate `SELECT`s (for example `MATCH … AGAINST`, `NOW()`, which sqlglot does not model) get no plan |
 | Function evaluation | `EXPLAIN` can evaluate stored functions while planning (Percona, MySQL 8.0.21 and earlier: a function in a derived table deleted rows). Two controls: the function policy above (first) and the read-only transaction (second). The read-only transaction prohibits changes to tables but not to temporary tables (SET TRANSACTION manual), and it does not stop sleeping, locking or other server load; it is a session setting, not a privilege. Neither control has been tested against a live server |
 | Least privilege | Recommended evidence account: `SELECT` on the reviewed tables (plans and metadata). `EXPLAIN` needs the explained statement's privileges, so `SELECT` plans need `SELECT`. Never `UPDATE`/`DELETE` for evidence |
