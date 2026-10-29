@@ -150,6 +150,10 @@ NONE_FOUND = [
     "SELECT LOWER(s) AS status, COUNT(*) FROM orders GROUP BY status HAVING status = 'x'",
     "SELECT o.status, COUNT(*) FROM orders o GROUP BY o.status HAVING status = 'x'",  # written differently
     "SELECT a FROM t HAVING a > 0",                              # no GROUP BY: MySQL merges it with WHERE
+    # The join and HAVING rules look at the outer query only.
+    "SELECT x FROM (SELECT * FROM a, b) d",
+    "SELECT id FROM a WHERE id IN (SELECT a_id FROM b, c)",
+    "SELECT s, n FROM (SELECT s, COUNT(*) AS n FROM t GROUP BY s HAVING s = 1) d",
 ]
 
 
@@ -209,6 +213,14 @@ def test_the_unlinked_tables_are_named_by_alias():
     assert item["observation"].startswith("No join condition was found linking `r` to the other tables")
 
 
+def test_the_having_advice_relies_on_the_collation_and_warns_about_string_number_comparisons():
+    item = advice("SELECT code, COUNT(*) FROM t GROUP BY code HAVING code = 1")["recommendations"][0]
+    assert "equal in each grouping column under that column's collation" in item["reasoning"]
+    assert "same value" not in item["reasoning"]
+    assert any(caveat.startswith("If the column is a string and the constant a number")
+               and "cannot see column types" in caveat for caveat in item["caveats"])
+
+
 def test_the_union_advice_does_not_claim_the_same_result():
     item = advice("SELECT id FROM users UNION SELECT id FROM admins")["recommendations"][0]
     assert "keep UNION" in item["action"]
@@ -227,16 +239,16 @@ def test_the_union_advice_does_not_claim_the_same_result():
     ("VALUES ROW(1)", "not analysed"),
     ("SELECT id FROM users WHERE name LIKE '%a' FOR UPDATE", "locking read"),
     # A UNION is checked only when it removes duplicates and every block is a plain SELECT.
-    ("SELECT id FROM users WHERE name LIKE '%a' UNION ALL SELECT id FROM admins", "SELECT statements only"),
-    ("SELECT id FROM a UNION ALL SELECT id FROM b UNION ALL SELECT id FROM c", "SELECT statements only"),
-    ("(SELECT id FROM users) UNION (SELECT id FROM admins)", "SELECT statements only"),
-    ("SELECT id FROM users INTERSECT SELECT id FROM admins", "SELECT statements only"),
-    ("SELECT id FROM users EXCEPT SELECT id FROM admins", "SELECT statements only"),
+    ("SELECT id FROM users WHERE name LIKE '%a' UNION ALL SELECT id FROM admins", "covers a single SELECT"),
+    ("SELECT id FROM a UNION ALL SELECT id FROM b UNION ALL SELECT id FROM c", "covers a single SELECT"),
+    ("(SELECT id FROM users) UNION (SELECT id FROM admins)", "covers a single SELECT"),
+    ("SELECT id FROM users INTERSECT SELECT id FROM admins", "covers a single SELECT"),
+    ("SELECT id FROM users EXCEPT SELECT id FROM admins", "covers a single SELECT"),
     ("SELECT id FROM users UNION SELECT id FROM admins FOR UPDATE", "locking read"),
-    ("EXPLAIN SELECT id FROM users WHERE name LIKE '%a'", "SELECT statements only"),
-    ("(SELECT id FROM users WHERE name LIKE '%a')", "SELECT statements only"),
-    ("UPDATE users SET a = 1 WHERE name LIKE '%a'", "SELECT statements only"),
-    ("DELETE FROM users WHERE YEAR(born) = 1990", "SELECT statements only"),
+    ("EXPLAIN SELECT id FROM users WHERE name LIKE '%a'", "covers a single SELECT"),
+    ("(SELECT id FROM users WHERE name LIKE '%a')", "covers a single SELECT"),
+    ("UPDATE users SET a = 1 WHERE name LIKE '%a'", "covers a single SELECT"),
+    ("DELETE FROM users WHERE YEAR(born) = 1990", "covers a single SELECT"),
 ])
 def test_only_an_analysed_non_locking_select_is_checked(sql, reason):
     result = advice(sql)

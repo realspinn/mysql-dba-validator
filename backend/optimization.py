@@ -24,7 +24,8 @@ The rules follow the MySQL 8.4 Reference Manual:
   Tables: a UNION ALL with no global ORDER BY can be evaluated without a temporary table.
 
 A UNION is checked only when it removes duplicates and every query block is a plain SELECT,
-and only by the UNION rule; anything else but a single SELECT is not checked.
+and only by the UNION rule; anything else but a single SELECT is not checked. The join and
+HAVING rules look at the outer query only, not inside subqueries, derived tables or CTEs.
 """
 
 from __future__ import annotations
@@ -45,6 +46,9 @@ VERIFY_WITH_EXPLAIN = (
     "the ticket needs; only timing both on representative data shows a real difference."
 )
 
+NOT_CHECKED = ("Optimization advice covers a single SELECT, or a UNION of plain SELECT "
+               "blocks that removes duplicates.")
+
 COMPARISONS = (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.NullSafeEQ)
 CALCULATIONS = (exp.Func, exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.IntDiv)
 
@@ -54,7 +58,7 @@ def advise(facts: StatementFacts) -> dict:
     if facts.analysis_status != ANALYSED:
         return _not_eligible("The statement was not analysed, so it was not checked for optimization.")
     if facts.statement_type not in ("SELECT", "UNION"):
-        return _not_eligible("Optimization advice covers single SELECT statements only.")
+        return _not_eligible(NOT_CHECKED)
     if facts.locking_read:
         return _not_eligible("A locking read (FOR UPDATE, FOR SHARE) is not checked for optimization.")
     try:
@@ -67,7 +71,7 @@ def advise(facts: StatementFacts) -> dict:
         if unions and any(union.args.get("distinct") for union in unions):
             return {"status": "advised", "recommendations": _union_distinct()}
     if not isinstance(select, exp.Select):
-        return _not_eligible("Optimization advice covers single SELECT statements only.")
+        return _not_eligible(NOT_CHECKED)
 
     recommendations = _join_without_condition(select)
     # Index advice names a column of a real table only when the query reads one base table
@@ -303,8 +307,10 @@ def _table_names(tables: list[exp.Table]) -> str:
 def _having_could_be_where(select: exp.Select) -> list[dict]:
     """Top-level HAVING conditions that compare a grouping column with constants only.
 
-    Every row of a group has the same value of a grouping column, so such a condition is true
-    for all rows of a group or for none, and filtering the rows first leaves the same groups.
+    Each top-level AND condition is checked on its own. Rows in one group are equal in a
+    grouping column under its collation, so such a condition (when the constant is of the
+    column's kind) is true for all rows of a group or for none, and filtering the rows first
+    leaves the same groups. Column types are not known here, hence the string/number caveat.
     Only plain comparisons qualify (no function, LIKE, COLLATE, BINARY or subquery), the
     column must be written as in GROUP BY and not be a select-list alias, and WITH ROLLUP
     (whose super-aggregate rows WHERE cannot express) is excluded.
@@ -358,14 +364,19 @@ def _having_could_be_where(select: exp.Select) -> list[dict]:
         "action": ("Consider moving that condition from HAVING to WHERE, so the rows are "
                    "filtered before they are grouped. Conditions on aggregates, such as "
                    "COUNT(*) > 1, stay in HAVING."),
-        "reasoning": ("Every row of a group has the same value of a grouping column, so a "
-                      "comparison of that column with a constant leaves the same groups whether "
-                      "it filters rows or groups. MySQL merges HAVING with WHERE only when there "
+        "reasoning": ("Rows in one group are equal in each grouping column under that column's "
+                      "collation, so comparing the column with a constant of the same kind (a "
+                      "string with a string, a number with a number) is true for all rows of a "
+                      "group or for none, and filtering the rows first leaves the same groups. "
+                      "MySQL merges HAVING with WHERE only when there "
                       "is no GROUP BY and no aggregate function (MySQL 8.4 manual: WHERE Clause "
                       "Optimization); otherwise HAVING is applied nearly last, with no "
                       "optimization (SELECT Statement). In WHERE, the condition reduces the rows "
                       "to be grouped and can be considered for index access."),
         "caveats": [
+            "If the column is a string and the constant a number, MySQL converts each value "
+            "before comparing, and values that are equal under the collation can convert "
+            "differently; check the column's type first. This advice cannot see column types.",
             "When the condition removes few rows, the difference may be small.",
             "This advice does not check index definitions.",
         ],

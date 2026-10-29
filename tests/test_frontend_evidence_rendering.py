@@ -608,7 +608,7 @@ def test_optimization_advice_is_a_collapsed_advisory_section(rendered):
     assert select["caveatLabels"] == ["Caveats:", "Caveats:"] and select["caveatLists"] == 2
     assert select["caveatLook"] == select["actionLook"] and select["caveatLook"][0] == "400"
     assert update["summary"].startswith("Optimization advice: not checked")
-    assert "covers single SELECT statements only" in update["text"]
+    assert "covers a single SELECT, or a UNION of plain SELECT blocks" in update["text"]
     # Every rendered result has optimization in its own section, never in the risk summary.
     for name, view in out.items():
         if name != "__states":

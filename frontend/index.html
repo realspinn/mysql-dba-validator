@@ -4042,7 +4042,7 @@
 			if (o.status === 'not_eligible' || o.status === 'unavailable') {
 				children.push(el('p', 'muted', o.reason || 'Optimization advice could not be produced for this statement.'));
 			} else if (!items.length) {
-				children.push(el('p', 'muted', 'The rules checked are: tables joined without a join condition, a LIKE pattern that starts with a wildcard, a filtered column inside a function or calculation, a HAVING condition on a grouping column, ORDER BY RAND(), and a UNION that removes duplicates. This is not a full performance review.'));
+				children.push(el('p', 'muted', 'The rules checked are: tables joined without a join condition, a LIKE pattern that starts with a wildcard, a filtered column inside a function or calculation, a HAVING condition on a grouping column, ORDER BY RAND(), and a UNION that removes duplicates. The join, HAVING and UNION checks look at the outer query only, not inside subqueries, derived tables or CTEs. This is not a full performance review.'));
 			}
 			items.forEach(item => {
 				const caveats = plainList(item.caveats, 'No caveats reported.');

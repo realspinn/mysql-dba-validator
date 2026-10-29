@@ -527,14 +527,16 @@ regeneration instead (no input is known to do this).
 result is final (`backend.optimization`): it never changes the score, the
 confidence, completeness, the evidence or what is sent to a database, and it
 rewrites, runs and measures nothing. `status` is `advised`, `none_found`,
-`not_eligible` (with a `reason`: not analysed, not a single SELECT, or a locking
-read) or `unavailable`. Each recommendation has `code`, `basis` (always `sql`:
+`not_eligible` (with a `reason`: not analysed, neither a single SELECT nor a
+`UNION` of plain SELECT blocks that removes duplicates, or a locking read) or
+`unavailable`. Each recommendation has `code`, `basis` (always `sql`:
 observed in the SQL; nothing from a plan or a measurement), `title`,
 `observation`, `action`, `reasoning`, `caveats` and `verify`. The rules for a
 single SELECT are a `LIKE` pattern that starts with a wildcard and a filtered
 column inside a function or calculation (both only when the query reads one base
 table, with no join, subquery or CTE), and `ORDER BY RAND()`; and, citing the
-MySQL 8.4 manual:
+MySQL 8.4 manual, three rules that look at the outer query only (subqueries,
+derived tables and CTE bodies are not checked by them):
 
 - `join_without_condition`: a table in `FROM` that no `ON`, `USING`, `NATURAL`
   or cross-table comparison in `WHERE` links to the others ("`INNER JOIN` and
@@ -542,13 +544,20 @@ MySQL 8.4 manual:
   Clause). An explicit `CROSS JOIN` is taken as intended. Nothing is said when
   a source is not a named table, a CTE is used, a condition has a subquery, or a
   column has no known table qualifier.
-- `having_could_be_where`: a top-level `HAVING` condition that compares a
-  grouping column, written as in `GROUP BY` and not a select-list alias, with
-  constants only (`=`, `<>`, `<`, `>`, `<=>`, `IS`, `BETWEEN`, `IN`); never
-  with `WITH ROLLUP`, a function, `LIKE`, `COLLATE`, `BINARY`, an aggregate or a
-  subquery. `HAVING` is merged with `WHERE` only without `GROUP BY` and
-  aggregates (WHERE Clause Optimization) and is otherwise "applied nearly last
-  … with no optimization" (SELECT Statement).
+- `having_could_be_where`: each top-level `AND` condition of `HAVING` is
+  checked on its own. One qualifies when it compares a grouping column, written
+  as in `GROUP BY` and not a select-list alias, with constants only (`=`, `<>`,
+  `<`, `>`, `<=>`, `IS`, `BETWEEN`, `IN`) and contains no function, `LIKE`,
+  `COLLATE`, `BINARY`, aggregate or subquery; other conditions in the same
+  `HAVING` (such as `COUNT(*) > 1`) do not prevent it and stay in `HAVING`. No
+  condition qualifies with `WITH ROLLUP`, or when the conditions are joined by
+  `OR`. Rows in a group are equal in a grouping column under its collation, so
+  a qualifying condition with a constant of the column's kind leaves the same
+  groups when moved to `WHERE`; column types are not known, so the advice
+  cautions that a string column compared with a number must be checked first.
+  `HAVING` is merged with `WHERE` only without `GROUP BY` and aggregates (WHERE
+  Clause Optimization) and is otherwise "applied nearly last … with no
+  optimization" (SELECT Statement).
 - `union_distinct`: a `UNION` chain of plain `SELECT` blocks with at least one
   `UNION` or `UNION DISTINCT`. Duplicates are removed unless `ALL` is given, and
   `DISTINCT` overrides any `ALL` to its left (Set Operations with UNION,
