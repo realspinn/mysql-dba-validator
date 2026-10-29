@@ -203,6 +203,39 @@ def test_installed_sqlglot_regenerates_quotes_by_doubling():
     assert sent == ["EXPLAIN SELECT a FROM t WHERE b = 'x'' OR evil() OR ''';"]
 
 
+# DUAL is a reserved word and a quoted reserved word is an ordinary identifier (MySQL 8.4
+# manual: Keywords and Reserved Words), so `DUAL` names a table called DUAL, not the dummy
+# table. sqlglot regenerates FROM DUAL as FROM `DUAL`: planning that text would explain a
+# different statement (or fail), so it is never sent.
+DUAL_SELECTS = ["SELECT 1 FROM DUAL", "SELECT 1 FROM dual WHERE 1 = 1", "SELECT 1 FROM `DUAL`"]
+
+
+def test_installed_sqlglot_quotes_dual_in_the_outgoing_text():
+    assert parse_sql("SELECT 1 FROM DUAL")[0].raw_sql == "SELECT 1 FROM `DUAL`"
+
+
+@pytest.mark.parametrize("sql", DUAL_SELECTS)
+def test_dual_is_never_planned(sql):
+    evidence, sent = plan_requests(sql)
+    assert sent == [] and evidence.error == PLAN_NOT_ELIGIBLE
+
+
+def test_a_qualified_table_named_dual_and_similar_names_are_still_planned():
+    # After a period a reserved word is an identifier: app.DUAL is a real table.
+    assert _is_plain_select_explain("EXPLAIN SELECT a FROM app.`DUAL`;")
+    assert _is_plain_select_explain("EXPLAIN SELECT a FROM dual_log;")
+    assert _is_plain_select_explain("EXPLAIN SELECT 1 FROM `DUAL`;") is False
+
+
+@pytest.mark.parametrize("sql", DUAL_SELECTS)
+def test_company_validation_never_plans_dual(monkeypatch, sql):
+    server = remote.FakeServer(explain=[remote.explain_row("ALL", 1_902_192)])
+    response, _ = remote.remote_validate(monkeypatch, server, sql)
+    assert response.status_code == 200, response.text
+    assert not [statement for statement, _ in server.executed if statement.startswith("EXPLAIN")]
+    assert response.json()["statements"][0]["evidence"]["plan"]["state"] == "not_eligible"
+
+
 # ---------------------------------------------------------------- M2: collector boundary
 
 

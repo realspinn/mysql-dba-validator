@@ -1,10 +1,11 @@
 """B1: optimization advice for an analysed SELECT, advisory only.
 
-- Six rules, each an observation from the SQL alone ("basis": "sql"): tables joined without
-  a join condition, a LIKE pattern that starts with a wildcard, a filtered column inside a
-  function or calculation, a HAVING condition on a grouping column, ORDER BY RAND(), and a
-  UNION that removes duplicates. Index advice needs a single base table; every rule has its
-  preconditions, and each stays quiet when the SQL cannot establish them.
+- Seven rules, each an observation from the SQL alone ("basis": "sql"): SELECT * over base
+  tables, tables joined without a join condition, a LIKE pattern that starts with a
+  wildcard, a filtered column inside a function or calculation, a HAVING condition on a
+  grouping column, ORDER BY RAND(), and a UNION that removes duplicates. Index advice needs
+  a single base table; every rule has its preconditions, and each stays quiet when the SQL
+  cannot establish them.
 - Statements that were not analysed, and anything but a single non-locking SELECT or a UNION
   of plain SELECTs that removes duplicates, get no advice.
 - The advice never changes the rest of the result or what is sent to the database; it
@@ -69,12 +70,12 @@ ADVISED = [
     ("SELECT id FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()",
      ["leading_wildcard_like", "column_in_expression", "order_by_rand"]),
     # Join without a condition: comma, JOIN or STRAIGHT_JOIN with nothing linking the tables.
-    ("SELECT * FROM users, orders", ["join_without_condition"]),
-    ("SELECT * FROM users JOIN orders", ["join_without_condition"]),
-    ("SELECT * FROM users STRAIGHT_JOIN orders", ["join_without_condition"]),
-    ("SELECT * FROM users u, orders o WHERE u.active = 1 AND o.paid = 1", ["join_without_condition"]),
-    ("SELECT * FROM a, b, c WHERE a.id = b.a_id", ["join_without_condition"]),           # c is not linked
-    ("SELECT * FROM a LEFT JOIN b ON b.a_id = a.id, c", ["join_without_condition"]),
+    ("SELECT 1 FROM users, orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users JOIN orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users STRAIGHT_JOIN orders", ["join_without_condition"]),
+    ("SELECT 1 FROM users u, orders o WHERE u.active = 1 AND o.paid = 1", ["join_without_condition"]),
+    ("SELECT 1 FROM a, b, c WHERE a.id = b.a_id", ["join_without_condition"]),           # c is not linked
+    ("SELECT 1 FROM a LEFT JOIN b ON b.a_id = a.id, c", ["join_without_condition"]),
     # HAVING on a grouping column compared with constants.
     ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING status = 'open'", ["having_could_be_where"]),
     ("SELECT status, COUNT(*) FROM orders GROUP BY status HAVING (status <> 'x' AND COUNT(*) > 1)",
@@ -91,6 +92,19 @@ ADVISED = [
     ("SELECT id FROM users UNION SELECT id FROM admins ORDER BY id LIMIT 3", ["union_distinct"]),
     # Only the UNION rule is checked for a UNION, not the rules for its query blocks.
     ("SELECT id FROM users WHERE name LIKE '%a' UNION SELECT id FROM admins", ["union_distinct"]),
+    ("SELECT * FROM users UNION SELECT * FROM admins", ["union_distinct"]),
+    # SELECT * is about the columns returned, so joins of base tables are included.
+    ("SELECT * FROM users WHERE id = 1", ["select_star"]),
+    ("SELECT u.* FROM users u", ["select_star"]),
+    ("SELECT o.id, u.* FROM users u JOIN orders o ON o.user_id = u.id", ["select_star"]),
+    ("SELECT * FROM users, orders", ["select_star", "join_without_condition"]),
+    ("SELECT `u`.* FROM shop.users AS `u`", ["select_star"]),
+    # The sort is over the rows JSON_TABLE produces, so ORDER BY RAND() still applies.
+    ("SELECT a FROM JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt ORDER BY RAND()", ["order_by_rand"]),
+    ("SELECT * FROM users WHERE name LIKE '%a' ORDER BY RAND()",
+     ["select_star", "leading_wildcard_like", "order_by_rand"]),
+    # MATCH ... AGAINST is left alone, other calculations beside it are not.
+    ("SELECT id FROM docs WHERE MATCH(title) AGAINST('x') > 0 AND YEAR(d) = 2024", ["column_in_expression"]),
 ]
 
 
@@ -120,21 +134,27 @@ NONE_FOUND = [
     "SELECT id FROM orders WHERE status IN ('a', 'b') AND deleted_at IS NULL",
     "SELECT YEAR(created_at) FROM orders WHERE id = 1",
     "SELECT id, RAND() AS r FROM users ORDER BY id",
+    "SELECT 1 ORDER BY RAND()",                                  # no table: one row, nothing to sort
+    "SELECT 1 FROM DUAL ORDER BY RAND()",
+    "SELECT * FROM `dual` ORDER BY RAND()",                      # reads like DUAL once regenerated
     "SELECT 1",
     # Joined tables that are linked, or explicitly crossed.
-    "SELECT * FROM users u JOIN orders o ON o.user_id = u.id",
-    "SELECT * FROM users u, orders o WHERE o.user_id = u.id",
-    "SELECT * FROM shop.users, shop.orders WHERE orders.user_id = users.id",
-    "SELECT * FROM a, b, c WHERE a.id = b.a_id AND b.id = c.b_id",
-    "SELECT * FROM users JOIN orders USING (user_id)",
-    "SELECT * FROM users NATURAL JOIN orders",
-    "SELECT * FROM users CROSS JOIN calendar",                   # explicit: taken as intended
-    "SELECT * FROM users u, orders o WHERE o.user_id = u.id OR u.admin = 1",
+    "SELECT 1 FROM users u JOIN orders o ON o.user_id = u.id",
+    "SELECT 1 FROM users u, orders o WHERE o.user_id = u.id",
+    "SELECT 1 FROM shop.users, shop.orders WHERE orders.user_id = users.id",
+    "SELECT 1 FROM a, b, c WHERE a.id = b.a_id AND b.id = c.b_id",
+    "SELECT 1 FROM users JOIN orders USING (user_id)",
+    "SELECT 1 FROM users NATURAL JOIN orders",
+    "SELECT 1 FROM users CROSS JOIN calendar",                   # explicit: taken as intended
+    "SELECT 1 FROM users u, orders o WHERE o.user_id = u.id OR u.admin = 1",
     # The link cannot be established, so nothing is said.
-    "SELECT * FROM users, orders WHERE user_id = id",            # unqualified columns
-    "SELECT * FROM users u, orders o WHERE EXISTS (SELECT 1 FROM x WHERE x.u = u.id AND x.o = o.id)",
-    "SELECT * FROM users u, (SELECT MAX(id) AS m FROM orders) o",  # a derived table
-    "WITH o AS (SELECT * FROM orders) SELECT * FROM users, o",
+    "SELECT 1 FROM users, orders WHERE user_id = id",            # unqualified columns
+    "SELECT 1 FROM users u, orders o WHERE EXISTS (SELECT 1 FROM x WHERE x.u = u.id AND x.o = o.id)",
+    "SELECT 1 FROM users u, (SELECT MAX(id) AS m FROM orders) o",  # a derived table
+    "WITH o AS (SELECT * FROM orders) SELECT 1 FROM users, o",
+    # Not base tables (the same check as SELECT *): a table function, or DUAL.
+    "SELECT u.id FROM users u, JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt",
+    "SELECT 1 FROM users, DUAL",
     # HAVING conditions that must stay, or whose move cannot be shown to keep the groups.
     "SELECT status, COUNT(*) FROM orders GROUP BY status HAVING COUNT(*) > 1",
     "SELECT status, COUNT(*) FROM orders GROUP BY status WITH ROLLUP HAVING status = 'open'",
@@ -154,6 +174,22 @@ NONE_FOUND = [
     "SELECT x FROM (SELECT * FROM a, b) d",
     "SELECT id FROM a WHERE id IN (SELECT a_id FROM b, c)",
     "SELECT s, n FROM (SELECT s, COUNT(*) AS n FROM t GROUP BY s HAVING s = 1) d",
+    # A FULLTEXT search: neither the bare column nor an index on the expression applies.
+    "SELECT id FROM docs WHERE MATCH(title) AGAINST('x')",
+    "SELECT id FROM docs WHERE MATCH(title) AGAINST('x' IN BOOLEAN MODE) > 0",
+    "SELECT id FROM docs WHERE MATCH(title) AGAINST('x') + 1 > 0",  # inside a larger calculation
+    # Not the outer SELECT list over base tables.
+    "SELECT COUNT(*) FROM users",
+    "SELECT id FROM users WHERE EXISTS (SELECT * FROM orders o WHERE o.user_id = users.id)",
+    "SELECT * FROM (SELECT id, name FROM users) x",
+    "WITH x AS (SELECT id FROM users) SELECT * FROM x",
+    "SELECT * FROM users u JOIN (SELECT user_id FROM orders) o ON o.user_id = u.id",
+    "SELECT `*` FROM t",                                         # a column named *
+    "SELECT t.`*` FROM t",
+    # JSON_TABLE is a table function: its columns are declared in the query and have no index.
+    "SELECT * FROM JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt",
+    "SELECT a FROM JSON_TABLE('[\"x\"]', '$[*]' COLUMNS (a VARCHAR(9) PATH '$')) jt WHERE a LIKE '%x'",
+    "SELECT a FROM JSON_TABLE('[1]', '$[*]' COLUMNS (a INT PATH '$')) jt WHERE a + 1 > 2",
 ]
 
 
@@ -175,7 +211,7 @@ def test_index_advice_needs_a_single_base_table(sql):
 
 
 @pytest.mark.parametrize("sql,count", [
-    ("SELECT id FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()", 3),
+    ("SELECT * FROM users WHERE name LIKE '%a' AND YEAR(born) = 1990 ORDER BY RAND()", 4),
     ("SELECT u.id, COUNT(*) FROM users u, orders o GROUP BY u.id HAVING u.id > 5", 2),
     ("SELECT id FROM users UNION SELECT id FROM admins", 1),
 ])
@@ -192,6 +228,13 @@ def test_each_recommendation_explains_itself_without_claiming_a_speed_up(sql, co
             assert claim not in words, (item["code"], claim)
 
 
+def test_order_by_rand_follows_the_manual_on_filesort_with_limit():
+    # LIMIT Query Optimization: "all rows that match the query without the LIMIT clause are
+    # selected, and most or all of them are sorted": not every row is always sorted.
+    item = advice("SELECT id FROM users ORDER BY RAND() LIMIT 1")["recommendations"][0]
+    assert "are selected, and most or all of them are sorted, before LIMIT applies" in item["reasoning"]
+
+
 def test_the_observation_names_only_columns_from_the_sql():
     item = advice("SELECT id FROM users WHERE (name LIKE '%x%' OR email LIKE '%@x.com')")["recommendations"][0]
     assert item["observation"] == "A LIKE pattern for `email`, `name` starts with a wildcard (% or _)."
@@ -201,6 +244,8 @@ def test_the_observation_names_only_columns_from_the_sql():
     ("SELECT id FROM people WHERE CONCAT(first_name, ' ', last_name) = 'Ann Lee'", "`first_name`, `last_name`"),
     ("SELECT id FROM orders WHERE price + tax > 100", "`price`, `tax`"),
     ("SELECT id FROM orders WHERE COALESCE(shipped_at, created_at) > '2024-01-01'", "`created_at`, `shipped_at`"),
+    # A column beside MATCH in the same calculation is still named; the MATCH column is not.
+    ("SELECT id FROM docs WHERE MATCH(title) AGAINST('x') + boost > 1", "`boost`"),
 ])
 def test_every_column_inside_the_calculation_is_named(sql, names):
     item = advice(sql)["recommendations"][0]
@@ -209,7 +254,7 @@ def test_every_column_inside_the_calculation_is_named(sql, names):
 
 
 def test_the_unlinked_tables_are_named_by_alias():
-    item = advice("SELECT * FROM users u, orders o, refunds r WHERE o.user_id = u.id")["recommendations"][0]
+    item = advice("SELECT 1 FROM users u, orders o, refunds r WHERE o.user_id = u.id")["recommendations"][0]
     assert item["observation"].startswith("No join condition was found linking `r` to the other tables")
 
 
