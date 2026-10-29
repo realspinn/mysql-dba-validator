@@ -530,10 +530,35 @@ rewrites, runs and measures nothing. `status` is `advised`, `none_found`,
 `not_eligible` (with a `reason`: not analysed, not a single SELECT, or a locking
 read) or `unavailable`. Each recommendation has `code`, `basis` (always `sql`:
 observed in the SQL; nothing from a plan or a measurement), `title`,
-`observation`, `action`, `reasoning`, `caveats` and `verify`. The rules are a
-`LIKE` pattern that starts with a wildcard and a filtered column inside a
-function or calculation (both only when the query reads one base table, with no
-join, subquery or CTE), and `ORDER BY RAND()`.
+`observation`, `action`, `reasoning`, `caveats` and `verify`. The rules for a
+single SELECT are a `LIKE` pattern that starts with a wildcard and a filtered
+column inside a function or calculation (both only when the query reads one base
+table, with no join, subquery or CTE), and `ORDER BY RAND()`; and, citing the
+MySQL 8.4 manual:
+
+- `join_without_condition`: a table in `FROM` that no `ON`, `USING`, `NATURAL`
+  or cross-table comparison in `WHERE` links to the others ("`INNER JOIN` and
+  `,` … both produce a Cartesian product" without a join condition: JOIN
+  Clause). An explicit `CROSS JOIN` is taken as intended. Nothing is said when
+  a source is not a named table, a CTE is used, a condition has a subquery, or a
+  column has no known table qualifier.
+- `having_could_be_where`: a top-level `HAVING` condition that compares a
+  grouping column, written as in `GROUP BY` and not a select-list alias, with
+  constants only (`=`, `<>`, `<`, `>`, `<=>`, `IS`, `BETWEEN`, `IN`); never
+  with `WITH ROLLUP`, a function, `LIKE`, `COLLATE`, `BINARY`, an aggregate or a
+  subquery. `HAVING` is merged with `WHERE` only without `GROUP BY` and
+  aggregates (WHERE Clause Optimization) and is otherwise "applied nearly last
+  … with no optimization" (SELECT Statement).
+- `union_distinct`: a `UNION` chain of plain `SELECT` blocks with at least one
+  `UNION` or `UNION DISTINCT`. Duplicates are removed unless `ALL` is given, and
+  `DISTINCT` overrides any `ALL` to its left (Set Operations with UNION,
+  INTERSECT, and EXCEPT); a `UNION ALL` with no global `ORDER BY` can avoid the
+  temporary table (Internal Temporary Tables). It suggests `UNION ALL` only if
+  duplicates cannot occur or are acceptable, and does not check which. This is
+  the only rule checked for a `UNION`; a `UNION ALL`-only chain, parenthesized
+  blocks, `INTERSECT` and `EXCEPT` remain `not_eligible`.
+
+Each names a pattern seen in the SQL, not a measured cost.
 
 **Whole request refused.** Local `/api/validate` returns HTTP 200
 `{"error": code}` (as for `statement_limit_exceeded`); the connector returns
