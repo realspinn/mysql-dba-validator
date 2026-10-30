@@ -27,7 +27,7 @@ It supports DBA judgement; it does **not** guarantee that SQL is safe.
 - SQL the parser cannot fully read is reported as **not analysed**, not treated as low risk. Some valid MySQL syntax is unsupported; see the [evidence contract](docs/v2-database-evidence-contract.md).
 - A `SELECT` can still have effects, for example through locking clauses or functions. The validator applies restrictions, but cannot establish what an arbitrary stored function does.
 - Optimization advice identifies patterns in SQL text. It cannot see the data, indexes or column types, and does not prove that a suggested change is equivalent or faster.
-- **Live validation is limited.** Automated tests cover the current release, but the v0.8.0 adviser rules and security changes have not been validated against a real MySQL server. Company infrastructure, VPN and company TLS are not verified. See [VERIFICATION.md](VERIFICATION.md).
+- **Live validation is limited.** The v0.8.0 adviser rules and `FROM DUAL` handling have not been checked against a real MySQL server. The Host check is covered by automated tests. Company infrastructure, VPN and company TLS are not verified. See [VERIFICATION.md](VERIFICATION.md).
 - The Windows build is not code-signed. The macOS build is ad hoc signed, not notarized, and has not been tested on a real Mac.
 - The app is designed for one user on one machine; it has no user authentication.
 
