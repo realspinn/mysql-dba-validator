@@ -40,12 +40,12 @@ Get the ZIP and its matching `.sha256` file from the [v0.8.0 release page](https
 1. Download `MySQL-DBA-Validator-v0.8.0-windows-x64.zip` and its checksum file.
 2. In PowerShell, verify the ZIP:
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.8.0-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\\MySQL-DBA-Validator-v0.8.0-windows-x64.zip -Algorithm SHA256
    ```
    Compare the result with the SHA-256 value in the release.
 3. Extract the ZIP and run `MySQL-DBA-Validator.exe`. Your browser opens `http://127.0.0.1:8420`. No installer or Python is needed.
 
-For approved company targets, run `MySQL-DBA-Validator Console.exe` as well; it provides the local connector's operator console. See [connector/README.md](connector/README.md).
+For approved company targets, run `MySQL-DBA-Validator Console.exe` instead; it provides the local connector's operator console. See [connector/README.md](connector/README.md).
 
 **macOS (Apple Silicon only)**
 
@@ -81,7 +81,7 @@ Requires Python 3.14. From the repository root:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 uvicorn backend.main:app --host 127.0.0.1 --port 8420
 ```
