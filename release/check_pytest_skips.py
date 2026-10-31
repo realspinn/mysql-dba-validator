@@ -23,6 +23,16 @@ EXPECTED_SKIPS = {
         "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes":
             "Windows Job Object; macOS uses the parent pipe (tests/test_release_macos.py)",
     },
+    "windows": {
+        "tests.test_release_macos::test_macos_audit_follows_link_chains_physically":
+            "POSIX link resolution; the macOS audit runs on macOS",
+        "tests.test_release_packaging::test_port_in_use_detects_a_server_on_the_wildcard_address":
+            "POSIX probe; Windows keeps the plain bind",
+    },
+    "linux": {
+        "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes":
+            "Windows Job Object; not used on Linux",
+    },
 }
 
 

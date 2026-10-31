@@ -216,6 +216,10 @@ pip check
   `tests/test_security_hardening.py` show the pattern.
 - The suite needs no MySQL server and no real credentials. Tests use fake
   connections and mocked DNS lookups. New tests should do the same.
+- `tests_mysql/live_mysql_checks.py` is the exception: Local Mode evidence
+  against a real MySQL 8.4 server. It runs only in CI (the MySQL 8.4
+  integration job in `ci.yml`, in a throwaway Docker service container on
+  Ubuntu) and fails anywhere else. Do not run it against your own server.
 - Never weaken a safety check, or edit an existing test, only to make a test
   pass. If a requirement has really changed, replace the old test with one for
   the new contract and explain why in the PR.
@@ -239,8 +243,9 @@ Changes reach `main` only through pull requests:
    `test/parser-join-cases` or `docs/connector-options`.
 2. Make the change and its tests on that branch.
 3. Run the full test suite and `pip check` locally. The CI workflow
-   (`.github/workflows/ci.yml`) runs them again on Windows and macOS for every
-   pull request to `main`; check its result on the pull request. Until you
+   (`.github/workflows/ci.yml`) runs them again on Windows, macOS and Linux
+   for every pull request to `main`, plus the MySQL 8.4 integration tests on
+   Linux; check its result on the pull request. Until you
    have had a pull request merged here, a maintainer has to approve each CI
    run before it starts.
 4. Push the branch to your fork and open a pull request from it against
