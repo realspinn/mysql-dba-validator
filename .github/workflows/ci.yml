@@ -1,9 +1,10 @@
 name: CI
 
 # Routine checks for pull requests to main and pushes to main: the same test
-# suite, pip check and macOS skip check that the release workflows run, on the
-# same runners. No build, packaging, signing or release; read-only token, no
-# secrets. Release tags are handled by release-windows.yml and release-macos.yml.
+# suite, pip check and skip check that the release workflows run, on the same
+# runners, plus Local Mode evidence against a disposable MySQL 8.4 server on
+# Linux. No build, packaging, signing or release; read-only token, no secrets.
+# Release tags are handled by release-windows.yml and release-macos.yml.
 
 on:
   pull_request:
@@ -24,11 +25,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     # One command per step, so a failing command fails its step in pwsh and bash alike.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.14"
 
@@ -42,5 +43,62 @@ jobs:
         run: python -m pip check
 
       - name: No unexpected skipped tests
-        if: runner.os == 'macOS'
-        run: python release/check_pytest_skips.py "${{ runner.temp }}/pytest.xml" --platform macos
+        run: python release/check_pytest_skips.py "${{ runner.temp }}/pytest.xml" --platform ${{ runner.os == 'macOS' && 'macos' || 'windows' }}
+
+  # Not a required check. Service containers need an Ubuntu runner. The MySQL
+  # server is a throwaway container for this job only: synthetic data, test-only
+  # passwords (tests_mysql/setup.sql), published on the runner's 127.0.0.1 only,
+  # removed when the job ends. No company, RDS or local credentials are used.
+  mysql:
+    name: MySQL 8.4 integration (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        # Official image, MySQL 8.4.13 (8.4 LTS, the primary supported version), pinned by digest.
+        image: mysql:8.4.13@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-root-pw-1
+        ports:
+          - 127.0.0.1:3306:3306
+        # TCP only answers once the final server runs (the image's init server skips networking).
+        options: >-
+          --health-cmd "mysqladmin ping --protocol=TCP -h 127.0.0.1 --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: MySQL accepts an authenticated query
+        run: docker exec ${{ job.services.mysql.id }} mysql --protocol=TCP -h 127.0.0.1 -uroot -pci-only-root-pw-1 -N -e "SELECT 1"
+
+      # Setup privileges (root) are used here only; the tests use the accounts it creates.
+      - name: Create the test schema, accounts and synthetic rows
+        run: |
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -pci-only-root-pw-1 < tests_mysql/setup.sql
+          docker exec -i ${{ job.services.mysql.id }} mysql -uroot -pci-only-root-pw-1 validator_live_test < docs/v2-live-validation/02-fixture.sql
+
+      - name: MySQL integration tests
+        env:
+          MDV_CI_MYSQL: "1"
+        run: python -m pytest -q -rs tests_mysql/live_mysql_checks.py --junitxml="$RUNNER_TEMP/pytest-mysql.xml"
+
+      - name: Test suite (Linux)
+        if: ${{ !cancelled() }}
+        run: python -m pytest -q -rs --junitxml="$RUNNER_TEMP/pytest.xml"
+
+      - name: pip check
+        run: python -m pip check
+
+      - name: No unexpected skipped tests
+        run: |
+          python release/check_pytest_skips.py "$RUNNER_TEMP/pytest-mysql.xml" --platform linux
+          python release/check_pytest_skips.py "$RUNNER_TEMP/pytest.xml" --platform linux
