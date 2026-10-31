@@ -31,6 +31,7 @@ than a recorded one.
 | Local web app and connector together in a browser | Real headless Chrome, with company MySQL replaced by a stand-in |
 | Windows portable release | Built by CI from the release tag, audited, smoke-tested from the extracted zip. The published v0.6.0 zip's checksum was re-checked on the maintainer's machine; its smoke test and artifact audit ran in CI only (below) |
 | Local database evidence against real MySQL | **Verified by the maintainer** with the Sakila sample database (below), on code before v0.5.0; not repeated for v0.5.0, v0.5.1, v0.6.0, v0.7.0 or the v0.8.0 candidate. Also covered by automated tests with a fake MySQL that models MySQL's read-only behaviour (error 1792) |
+| Local Mode evidence against MySQL 8.4 in CI | **Automated, real server (unreleased, PR #34).** The CI job "MySQL 8.4 integration (ubuntu-24.04)" runs `tests_mysql/live_mysql_checks.py` against a disposable `mysql:8.4.13` service container (pinned by digest) on each pull request and push to `main`. Not a required check. First green run: [41205998394](https://github.com/realspinn/mysql-dba-validator/actions/runs/41205998394), 16 passed, 0 skipped. See [below](#ci-mysql-84-integration-job) |
 | Remote/company workflow (local connector) end to end against a real MySQL server | **Reported by the maintainer** (manual test, recorded after the v0.4.1 release): successful on Windows against an AWS RDS for MySQL test database the maintainer created. No transcript or logs were provided for this record; see [below](#remote-workflow-against-aws-rds-for-mysql-maintainer-reported) |
 | Real company MySQL, VPN/LAN connectivity, company-issued TLS, hosted HTTPS frontend | **Not verified** |
 | Positive M1 metadata adjustment against a live large table | **Not verified.** It needs a collected `UPDATE`/`DELETE` plan. In v0.4.1 only the remote connector path collected one; since v0.5.0 neither path does (see below), so M1 does not arise in practice. Automated tests only |
@@ -275,6 +276,48 @@ in the sections above are for earlier states of the tree), any CI run of this
 tree (the macOS CI result recorded for v0.5.1 applies to v0.5.1 only), a real
 Mac (including approval prompts in Terminal), MySQL 8.4, a packaged build, and
 company infrastructure, VPN and TLS.
+
+## CI: MySQL 8.4 integration job
+
+Unreleased (PR #34). Level: real MySQL 8.4.13 server (the official Docker
+image, pinned by digest) in a GitHub Actions service container on
+`ubuntu-24.04`. The validator runs in-process (FastAPI TestClient) with the real
+PyMySQL driver over TCP on `127.0.0.1:3306`. Root is used only to load
+`tests_mysql/setup.sql` and the existing
+[02-fixture.sql](docs/v2-live-validation/02-fixture.sql). The tests use
+`vt_evidence` (SELECT on the test schema), `vt_writer` (SELECT, INSERT, UPDATE,
+DELETE; negative test only) and `vt_observer` (the statement digest table).
+The container is removed when the job ends.
+
+Shown on each run:
+
+- Connection test and database discovery. Discovery does not list a schema the
+  account has no privilege on.
+- A wrong password gives `auth_failed`, a schema without privilege gives
+  `insufficient_privileges`, and no password appears in any response.
+- The read-only session is confirmed by the server before evidence is
+  collected. An eligible `SELECT` gets a plain `EXPLAIN` plan (access type
+  `const`): an optimizer estimate, not a count of rows read or changed.
+- A missing table is reported as not found and caps confidence at LIMITED.
+- [Live plan](docs/v2-live-mysql-validation-plan.md) case 5 row scope:
+  - `PRIMARY`, `uq_tenant_ref`, `uq_email` and `uq_code_prefix` give
+    `at_most_one_row`, 20 MEDIUM, HIGH, with the one-row floor.
+  - The partial-key, `IS NULL`, non-unique, type-mismatch and `LOWER()`
+    statements, and the functional-key table, give `not_established`,
+    25 MEDIUM, LIMITED.
+- Submitted `UPDATE`, `DELETE`, `INSERT` and a mixed batch, validated with the
+  write-capable `vt_writer`:
+  - every row of the fixture tables is unchanged afterwards;
+  - no write, write-plan or `ANALYZE` statement digest appears. The digests are
+    trusted only because the same run sees the validator's own `SET SESSION
+    TRANSACTION READ ONLY` digest and no digest overflow.
+- The full suite on Linux: 2289 passed, 1 skipped (Windows Job Object).
+
+Not shown: Company Mode and the connector, any TLS (Local Mode has none),
+AWS RDS, proxies, VPN, MySQL 8.0, the packaged app against a database, the
+stored-function probes (plan cases 3(b) and 4), and server version detection
+(the validator has none). Linux is a run-from-source check, not a release
+platform.
 
 ## Unreleased: v0.8.0 candidate, local checks
 
