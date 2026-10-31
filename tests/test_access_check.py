@@ -371,7 +371,7 @@ def test_workflow_runs_hourly_and_never_from_pull_request_target():
 
 
 def test_checkout_is_pinned_to_the_same_commit_as_the_release_workflow():
-    pin = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0"
+    pin = "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0"
     assert pin in (ROOT / ".github" / "workflows" / "release-macos.yml").read_text(encoding="utf-8")
     assert f"- uses: {pin}" in WORKFLOW.read_text(encoding="utf-8")
     steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["access"]["steps"]
