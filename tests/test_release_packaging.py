@@ -742,3 +742,53 @@ def test_windows_draft_release_creates_nothing_unless_everything_matches(tmp_pat
     code, calls = _run_draft_release(tmp_path, files)
     assert code != 0
     assert calls == []
+
+
+# ---------------------------------------------------------------- PR package check (package-check.yml)
+
+
+def _package_check():
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "package-check.yml").read_text(encoding="utf-8"))
+
+
+def _release_scripts(job) -> list[str]:
+    """The release/*.py scripts a job runs, in order (the packaging, audit and smoke-test logic).
+
+    Steps that run only after a failure (diagnostics) are not part of the validation."""
+    runs = [step.get("run", "") for step in job["steps"] if "failure()" not in str(step.get("if", ""))]
+    return re.findall(r"release/(\w+)\.py", "\n".join(runs))
+
+
+def test_package_check_runs_only_for_pull_requests_with_a_read_only_token():
+    workflow = _package_check()
+    # PyYAML reads the "on" key as True.
+    assert workflow[True] == {"pull_request": {"branches": ["main"]}}  # no pull_request_target, no tags
+    assert workflow["permissions"] == {"contents": "read"}
+    for name, job in workflow["jobs"].items():
+        assert job.get("permissions", {"contents": "read"}) == {"contents": "read"}, name
+        assert "environment" not in job and "if" not in job, name
+        dumped = yaml.safe_dump(job)
+        for forbidden in ("secrets.", "vars.", "github.token", "gh release", "upload-artifact",
+                          "build_macos.py sign", "notarize", "staple", "build_macos.py dmg", "codesign"):
+            assert forbidden not in dumped, (name, forbidden)
+        for step in job["steps"]:
+            if "uses" in step:
+                assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", step["uses"]), (name, step["uses"])
+            if step.get("uses", "").startswith("actions/checkout"):
+                assert step["with"]["persist-credentials"] is False
+
+
+@pytest.mark.parametrize("package_job, release_file, release_job", [
+    ("windows", "release-windows.yml", "windows-x64"),
+    ("macos", "release-macos.yml", "build-test"),
+])
+def test_package_check_builds_and_smoke_tests_like_the_release(package_job, release_file, release_job):
+    package = _package_check()["jobs"][package_job]
+    release = yaml.safe_load((ROOT / ".github" / "workflows" / release_file).read_text(encoding="utf-8"))
+    release = release["jobs"][release_job]
+    assert package["runs-on"] == release["runs-on"]
+    # The same packaging, audit and smoke-test scripts as the release build, in the same
+    # order (the release job also runs the test suite and its skip check first).
+    packaging = [s for s in _release_scripts(release) if s != "check_pytest_skips"]
+    assert _release_scripts(package) == packaging
+    assert packaging[-1].startswith("smoke_test_")

@@ -93,6 +93,26 @@ When `requirements.txt` changes, regenerate `release/requirements-build.txt`
 from a fresh venv with `pip freeze`, then run the full test suite against
 those versions.
 
+## Package check on pull requests
+
+`.github/workflows/package-check.yml` runs on every pull request to `main`. It
+is not a required check. It uses the release build scripts unchanged:
+
+- **Package (windows-x64)**, `windows-latest`: `release/build_windows.py`, then
+  `release/smoke_test_artifact.py` on the zip.
+- **Package (macos-arm64-unsigned)**, `macos-15`: `release/build_macos.py build`
+  and `package-unsigned`, `release/audit_macos.py` on the zip, then
+  `release/smoke_test_macos.py`.
+
+It uses a read-only token, no secrets, no environment and no uploads, and it
+never signs, notarizes or touches a release.
+
+It shows that the change still packages and that the packaged executables start
+and pass the smoke tests on GitHub-hosted runners. It does not show signing,
+notarization, Gatekeeper or SmartScreen behaviour, first launch through Finder
+or Explorer, other Windows or macOS versions, or the packaged app against a real
+MySQL server. Releases are still built only by the tag workflows below.
+
 ## Publish
 
 1. Update `APP_VERSION`, then run the tests, build and smoke test.
