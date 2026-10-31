@@ -245,7 +245,8 @@ Changes reach `main` only through pull requests:
 3. Run the full test suite and `pip check` locally. The CI workflow
    (`.github/workflows/ci.yml`) runs them again on Windows, macOS and Linux
    for every pull request to `main`, plus the MySQL 8.4 integration tests on
-   Linux; check its result on the pull request. Until you
+   Linux. `.github/workflows/package-check.yml` also builds and smoke-tests the
+   Windows and unsigned macOS packages. Check both results on the pull request. Until you
    have had a pull request merged here, a maintainer has to approve each CI
    run before it starts.
 4. Push the branch to your fork and open a pull request from it against
