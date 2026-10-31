@@ -117,6 +117,14 @@ def stop_browser(process: subprocess.Popen) -> None:
             os.killpg(process.pid, sig)
         except ProcessLookupError:  # the whole group is already gone
             break
+        except PermissionError:
+            # macOS answers EPERM, not ESRCH, while the group still exists but has no member
+            # it can signal (XNU killpg1 skips zombies), e.g. helpers that exited but are not
+            # yet reaped. The browser is ours: while it runs it can be signalled, so EPERM
+            # then is a real failure.
+            if process.poll() is None:
+                raise
+            break
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -912,3 +920,75 @@ def test_dump_dom_gives_up_at_the_deadline_without_a_document(tmp_path):
         tmp_path, deadline=1)
     assert time.monotonic() - started < 30
     assert (document, code) == ("<html>", None)  # incomplete: the rendered fixture's assertion then fails
+
+
+# ---------------------------------------------------------------- stop_browser on POSIX (macOS EPERM)
+
+
+class _Browser:
+    """A stand-in Popen: exits after `exits_after` signals (None: never)."""
+
+    pid = 4242
+
+    def __init__(self, exits_after):
+        self.exits_after, self.signals, self.returncode = exits_after, [], None
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            raise subprocess.TimeoutExpired("browser", timeout)
+        return self.returncode
+
+
+def _stop_with(monkeypatch, browser, errors):
+    """Run stop_browser as on POSIX; killpg raises errors[i] (or signals) on its i-th call."""
+    calls = iter(errors)
+
+    def killpg(pgid, sig):
+        assert pgid == browser.pid
+        error = next(calls, None)
+        if error is not None:
+            raise error
+        browser.signals.append(sig)
+        if browser.exits_after is not None and len(browser.signals) >= browser.exits_after:
+            browser.returncode = -sig
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "os", type("PosixOS", (), {"name": "posix", "killpg": staticmethod(killpg)}))
+    monkeypatch.setattr(module, "signal", type("Signals", (), {"SIGTERM": 15, "SIGKILL": 9}))
+    stop_browser(browser)
+
+
+def test_stop_browser_signals_the_group_until_it_is_gone(monkeypatch):
+    browser = _Browser(exits_after=1)
+    _stop_with(monkeypatch, browser, [None, ProcessLookupError()])
+    assert browser.signals == [15] and browser.returncode == -15
+
+
+def test_stop_browser_kills_a_browser_that_ignores_sigterm(monkeypatch):
+    browser = _Browser(exits_after=2)
+    _stop_with(monkeypatch, browser, [])
+    assert browser.signals == [15, 9] and browser.returncode == -9
+
+
+def test_stop_browser_accepts_eperm_once_the_browser_has_exited(monkeypatch):
+    # The observed macOS case: Chrome exited (returncode 0) and only unreaped helpers were left.
+    browser = _Browser(exits_after=None)
+    browser.returncode = 0
+    _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
+    assert browser.signals == []
+
+
+def test_stop_browser_reports_eperm_while_the_browser_still_runs(monkeypatch):
+    browser = _Browser(exits_after=None)
+    with pytest.raises(PermissionError):
+        _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
+
+
+def test_stop_browser_reports_a_browser_that_never_exits(monkeypatch):
+    browser = _Browser(exits_after=None)
+    with pytest.raises(subprocess.TimeoutExpired):
+        _stop_with(monkeypatch, browser, [])
+    assert browser.signals == [15, 9]
