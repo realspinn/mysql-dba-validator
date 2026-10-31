@@ -89,7 +89,7 @@ def table_state():
         state = {}
         for table in ("users", "users_fx", "audit_log"):
             cursor.execute(f"SELECT * FROM {DB}.{table} ORDER BY id")
-            state[table] = cursor.fetchall()
+            state[table] = list(cursor.fetchall())  # PyMySQL returns () for no rows
         return state
 
 
