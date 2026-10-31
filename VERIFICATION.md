@@ -282,8 +282,8 @@ company infrastructure, VPN and TLS.
 Unreleased (PR #34). Level: real MySQL 8.4.13 server (the official Docker
 image, pinned by digest) in a GitHub Actions service container on
 `ubuntu-24.04`. The validator runs in-process (FastAPI TestClient) with the real
-PyMySQL driver over TCP on `127.0.0.1:3306`. Root is used only to load
-`tests_mysql/setup.sql` and the existing
+PyMySQL driver over TCP on `127.0.0.1:3306`. Root is used only for the
+readiness `SELECT 1` and to load `tests_mysql/setup.sql` and the existing
 [02-fixture.sql](docs/v2-live-validation/02-fixture.sql). The tests use
 `vt_evidence` (SELECT on the test schema), `vt_writer` (SELECT, INSERT, UPDATE,
 DELETE; negative test only) and `vt_observer` (the statement digest table).
@@ -294,7 +294,9 @@ Shown on each run:
 - Connection test and database discovery. Discovery does not list a schema the
   account has no privilege on.
 - A wrong password gives `auth_failed`, a schema without privilege gives
-  `insufficient_privileges`, and no password appears in any response.
+  `insufficient_privileges`. No test password appears in any `/api/validate`
+  response, and the wrong password does not appear in the connection-test
+  response.
 - The read-only session is confirmed by the server before evidence is
   collected. An eligible `SELECT` gets a plain `EXPLAIN` plan (access type
   `const`): an optimizer estimate, not a count of rows read or changed.
