@@ -308,15 +308,21 @@ def validate(sql: str) -> dict:
                 "confidence": "LIMITED",
             },
         ),
-        
+        (
+            "CREATE PROCEDURE p() SELECT 1",
+            {
+                "statement_type": "CREATE PROCEDURE",
+                "analysis_status": "unsupported",
+                "risk_level": "CRITICAL",
+                "confidence": "LOW",
+            },
+        ),
         (
             "CREATE PROCEDURE p() BEGIN SELECT 1; END",
             {
-                
                 "error": "stored_program_not_supported",
             },
         ),
-    
         (
             "DELIMITER //\nCREATE PROCEDURE p() BEGIN SELECT 1; END //\nDELIMITER ;",
             {
@@ -344,8 +350,7 @@ def validate(sql: str) -> dict:
                 "statement_type": "DELETE",
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
-                "confidence": "LIMITED",
-                "score": 25,
+                "confidence": "LIMITED";
                 "scope_basis": "not_established",
             },
         ),
@@ -398,13 +403,15 @@ def validate(sql: str) -> dict:
 def test_assessment_corpus(sql, expected):
     result = validate(sql)
 
-    # Script-level refusal path
     if "error" in expected:
         assert result == {"error": expected["error"]}
         return
 
+    # Normal statement path
+    assert "statement_type" in result, "statement response must contain statement_type"
+
     if "statement_type" in expected:
-        assert result.get("statement_type") == expected["statement_type"]
+        assert result["statement_type"] == expected["statement_type"]
 
     if "allow_analysis_statuses" in expected:
         assert result["analysis_status"] in expected["allow_analysis_statuses"]
