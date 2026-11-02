@@ -1,0 +1,24 @@
+# Render Blueprint for the hosted online demo: the homepage and static-only validator.
+# Nothing is created until someone connects this file in the Render Dashboard.
+# See docs/public-demo.md before using it.
+services:
+  - type: web
+    name: mysql-dba-validator-demo
+    runtime: python
+    # Render's default for a new web service is a paid instance; the demo runs on Free.
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    # Deploys happen only when started by hand.
+    autoDeployTrigger: "off"
+    envVars:
+      - key: MDV_PUBLIC_DEMO
+        value: "1"
+      # The service's own host name, e.g. mysql-dba-validator-demo.onrender.com. Without
+      # it the server does not start.
+      - key: MDV_ALLOWED_HOSTS
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.14.8"

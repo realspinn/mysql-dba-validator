@@ -71,6 +71,7 @@ Without a database login, analysis is based on SQL text only. Optional database 
 | [Security policy](SECURITY.md) | Security boundaries and private vulnerability reporting |
 | [Verification](VERIFICATION.md) | What has and has not been tested |
 | [Local connector](connector/README.md) | Company-target setup and operator console |
+| [Hosted online demo](docs/public-demo.md) | The static-only public mode (`MDV_PUBLIC_DEMO=1`) and its deployment |
 | [Contributing](CONTRIBUTING.md) | Development setup, tests and pull requests |
 | [Releasing](RELEASING.md) | Maintainer release procedure |
 | [GitHub Releases](https://github.com/realspinn/mysql-dba-validator/releases) | Downloads, release notes and checksums |

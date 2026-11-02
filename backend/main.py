@@ -49,16 +49,18 @@ from .version import APP_VERSION
 from .update_check import check_for_update
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 import ipaddress
 import os
+import posixpath
 import re
 import socket
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Literal
@@ -68,9 +70,39 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+PUBLIC_DEMO_ENV = "MDV_PUBLIC_DEMO"
+
+
+def public_demo_enabled() -> bool:
+    """The hosted online demo (MDV_PUBLIC_DEMO=1): static analysis only.
+
+    Read once at startup; no request can change it. Unset or "0" is the normal local
+    application. Any other value stops the server from starting rather than guessing.
+    """
+    value = os.environ.get(PUBLIC_DEMO_ENV, "")
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise RuntimeError(f"{PUBLIC_DEMO_ENV} must be 0 or 1")
+
+
+PUBLIC_DEMO = public_demo_enabled()
+
+if os.environ.get("RENDER") and not PUBLIC_DEMO:
+    # Render sets RENDER=true in every service. Hosted there, the server is the public
+    # demo; a missing setting must not publish the full local application.
+    raise RuntimeError(f"On Render the server runs only with {PUBLIC_DEMO_ENV}=1")
+
+if PUBLIC_DEMO and os.environ.get("CORS_ALLOW_ORIGINS", "").strip():
+    # The demo page and its API share one origin; cross-origin access is never needed.
+    raise RuntimeError(f"CORS_ALLOW_ORIGINS cannot be set with {PUBLIC_DEMO_ENV}=1")
+
 app = FastAPI(
     title="MySQL DBA Validator",
     version=APP_VERSION,
+    # The public demo publishes no API description or interactive docs.
+    **({"docs_url": None, "redoc_url": None, "openapi_url": None} if PUBLIC_DEMO else {}),
 )
 
 
@@ -104,6 +136,82 @@ app.add_middleware(
 )
 
 
+MAX_SQL_BYTES = 64 * 1024
+MAX_STATEMENTS = 16
+
+# Public demo: the only routes served. Everything else (connection test, database
+# discovery, evidence, heartbeat, update check, API docs) is 404 before any route
+# code runs, whatever the request contains.
+PUBLIC_ROUTES = frozenset({
+    ("GET", "/"),
+    ("GET", "/demo"),
+    ("GET", "/api/health"),
+    ("POST", "/api/validate"),
+})
+PUBLIC_STATIC_PREFIX = "/static/assets/"
+# Largest legitimate /api/validate body: MAX_SQL_BYTES of SQL, where JSON can write one
+# byte as up to six (a control character becomes a \u00XX escape), plus room for the key.
+PUBLIC_MAX_BODY_BYTES = 6 * MAX_SQL_BYTES + 16 * 1024
+
+
+def public_route_allowed(method: str, path: str) -> bool:
+    if (method, path) in PUBLIC_ROUTES:
+        return True
+    # Only the assets folder, and no "..", "//" or backslash that could leave it.
+    return (method == "GET" and path.startswith(PUBLIC_STATIC_PREFIX)
+            and posixpath.normpath(path) == path and "\\" not in path)
+
+
+class PublicDemoGuard:
+    """ASGI middleware for the public demo: route allowlist and request-body bound.
+
+    The body bound holds before the body is buffered: a declared Content-Length over
+    the limit is refused at once, and the bytes actually received are counted as they
+    arrive (chunked bodies, or a Content-Length that understates the body), so no more
+    than the limit plus one chunk is ever held.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        if not public_route_allowed(scope["method"], scope["path"]):
+            await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
+            return
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None:
+            if not declared.isdigit():
+                await JSONResponse({"detail": "Invalid Content-Length"}, status_code=400)(scope, receive, send)
+                return
+            if int(declared) > PUBLIC_MAX_BODY_BYTES:
+                await JSONResponse({"error": "request_too_large"}, status_code=413)(scope, receive, send)
+                return
+        received = 0
+
+        async def bounded_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > PUBLIC_MAX_BODY_BYTES:
+                    # FastAPI passes an HTTPException raised while reading the body
+                    # through as the response.
+                    raise HTTPException(status_code=413, detail="request_too_large")
+            return message
+
+        await self.app(scope, bounded_receive, send)
+
+
+if PUBLIC_DEMO:
+    app.add_middleware(PublicDemoGuard)
+
+
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
 _HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
 
@@ -120,6 +228,13 @@ def configured_allowed_hosts() -> list[str]:
     configured = os.environ.get("MDV_ALLOWED_HOSTS", "")
     extra = [host.strip().lower()
              for host in configured.split(",") if host.strip()]
+    if PUBLIC_DEMO:
+        # The public demo answers only the host names it is deployed under (loopback
+        # too only if listed), and does not start without one.
+        public = [host for host in extra if _HOST_NAME.fullmatch(host)]
+        if not public:
+            raise RuntimeError(f"{PUBLIC_DEMO_ENV}=1 needs MDV_ALLOWED_HOSTS with the public host name")
+        return public
     return list(LOOPBACK_HOSTS) + [
         host for host in extra
         if _HOST_NAME.fullmatch(host) and host not in LOOPBACK_HOSTS
@@ -133,6 +248,11 @@ app.add_middleware(
 )
 
 
+# The page may call its own server and, in the local application, the local connector.
+# The public demo has no connector, so only its own server.
+CONNECT_SRC = "'self'" if PUBLIC_DEMO else "'self' http://127.0.0.1:8765 http://localhost:8765"
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -141,7 +261,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:8765 http://localhost:8765; "
+        f"style-src 'self' 'unsafe-inline'; connect-src {CONNECT_SRC}; "
         "img-src 'self' data:; object-src 'none'; base-uri 'self'; "
         "frame-ancestors 'none'"
     )
@@ -153,9 +273,6 @@ async def add_security_headers(request: Request, call_next):
 FRONTEND_DIR = (
     Path(__file__).resolve().parent.parent / "frontend"
 )
-
-MAX_SQL_BYTES = 64 * 1024
-MAX_STATEMENTS = 16
 
 
 def script_error(sql: str, all_facts: list) -> str | None:
@@ -334,6 +451,15 @@ def _invalid_connection_config():
     }
 
 
+def public_demo_refusal() -> JSONResponse:
+    """The answer to anything the public demo does not do: it only analyses SQL text."""
+    return JSONResponse(status_code=403, content={
+        "error_code": "public_demo_static_only",
+        "message": ("The online demo runs static analysis only. Database connections are "
+                    "available only in the downloaded application."),
+    })
+
+
 def _session_from_connection_request(
     req: ConnectionTestRequest,
     include_database: bool = True,
@@ -354,6 +480,8 @@ def _session_from_connection_request(
 @app.post("/api/connections/test")
 def connection_test(req: ConnectionTestRequest):
     """Test a local-only MySQL connection for trusted self-hosted deployment."""
+    if PUBLIC_DEMO:  # also unreachable there (PublicDemoGuard); refused before any lookup
+        return public_demo_refusal()
     session = _session_from_connection_request(req)
     if session is None:
         return _invalid_connection_config()
@@ -372,6 +500,8 @@ def connection_test(req: ConnectionTestRequest):
 @app.post("/api/connections/discover-databases")
 def discover_databases_endpoint(req: ConnectionTestRequest):
     """Discover databases for a trusted local-only deployment."""
+    if PUBLIC_DEMO:  # also unreachable there (PublicDemoGuard); refused before any lookup
+        return public_demo_refusal()
     session = _session_from_connection_request(req, include_database=False)
     if session is None:
         return _invalid_connection_config()
@@ -401,8 +531,40 @@ def risk_level_from_score(score: int) -> str:
     return "LOW"
 
 
+# Public demo: validations allowed at once. Analysis is CPU-bound, so more would only
+# queue; a request over the limit is told to retry instead of waiting.
+PUBLIC_MAX_CONCURRENT_VALIDATIONS = 2
+_public_validations = threading.BoundedSemaphore(PUBLIC_MAX_CONCURRENT_VALIDATIONS)
+
+
 @app.post("/api/validate")
 def validate(req: ValidateRequest):
+    if PUBLIC_DEMO:
+        # Only the SQL text. A connection field, even empty, is refused rather than
+        # dropped, before the target is classified (which can look up a host name).
+        if req.model_fields_set != {"sql"}:
+            return public_demo_refusal()
+        if not _public_validations.acquire(blocking=False):
+            return JSONResponse(status_code=503, headers={"Retry-After": "5"},
+                                content={"error": "server_busy"})
+        try:
+            return _validate_or_report_too_complex(req)
+        finally:
+            _public_validations.release()
+    return _validate_or_report_too_complex(req)
+
+
+def _validate_or_report_too_complex(req: ValidateRequest):
+    try:
+        return _validate(req)
+    except RecursionError:
+        # Deeply nested or very long expressions can exceed Python's recursion limit
+        # in the analysis; nothing was assessed. Any evidence connection is already
+        # closed by _validate.
+        return {"error": "sql_too_complex"}
+
+
+def _validate(req: ValidateRequest):
 
     if len(req.sql.encode("utf-8")) > MAX_SQL_BYTES:
         return {"error": "request_too_large"}
@@ -820,6 +982,10 @@ def build_statement_result(static_report, analysis, evidence: DatabaseEvidence,
 
 @app.get("/api/health")
 def health():
+    if PUBLIC_DEMO:
+        # Readiness only: no database probe even if MYSQL_* variables are set, and
+        # nothing about the deployment.
+        return {"status": "ok"}
     client = get_client()
     configured = bool(client.configured)
     db_status = "not_configured"
@@ -922,14 +1088,30 @@ def homepage_preview_enabled() -> bool:
 
 @app.get("/")
 def index():
-    if homepage_preview_enabled():
+    if PUBLIC_DEMO or homepage_preview_enabled():
         return FileResponse(str(FRONTEND_DIR / "home.html"))
     return FileResponse(
         str(FRONTEND_DIR / "index.html")
     )
 
 
+def public_demo_page() -> str:
+    """The validator marked as the online demo. The page then shows the SQL privacy
+    notice, hides the connection, connector and database controls, and sends only the
+    SQL text; the server enforces the same limits whatever the page does."""
+    page = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    marked = page.replace('<html lang="en">', '<html lang="en" data-public-demo>', 1)
+    if marked == page:
+        raise RuntimeError("frontend/index.html has no <html lang=\"en\"> tag to mark")
+    return marked
+
+
+PUBLIC_DEMO_PAGE = public_demo_page() if PUBLIC_DEMO else None
+
+
 @app.get("/demo")
 def demo():
     """The validator, at the address the homepage links to."""
+    if PUBLIC_DEMO:
+        return HTMLResponse(PUBLIC_DEMO_PAGE)
     return FileResponse(str(FRONTEND_DIR / "index.html"))
