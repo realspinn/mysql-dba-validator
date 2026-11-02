@@ -52,6 +52,19 @@ def _home_links() -> _Links:
     return parser
 
 
+def _current_release() -> str:
+    """The release the README names as current, e.g. v0.8.0."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    return re.search(r"\*\*Current release: \[(v\d+\.\d+\.\d+)\]", readme).group(1)
+
+
+def _release_files(version: str) -> dict[str, str]:
+    # The two packages each release publishes (RELEASING.md): Windows x64 and an
+    # unsigned macOS build for Apple Silicon only.
+    base = f"{REPO}/releases/download/{version}/MySQL-DBA-Validator-{version}"
+    return {"windows": f"{base}-windows-x64.zip", "macos": f"{base}-macos-arm64-unsigned.zip"}
+
+
 @pytest.fixture
 def preview(monkeypatch):
     monkeypatch.setenv("MDV_HOMEPAGE_PREVIEW", "1")
@@ -112,8 +125,10 @@ def test_preview_keeps_the_host_check_and_security_headers(preview):
 def test_homepage_links_lead_somewhere(preview):
     links = _home_links()
     internal = {"/", "/demo", "/#how-it-works", "#main"}
+    version = _current_release()
     external = {REPO, f"{REPO}/releases", f"{REPO}#readme", f"{REPO}/blob/main/SECURITY.md",
-                f"{REPO}/blob/main/VERIFICATION.md", f"{REPO}/blob/main/LICENSE", LINKEDIN}
+                f"{REPO}/blob/main/VERIFICATION.md", f"{REPO}/blob/main/LICENSE", LINKEDIN,
+                f"{REPO}/releases/tag/{version}", *_release_files(version).values()}
     for href in links.hrefs:
         if href.startswith("/static/"):
             assert client.get(href).status_code == 200, href
@@ -197,3 +212,57 @@ def test_homepage_states_the_demo_limits():
     assert "sends your SQL to the hosted server" in text
     assert "Do not paste confidential company scripts, credentials or production-sensitive information." in text
     assert "None. Static analysis only." in text
+
+
+def test_download_menu_offers_only_the_current_release_files():
+    # Direct links must match the release the README names, with honest labels: an
+    # x64 Windows build, and a macOS build for Apple Silicon only that is unsigned.
+    text = " ".join(HOME.read_text(encoding="utf-8").split())
+    version = _current_release()
+    files = _release_files(version)
+    downloads = re.findall(rf'href="({REPO}/releases/download/[^"]+)"', text)
+    assert sorted(downloads) == sorted(files.values()), downloads
+    windows = text[text.index(files["windows"]):text.index(files["macos"])]
+    macos = text[text.index(files["macos"]):]
+    assert "<strong>Windows</strong><small>x64 ·" in windows
+    assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · unsigned, not notarized" in macos
+    assert f'href="{REPO}/releases/tag/{version}"' in text  # checksums and release notes
+
+
+def test_menus_are_native_disclosures_closed_by_escape_or_outside_click():
+    text = HOME.read_text(encoding="utf-8")
+    assert text.count('<details class="menu') == 2  # download and theme
+    assert "<summary" in text and "role=\"menu\"" not in text  # links and radios, not an ARIA menu
+    css = " ".join(text.split())
+    assert ":hover .menu-panel" not in css and "details:hover" not in css  # never opens on hover
+    assert "event.key === 'Escape'" in text and ".querySelector('summary').focus()" in text
+    assert "closeAll(menu)" in text  # a click outside closes the open menu
+
+
+def _webp_size(data: bytes) -> tuple[int, int]:
+    # Lossless WebP: RIFF....WEBPVP8L, then 14 bits of width - 1 and 14 bits of height - 1.
+    assert data[:4] == b"RIFF" and data[8:16] == b"WEBPVP8L"
+    bits = int.from_bytes(data[21:25], "little")
+    return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+
+
+def test_screenshots_are_lossless_and_twice_their_display_size(preview):
+    text = HOME.read_text(encoding="utf-8")
+    for name in ("validator-review.webp", "validator-review-dark.webp"):
+        response = client.get(f"/static/assets/{name}")
+        assert response.status_code == 200 and response.headers["content-type"] == "image/webp"
+        # Sharp on 2x screens; drawn at 1440 x 762 CSS pixels at most.
+        assert _webp_size(response.content) == (2880, 1524), name
+        assert len(response.content) < 150_000, name
+        assert f'src="/static/assets/{name}" width="1440" height="762"' in text
+
+
+def test_screenshot_motion_is_optional():
+    css = " ".join(HOME.read_text(encoding="utf-8").split())
+    frame = css[css.index(".frame { display: block;"):]
+    frame = frame[:frame.index("}")]
+    assert "animation" not in frame  # still unless scroll-driven animation is supported
+    motion = css[css.index("@supports (animation-timeline: scroll())"):]
+    assert motion.startswith("@supports (animation-timeline: scroll()) { @media (prefers-reduced-motion: no-preference) { .frame {")
+    reduced = css[css.index("@media (prefers-reduced-motion: reduce)"):]
+    assert ".frame img, .fish, .fish i { transition: none; }" in reduced
