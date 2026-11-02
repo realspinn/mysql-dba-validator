@@ -350,7 +350,7 @@ def validate(sql: str) -> dict:
                 "statement_type": "DELETE",
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
-                "confidence": "LIMITED";
+                "confidence": "LIMITED",
                 "scope_basis": "not_established",
             },
         ),
