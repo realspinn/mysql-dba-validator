@@ -49,7 +49,9 @@ covered by this statement.
 
 `render.yaml` describes one Python web service on the Free plan with auto-deploy off.
 Creating it requires connecting the repository in the Render Dashboard; nothing in this
-repository does that.
+repository does that. If it is used as a Blueprint, also turn off **Auto Sync** in the
+Blueprint's settings: auto-sync is on by default and applies `render.yaml` changes on
+every push, independently of `autoDeployTrigger`.
 
 | Setting | Value |
 |---|---|
@@ -57,7 +59,7 @@ repository does that.
 | Start command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1` |
 | Health check path | `/api/health` |
 | `MDV_PUBLIC_DEMO` | `1` |
-| `MDV_ALLOWED_HOSTS` | the service's host name, such as `<name>.onrender.com` |
+| `MDV_ALLOWED_HOSTS` | the service's host name, such as `<name>.onrender.com`, plus any custom domain (comma-separated) |
 | `PYTHON_VERSION` | `3.14.8` |
 
 Set no database, connector or cloud credentials. The demo does not use them.
@@ -68,17 +70,21 @@ traffic and about a minute to start again; a single instance; no persistent disk
 (files are lost on restart or redeploy); outbound bandwidth and build minutes come from
 the workspace allowance, and a Free service is suspended for the rest of the month if
 bandwidth is exceeded without a payment method. Render terminates TLS and redirects HTTP
-to HTTPS. Its health checks send the service's `onrender.com` name (or verified custom
-domain) as `Host`. The Free instance's CPU and memory were not stated on the pages
-checked.
+to HTTPS. Its health checks send the service's `onrender.com` name, or a verified custom
+domain once there is one, as `Host`: add a custom domain to `MDV_ALLOWED_HOSTS` before
+verifying it, or the health checks get 400 and Render restarts the service. The Free
+instance's CPU and memory were not stated on the pages checked.
 
 ## Rollback and emergency stop
 
 - **Stop public access at once:** suspend the service in the Render Dashboard (service
-  settings), or delete it.
+  settings). Deleting a service that a Blueprint manages is not enough: the next
+  Blueprint sync recreates it. Remove it from `render.yaml` and sync first, then delete it.
 - **Go back to a known-good commit:** Deploys, then Manual Deploy, then "Deploy a
   specific commit"; or roll back to a previous successful deploy whose build is still
-  retained (Render keeps a plan-dependent number of builds).
+  retained (Render keeps a plan-dependent number of builds). Choose only a commit that
+  includes the public demo mode (this change or later). An earlier commit runs the full
+  local application, with its connection routes, on the public address.
 - **Fix a configuration mistake:** correct the environment variable and redeploy. A
   wrong `MDV_PUBLIC_DEMO` value or a missing `MDV_ALLOWED_HOSTS` stops the server from
   starting, so the previous deploy keeps serving.

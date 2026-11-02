@@ -11,7 +11,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /api/health
-    # Deploys happen only when started by hand.
+    # Deploys happen only when started by hand. This does not stop Blueprint auto-sync:
+    # turn off Auto Sync in the Blueprint's settings too (docs/public-demo.md).
     autoDeployTrigger: "off"
     envVars:
       - key: MDV_PUBLIC_DEMO
