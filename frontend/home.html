@@ -39,7 +39,24 @@
 			--on-accent: #ffffff;
 			--focus: rgba(15, 118, 110, .32);
 			--critical: #b42318;
-			--stage: #e9ecf0;
+			/* Page surfaces, top to bottom: the stage (header, hero and screenshot) falls from
+			   --stage-top to --stage; the sections sit on --sheet, the comparison on --band,
+			   and the footer is graphite in both themes. */
+			--stage-top: #f7f8fa;
+			--stage: #e6eaef;
+			--sheet: #fbfbfc;
+			--band: #f0f2f5;
+			--frame-border: #c9cfd7;
+			--frame-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 28px 56px -28px rgba(16, 24, 40, .32);
+			--graphite: #1b2027;
+			--graphite-rule: #2e3540;
+			--graphite-text: #a9b1bd;
+			--graphite-strong: #eef0f4;
+			/* Controls: hover surface, menu elevation and the primary button's depth. */
+			--hover: #eef1f4;
+			--menu-shadow: 0 2px 6px rgba(16, 24, 40, .06), 0 18px 40px -12px rgba(16, 24, 40, .24);
+			--primary-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 1px 2px rgba(16, 24, 40, .16);
+			--primary-lift: 0 10px 22px -10px rgba(15, 118, 110, .6);
 			--sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 			--mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 			--wide: 1180px;
@@ -64,7 +81,19 @@
 				--on-accent: #04201c;
 				--focus: rgba(60, 196, 180, .45);
 				--critical: #ff8a80;
-				--stage: #141a21;
+				--stage-top: #1a2029;
+				--stage: #12171e;
+				--sheet: #0d1015;
+				--band: #11151b;
+				--frame-border: #3a4451;
+				--frame-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 32px 64px -28px rgba(0, 0, 0, .8);
+				--graphite: #08090c;
+				--graphite-rule: #1d232b;
+				--graphite-text: #8a93a0;
+				--hover: #1d242d;
+				--menu-shadow: 0 2px 6px rgba(0, 0, 0, .4), 0 20px 44px -12px rgba(0, 0, 0, .75);
+				--primary-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 1px 2px rgba(0, 0, 0, .4);
+				--primary-lift: 0 10px 24px -10px rgba(42, 174, 159, .5);
 			}
 		}
 
@@ -85,7 +114,19 @@
 			--on-accent: #04201c;
 			--focus: rgba(60, 196, 180, .45);
 			--critical: #ff8a80;
-			--stage: #141a21;
+			--stage-top: #1a2029;
+			--stage: #12171e;
+			--sheet: #0d1015;
+			--band: #11151b;
+			--frame-border: #3a4451;
+			--frame-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 32px 64px -28px rgba(0, 0, 0, .8);
+			--graphite: #08090c;
+			--graphite-rule: #1d232b;
+			--graphite-text: #8a93a0;
+			--hover: #1d242d;
+			--menu-shadow: 0 2px 6px rgba(0, 0, 0, .4), 0 20px 44px -12px rgba(0, 0, 0, .75);
+			--primary-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 1px 2px rgba(0, 0, 0, .4);
+			--primary-lift: 0 10px 24px -10px rgba(42, 174, 159, .5);
 		}
 
 		.only-light {
@@ -120,7 +161,9 @@
 
 		body {
 			margin: 0;
-			background: var(--bg);
+			/* The stage: header, hero and screenshot on one surface that darkens slightly
+			   towards the screenshot. Every section below sets its own surface. */
+			background: linear-gradient(var(--stage-top), var(--stage) 720px) var(--stage);
 			color: var(--text);
 			font: 16px/1.6 var(--sans);
 			-webkit-font-smoothing: antialiased;
@@ -164,7 +207,7 @@
 
 		/* ------------------------------------------------------------ header */
 		header {
-			border-bottom: 1px solid var(--border);
+			border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 		}
 
 		.bar {
@@ -178,6 +221,7 @@
 		.brand {
 			display: inline-flex;
 			align-items: center;
+			min-height: 40px;
 			gap: 10px;
 			color: var(--text);
 			font-weight: 650;
@@ -202,73 +246,53 @@
 		nav a {
 			display: inline-flex;
 			align-items: center;
+			gap: 8px;
 			min-height: 40px;
 			padding: 0 12px;
-			border-radius: 6px;
+			border-radius: 8px;
 			color: var(--muted);
 			font-size: 15px;
 			text-decoration: none;
+			transition: color .15s ease, background-color .15s ease, border-color .15s ease;
 		}
 
 		nav a:hover {
 			color: var(--text);
-			background: var(--surface);
+			background: var(--hover);
 		}
 
 		nav a.nav-demo {
 			margin-left: 6px;
+			min-height: 38px;
 			border: 1px solid var(--border-strong);
+			background: var(--surface);
 			color: var(--text);
-			font-weight: 550;
+			font-weight: 600;
 		}
 
 		nav a.nav-demo:hover {
 			border-color: var(--accent);
+			background: var(--surface);
 			color: var(--accent-text);
 		}
 
 		.bar-end {
 			display: flex;
 			align-items: center;
-			gap: 14px;
+			gap: 10px;
 		}
 
-		/* Theme: three native radios (arrow keys move between them) drawn as icons. */
-		.theme {
-			display: inline-flex;
-			gap: 2px;
-			padding: 2px;
-			border: 1px solid var(--border);
-			border-radius: 8px;
+		/* Brand marks (GitHub, Windows, Apple): one size, drawn in the text colour. */
+		.mark-icon {
+			flex: none;
+			width: 16px;
+			height: 16px;
+			fill: currentColor;
 		}
 
-		.theme label {
-			position: relative;
-			display: inline-flex;
-		}
-
-		.theme input {
-			position: absolute;
-			inset: 0;
-			width: 100%;
-			height: 100%;
-			margin: 0;
-			opacity: 0;
-			cursor: pointer;
-		}
-
-		.theme .chip {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 34px;
-			height: 34px;
-			border-radius: 6px;
-			color: var(--subtle);
-			transition: color .15s ease, background-color .15s ease;
-		}
-
-		.theme svg {
+		/* Line icons: theme choices, chevron, download. */
+		.line-icon {
+			flex: none;
 			width: 16px;
 			height: 16px;
 			fill: none;
@@ -278,19 +302,190 @@
 			stroke-linejoin: round;
 		}
 
-		.theme label:hover .chip {
-			color: var(--text);
+		.chevron {
+			width: 12px;
+			height: 12px;
+			stroke-width: 1.7;
+			opacity: .7;
 		}
 
-		.theme input:checked+.chip {
+		/* ------------------------------------------------------------ menus */
+		/* The download and theme menus are native disclosure widgets (details and summary):
+		a click, Enter or Space opens them, and they work without JavaScript. The script
+		at the end of the page adds Escape, a click outside and the arrow keys. */
+		.menu {
+			position: relative;
+		}
+
+		.menu summary {
+			list-style: none;
+			cursor: pointer;
+		}
+
+		.menu summary::-webkit-details-marker {
+			display: none;
+		}
+
+		.menu-panel {
+			position: absolute;
+			top: calc(100% + 8px);
+			right: 0;
+			z-index: 20;
+			padding: 6px;
+			border: 1px solid var(--border);
+			border-radius: 10px;
 			background: var(--surface);
-			color: var(--text);
-			box-shadow: 0 0 0 1px var(--border-strong);
+			box-shadow: var(--menu-shadow);
 		}
 
-		.theme input:focus-visible+.chip {
+		.menu[open] .menu-panel {
+			animation: menu-in .12s cubic-bezier(0, 0, 0, 1);
+		}
+
+		@keyframes menu-in {
+			from {
+				opacity: 0;
+				translate: 0 -4px;
+			}
+		}
+
+		.menu-item {
+			position: relative;
+			display: grid;
+			grid-template-columns: 16px minmax(0, 1fr) auto;
+			align-items: center;
+			column-gap: 12px;
+			padding: 10px 12px;
+			border-radius: 6px;
+			color: var(--text);
+			font-size: 15px;
+			line-height: 1.3;
+			text-decoration: none;
+			cursor: pointer;
+			transition: background-color .12s ease;
+		}
+
+		.menu-item:hover,
+		.menu-item:focus-visible,
+		.menu-item:has(input:focus-visible) {
+			background: var(--hover);
+			color: var(--text);
+		}
+
+		.menu-item:focus-visible,
+		.menu-item:has(input:focus-visible) {
 			outline: 3px solid var(--focus);
-			outline-offset: 1px;
+			outline-offset: -3px;
+		}
+
+		.download .menu-panel {
+			width: 340px;
+		}
+
+		.download .menu-item {
+			align-items: start;
+			padding: 12px;
+		}
+
+		.download .menu-item .mark-icon {
+			margin-top: 2px;
+		}
+
+		.menu-item strong {
+			display: block;
+			font-weight: 600;
+		}
+
+		.menu-item small {
+			display: block;
+			margin-top: 2px;
+			color: var(--muted);
+			font-size: 13px;
+			line-height: 1.45;
+		}
+
+		.menu-item .get {
+			margin-top: 2px;
+			color: var(--subtle);
+			transition: color .12s ease;
+		}
+
+		.menu-item:hover .get,
+		.menu-item:focus-visible .get {
+			color: var(--accent-text);
+		}
+
+		.menu-foot {
+			display: block;
+			margin: 6px -6px -6px;
+			padding: 11px 18px 12px;
+			border-top: 1px solid var(--border);
+			color: var(--muted);
+			font-size: 13px;
+		}
+
+		.menu-foot:hover {
+			color: var(--accent-text);
+		}
+
+		/* Theme: three native radios (arrow keys move between them and apply the theme at
+		once). The trigger shows the current choice. */
+		.theme-menu summary {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			height: 40px;
+			padding: 0 10px 0 11px;
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			color: var(--muted);
+			transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+		}
+
+		.theme-menu summary:hover,
+		.theme-menu[open] summary {
+			border-color: var(--border-strong);
+			background: var(--hover);
+			color: var(--text);
+		}
+
+		.theme-menu summary .line-icon:not(.chevron) {
+			display: none;
+		}
+
+		.theme-menu:has(input[value="light"]:checked) summary .is-light,
+		.theme-menu:has(input[value="dark"]:checked) summary .is-dark,
+		.theme-menu:has(input[value="system"]:checked) summary .is-system {
+			display: block;
+		}
+
+		.theme-menu .menu-panel {
+			width: 172px;
+		}
+
+		.theme-menu input {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			margin: 0;
+			opacity: 0;
+			cursor: pointer;
+		}
+
+		.theme-menu .tick {
+			visibility: hidden;
+			width: 14px;
+			height: 14px;
+			color: var(--accent-text);
+		}
+
+		.theme-menu .menu-item:has(input:checked) {
+			font-weight: 600;
+		}
+
+		.theme-menu .menu-item:has(input:checked) .tick {
+			visibility: visible;
 		}
 
 		/* ------------------------------------------------------------ hero */
@@ -300,8 +495,8 @@
 
 		.hero-grid {
 			display: grid;
-			grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-			gap: 24px 64px;
+			grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+			gap: 24px 56px;
 			align-items: start;
 		}
 
@@ -340,18 +535,22 @@
 			margin-top: 28px;
 		}
 
+		/* Buttons: the primary action is filled and lifts slightly on hover; the secondary
+		one stays in place and strengthens its border and surface. */
 		.button {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
+			gap: 10px;
 			min-height: 46px;
 			padding: 0 20px;
 			border-radius: 8px;
 			border: 1px solid transparent;
 			font-size: 16px;
 			font-weight: 600;
+			line-height: 1.2;
 			text-decoration: none;
-			transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+			transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .2s ease, translate .2s ease;
 		}
 
 		.button:active,
@@ -362,21 +561,32 @@
 		.button.primary {
 			background: var(--accent);
 			color: var(--on-accent);
+			box-shadow: var(--primary-shadow);
 		}
 
 		.button.primary:hover {
 			background: var(--accent-hover);
 			color: var(--on-accent);
+			box-shadow: var(--primary-shadow), var(--primary-lift);
+			translate: 0 -1px;
+		}
+
+		.button.primary:active {
+			box-shadow: var(--primary-shadow);
+			translate: 0 1px;
 		}
 
 		.button.secondary {
 			border-color: var(--border-strong);
 			color: var(--text);
 			background: var(--surface);
+			box-shadow: 0 1px 2px rgba(16, 24, 40, .05);
 		}
 
-		.button.secondary:hover {
-			border-color: var(--text);
+		.button.secondary:hover,
+		.menu[open] .button.secondary {
+			border-color: var(--subtle);
+			background: var(--hover);
 			color: var(--text);
 		}
 
@@ -387,35 +597,54 @@
 		}
 
 		/* ------------------------------------------------------------ product view */
-		/* The product band: one tone behind the lower half of the screenshot and the details
-		   taken from it, so the product reads as one block. */
+		/* The screenshot ends the stage; the sections start on a new surface below its caption. */
 		.view {
-			background: linear-gradient(var(--bg) 0 42%, var(--stage) 42%);
-			padding-bottom: clamp(48px, 6vw, 72px);
-		}
-
-		#capabilities {
-			border-top: 0;
-			padding-top: 0;
-			background: var(--stage);
+			padding-bottom: clamp(56px, 7vw, 96px);
 		}
 
 		figure {
 			margin: 0;
 		}
 
+		/* The screenshot. Its image fades in once it has loaded, so an empty frame is never
+		animated. While the page scrolls through its first 420 px the frame straightens
+		from a slight tilt to flat, and tilts back when scrolling up: one transform, tied
+		to the scroll position. Without scroll-driven animations, or with reduced motion,
+		it stays flat and still. */
 		.frame {
 			display: block;
 			overflow: hidden;
-			border: 1px solid var(--border-strong);
+			border: 1px solid var(--frame-border);
 			border-radius: 10px;
 			background: var(--surface);
-			box-shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 12px 32px -12px rgba(16, 24, 40, .18);
+			box-shadow: var(--frame-shadow);
+			transform-origin: 50% 0;
+		}
+
+		.frame img.pending {
+			opacity: 0;
+		}
+
+		@supports (animation-timeline: scroll()) {
+			@media (prefers-reduced-motion: no-preference) {
+				.frame {
+					animation: frame-settle linear both;
+					animation-timeline: scroll(root);
+					animation-range: 0 420px;
+				}
+			}
+		}
+
+		@keyframes frame-settle {
+			from {
+				transform: perspective(2400px) rotateX(4deg) scale(.975);
+			}
 		}
 
 		.frame img {
 			width: 100%;
 			height: auto;
+			transition: opacity .45s ease;
 		}
 
 		figcaption {
@@ -425,7 +654,7 @@
 			align-items: baseline;
 			gap: 6px 32px;
 			margin-top: 14px;
-			color: var(--subtle);
+			color: var(--muted);
 			font-size: 14px;
 		}
 
@@ -438,10 +667,19 @@
 		}
 
 		/* ------------------------------------------------------------ sections */
+		/* Sections are told apart by their surface and spacing, not by rules. */
 		section.band {
-			border-top: 1px solid var(--border);
-			padding: clamp(48px, 6vw, 80px) 0;
+			padding: clamp(56px, 7vw, 96px) 0;
+			background: var(--sheet);
 			scroll-margin-top: 8px;
+		}
+
+		#how-it-works {
+			padding-top: clamp(16px, 2vw, 24px);
+		}
+
+		#demo-or-download {
+			background: var(--band);
 		}
 
 		.section-grid {
@@ -589,7 +827,7 @@
 			font-weight: 600;
 			letter-spacing: .06em;
 			text-transform: uppercase;
-			color: var(--subtle);
+			color: var(--muted);
 		}
 
 		tbody th {
@@ -607,7 +845,8 @@
 		}
 
 		.warning {
-			margin: 28px 0 0;
+			margin: 24px 0 0;
+			max-width: 34ch;
 			padding-left: 14px;
 			border-left: 3px solid var(--critical);
 			color: var(--text);
@@ -621,11 +860,38 @@
 		}
 
 		/* ------------------------------------------------------------ footer */
+		/* Graphite in both themes, so the page ends on a firm surface. */
 		footer {
-			border-top: 1px solid var(--border);
-			padding: 40px 0 32px;
-			color: var(--subtle);
+			padding: 56px 0 40px;
+			background: var(--graphite);
+			color: var(--graphite-text);
 			font-size: 14px;
+		}
+
+		footer .brand,
+		footer a:hover {
+			color: var(--graphite-strong);
+		}
+
+		/* The footer mark is drawn inline in light ink, which the graphite needs in both themes. */
+		.mark {
+			display: block;
+			fill: none;
+			stroke-width: 2.5;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+		}
+
+		.mark .ink {
+			stroke: var(--graphite-strong);
+		}
+
+		.mark .top {
+			fill: var(--graphite-strong);
+		}
+
+		.mark .check {
+			stroke: #2aae9f;
 		}
 
 		.foot {
@@ -650,12 +916,11 @@
 		}
 
 		.foot-links a {
-			color: var(--muted);
+			color: var(--graphite-strong);
 			text-decoration: none;
 		}
 
 		.foot-links a:hover {
-			color: var(--text);
 			text-decoration: underline;
 		}
 
@@ -666,7 +931,7 @@
 			gap: 8px 24px;
 			margin-top: 28px;
 			padding-top: 20px;
-			border-top: 1px solid var(--border);
+			border-top: 1px solid var(--graphite-rule);
 		}
 
 		.foot-base p {
@@ -674,11 +939,7 @@
 		}
 
 		.foot-base a {
-			color: var(--muted);
-		}
-
-		.foot-base a:hover {
-			color: var(--text);
+			color: var(--graphite-strong);
 		}
 
 		.ext {
@@ -791,14 +1052,9 @@
 				display: contents;
 			}
 
-			.theme {
+			.theme-menu {
 				order: 1;
 				margin-left: auto;
-			}
-
-			.theme .chip {
-				width: 36px;
-				height: 36px;
 			}
 
 			nav {
@@ -818,8 +1074,19 @@
 				margin-left: auto;
 			}
 
-			.actions .button {
+			.actions .button,
+			.actions .download {
 				flex: 1 1 100%;
+			}
+
+			/* The download menu spans the full-width trigger. */
+			.download summary {
+				width: 100%;
+			}
+
+			.download .menu-panel {
+				left: 0;
+				width: auto;
 			}
 
 			.points li,
@@ -876,10 +1143,21 @@
 			}
 
 			.button,
-			.theme .chip,
+			nav a,
+			.theme-menu summary,
+			.menu-item,
+			.frame img,
 			.fish,
 			.fish i {
 				transition: none;
+			}
+
+			.button.primary:hover {
+				translate: none;
+			}
+
+			.menu[open] .menu-panel {
+				animation: none;
 			}
 
 			/* A still fish at the top of its path: no entrance, travel, tilt or swim cycle. */
@@ -905,36 +1183,68 @@
 				<nav aria-label="Main">
 					<ul>
 						<li><a href="/#how-it-works">How it works</a></li>
-						<li><a href="https://github.com/realspinn/mysql-dba-validator">GitHub</a></li>
+						<li><a href="https://github.com/realspinn/mysql-dba-validator"><svg class="mark-icon"
+									viewBox="0 0 16 16" aria-hidden="true">
+									<path
+										d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656" />
+								</svg>GitHub</a></li>
 						<li><a class="nav-demo" href="/demo">Try the demo</a></li>
 					</ul>
 				</nav>
-				<div class="theme" role="radiogroup" aria-label="Theme">
-					<label title="Light">
-						<input type="radio" name="theme" value="light" />
-						<span class="chip" aria-hidden="true"><svg viewBox="0 0 16 16">
+				<details class="menu theme-menu">
+					<summary aria-label="Theme" title="Theme">
+						<svg class="line-icon is-light" viewBox="0 0 16 16" aria-hidden="true">
+							<circle cx="8" cy="8" r="2.75" />
+							<path
+								d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5M3.23 3.23l1.06 1.06M11.71 11.71l1.06 1.06M3.23 12.77l1.06-1.06M11.71 4.29l1.06-1.06" />
+						</svg>
+						<svg class="line-icon is-dark" viewBox="0 0 16 16" aria-hidden="true">
+							<path d="M13.25 9.6A5.5 5.5 0 1 1 6.4 2.75a4.4 4.4 0 0 0 6.85 6.85Z" />
+						</svg>
+						<svg class="line-icon is-system" viewBox="0 0 16 16" aria-hidden="true">
+							<rect x="1.75" y="2.5" width="12.5" height="8.5" rx="1.25" />
+							<path d="M5.75 14h4.5M8 11v3" />
+						</svg>
+						<svg class="line-icon chevron" viewBox="0 0 12 12" aria-hidden="true">
+							<path d="M3 4.5 6 7.5l3-3" />
+						</svg>
+					</summary>
+					<div class="menu-panel" role="radiogroup" aria-label="Theme">
+						<label class="menu-item">
+							<input type="radio" name="theme" value="light" />
+							<svg class="line-icon" viewBox="0 0 16 16" aria-hidden="true">
 								<circle cx="8" cy="8" r="2.75" />
 								<path
 									d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5M3.23 3.23l1.06 1.06M11.71 11.71l1.06 1.06M3.23 12.77l1.06-1.06M11.71 4.29l1.06-1.06" />
-							</svg></span>
-						<span class="sr-only">Light</span>
-					</label>
-					<label title="Dark">
-						<input type="radio" name="theme" value="dark" />
-						<span class="chip" aria-hidden="true"><svg viewBox="0 0 16 16">
+							</svg>
+							Light
+							<svg class="line-icon tick" viewBox="0 0 14 14" aria-hidden="true">
+								<path d="M3 7.5 5.75 10 11 4.5" />
+							</svg>
+						</label>
+						<label class="menu-item">
+							<input type="radio" name="theme" value="dark" />
+							<svg class="line-icon" viewBox="0 0 16 16" aria-hidden="true">
 								<path d="M13.25 9.6A5.5 5.5 0 1 1 6.4 2.75a4.4 4.4 0 0 0 6.85 6.85Z" />
-							</svg></span>
-						<span class="sr-only">Dark</span>
-					</label>
-					<label title="System">
-						<input type="radio" name="theme" value="system" checked />
-						<span class="chip" aria-hidden="true"><svg viewBox="0 0 16 16">
+							</svg>
+							Dark
+							<svg class="line-icon tick" viewBox="0 0 14 14" aria-hidden="true">
+								<path d="M3 7.5 5.75 10 11 4.5" />
+							</svg>
+						</label>
+						<label class="menu-item">
+							<input type="radio" name="theme" value="system" checked />
+							<svg class="line-icon" viewBox="0 0 16 16" aria-hidden="true">
 								<rect x="1.75" y="2.5" width="12.5" height="8.5" rx="1.25" />
 								<path d="M5.75 14h4.5M8 11v3" />
-							</svg></span>
-						<span class="sr-only">System</span>
-					</label>
-				</div>
+							</svg>
+							System
+							<svg class="line-icon tick" viewBox="0 0 14 14" aria-hidden="true">
+								<path d="M3 7.5 5.75 10 11 4.5" />
+							</svg>
+						</label>
+					</div>
+				</details>
 			</div>
 		</div>
 	</header>
@@ -951,9 +1261,40 @@
 						available evidence does and does not prove.</p>
 					<div class="actions">
 						<a class="button primary" href="/demo">Try the online demo</a>
-						<a class="button secondary"
-							href="https://github.com/realspinn/mysql-dba-validator/releases">Download the
-							application</a>
+						<!-- The v0.8.0 release files, checked against the GitHub release. Update with
+							each release (tests/test_homepage.py compares them with the README). -->
+						<details class="menu download">
+							<summary class="button secondary">Download the application
+								<svg class="line-icon chevron" viewBox="0 0 12 12" aria-hidden="true">
+									<path d="M3 4.5 6 7.5l3-3" />
+								</svg>
+							</summary>
+							<div class="menu-panel">
+								<a class="menu-item"
+									href="https://github.com/realspinn/mysql-dba-validator/releases/download/v0.8.0/MySQL-DBA-Validator-v0.8.0-windows-x64.zip">
+									<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true">
+										<path d="M1.5 1.5h6.1v6.1H1.5zM8.4 1.5h6.1v6.1H8.4zM1.5 8.4h6.1v6.1H1.5zM8.4 8.4h6.1v6.1H8.4z" />
+									</svg>
+									<span><strong>Windows</strong><small>x64 · portable ZIP, no installer · 33 MB</small></span>
+									<svg class="line-icon get" viewBox="0 0 16 16" aria-hidden="true">
+										<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+									</svg>
+								</a>
+								<a class="menu-item"
+									href="https://github.com/realspinn/mysql-dba-validator/releases/download/v0.8.0/MySQL-DBA-Validator-v0.8.0-macos-arm64-unsigned.zip">
+									<svg class="mark-icon" viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+									</svg>
+									<span><strong>macOS</strong><small>Apple Silicon (M1 or later) only · unsigned, not
+											notarized · 34 MB</small></span>
+									<svg class="line-icon get" viewBox="0 0 16 16" aria-hidden="true">
+										<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+									</svg>
+								</a>
+								<a class="menu-foot" href="https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.8.0">Checksums
+									and release notes for v0.8.0, including how to open the macOS app</a>
+							</div>
+						</details>
 					</div>
 					<p class="note">The demo needs no account. The validator never runs the SQL you give it.</p>
 				</div>
@@ -964,18 +1305,18 @@
 			<figure class="wrap">
 				<!-- One image per theme; the hidden one is lazy and display: none, so it is not fetched. -->
 				<div class="frame">
-					<img class="only-light" src="/static/assets/validator-review.png" width="1440" height="762"
-						loading="lazy"
+					<img class="only-light" src="/static/assets/validator-review.webp" width="1440" height="762"
+						loading="lazy" fetchpriority="high" decoding="async"
 						alt="The validator's dashboard after reviewing a four-statement batch: overall risk CRITICAL, 100 out of 100; confidence LIMITED; a findings table led by a DELETE with no WHERE clause; a list of DBA actions; and an evidence list where table metadata and the execution plan are marked not collected." />
-					<img class="only-dark" src="/static/assets/validator-review-dark.png" width="1440" height="762"
-						loading="lazy"
+					<img class="only-dark" src="/static/assets/validator-review-dark.webp" width="1440" height="762"
+						loading="lazy" fetchpriority="high" decoding="async"
 						alt="The validator's dashboard after reviewing a four-statement batch: overall risk CRITICAL, 100 out of 100; confidence LIMITED; a findings table led by a DELETE with no WHERE clause; a list of DBA actions; and an evidence list where table metadata and the execution plan are marked not collected." />
 				</div>
 				<figcaption><span>A four-statement batch reviewed without a database login. Table metadata and
 						execution plans are marked not collected, so the assessment rests on the SQL text alone and
 						confidence is LIMITED.</span>
-					<a class="only-light" href="/static/assets/validator-review.png">Open full size</a>
-					<a class="only-dark" href="/static/assets/validator-review-dark.png">Open full size</a>
+					<a class="only-light" href="/static/assets/validator-review.webp">Open full size</a>
+					<a class="only-dark" href="/static/assets/validator-review-dark.webp">Open full size</a>
 				</figcaption>
 			</figure>
 		</div>
@@ -990,9 +1331,9 @@
 				<ul class="points">
 					<li>
 						<div class="detail d-risk" aria-hidden="true">
-							<img class="only-light" src="/static/assets/validator-review.png" width="1440" height="762"
+							<img class="only-light" src="/static/assets/validator-review.webp" width="1440" height="762"
 								loading="lazy" alt="" />
-							<img class="only-dark" src="/static/assets/validator-review-dark.png" width="1440" height="762"
+							<img class="only-dark" src="/static/assets/validator-review-dark.webp" width="1440" height="762"
 								loading="lazy" alt="" />
 						</div>
 						<h3>A risk score you can trace</h3>
@@ -1004,9 +1345,9 @@
 					</li>
 					<li>
 						<div class="detail d-evidence" aria-hidden="true">
-							<img class="only-light" src="/static/assets/validator-review.png" width="1440" height="762"
+							<img class="only-light" src="/static/assets/validator-review.webp" width="1440" height="762"
 								loading="lazy" alt="" />
-							<img class="only-dark" src="/static/assets/validator-review-dark.png" width="1440" height="762"
+							<img class="only-dark" src="/static/assets/validator-review-dark.webp" width="1440" height="762"
 								loading="lazy" alt="" />
 						</div>
 						<h3>Confidence and evidence, stated plainly</h3>
@@ -1017,9 +1358,9 @@
 					</li>
 					<li>
 						<div class="detail d-actions" aria-hidden="true">
-							<img class="only-light" src="/static/assets/validator-review.png" width="1440" height="762"
+							<img class="only-light" src="/static/assets/validator-review.webp" width="1440" height="762"
 								loading="lazy" alt="" />
-							<img class="only-dark" src="/static/assets/validator-review-dark.png" width="1440" height="762"
+							<img class="only-dark" src="/static/assets/validator-review-dark.webp" width="1440" height="762"
 								loading="lazy" alt="" />
 						</div>
 						<h3>Checks to make before running it</h3>
@@ -1061,6 +1402,8 @@
 					<h2 id="compare-title">Online demo or downloaded application</h2>
 					<p class="section-intro">The demo shows the analysis. Database evidence needs the application
 						on your own computer.</p>
+					<p class="warning">The online demo sends your SQL to the hosted server. Do not paste confidential
+						company scripts, credentials or production-sensitive information.</p>
 				</div>
 				<div>
 					<table aria-labelledby="compare-title">
@@ -1101,8 +1444,6 @@
 							</tr>
 						</tbody>
 					</table>
-					<p class="warning">The online demo sends your SQL to the hosted server. Do not paste confidential
-						company scripts, credentials or production-sensitive information.</p>
 					<p class="after-table">Downloads: a portable Windows x64 build and an unsigned macOS build for
 						Apple Silicon, each with a SHA-256 checksum to verify before running. See the
 						<a href="https://github.com/realspinn/mysql-dba-validator/releases">release notes</a>.</p>
@@ -1115,7 +1456,13 @@
 		<div class="wrap">
 			<div class="foot">
 				<a class="brand" href="/">
-					<img src="/static/assets/logo-mark.svg" width="24" height="24" alt="" />
+					<svg class="mark" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true">
+						<g transform="translate(0 1)">
+							<ellipse class="ink top" cx="13" cy="7" rx="8" ry="3" />
+							<path class="ink" d="M5 7v15M21 7v7.5M5 14.5a8 3 0 0 0 16 0" />
+							<path class="check" d="M5 22a8 3 0 0 0 8 3l14-15" />
+						</g>
+					</svg>
 					MySQL DBA Validator
 				</a>
 				<ul class="foot-links" aria-label="Project">
@@ -1170,6 +1517,55 @@
 					apply(choice);
 					try { localStorage.setItem(KEY, choice); } catch (_) { }
 				});
+			}
+		})();
+
+		// The two menus (download and theme) are details elements, which open and close
+		// without script. This adds: a click outside or Escape closes them (Escape returns
+		// focus to the trigger), choosing a theme or a download with the pointer closes the
+		// menu, and the arrow keys move through the download links.
+		(function () {
+			var menus = document.querySelectorAll('details.menu');
+			function closeAll(except) {
+				for (var i = 0; i < menus.length; i++) if (menus[i] !== except) menus[i].open = false;
+			}
+			document.addEventListener('click', function (event) {
+				var menu = event.target.closest('details.menu');
+				closeAll(menu);
+				// event.detail is 0 for the click a keyboard selection makes, so Space on a
+				// theme radio keeps the menu open.
+				if (menu && event.detail && event.target.closest('.menu-panel')) menu.open = false;
+			});
+			document.addEventListener('keydown', function (event) {
+				var menu = event.target.closest && event.target.closest('details.menu');
+				if (event.key === 'Escape') {
+					for (var i = 0; i < menus.length; i++) {
+						if (!menus[i].open) continue;
+						menus[i].open = false;
+						if (menus[i].contains(document.activeElement)) menus[i].querySelector('summary').focus();
+					}
+					return;
+				}
+				if (!menu || !menu.classList.contains('download')) return;
+				if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+				event.preventDefault();
+				menu.open = true;
+				var items = menu.querySelectorAll('.menu-panel a');
+				var at = Array.prototype.indexOf.call(items, document.activeElement);
+				var next = event.key === 'ArrowDown' ? at + 1 : (at < 0 ? items.length : at) - 1;
+				items[(next + items.length) % items.length].focus();
+			});
+		})();
+
+		// The screenshot fades in when its image arrives (see .frame img.pending).
+		(function () {
+			var shots = document.querySelectorAll('.frame img');
+			function shown() { this.classList.remove('pending'); }
+			for (var i = 0; i < shots.length; i++) {
+				if (shots[i].complete && shots[i].naturalWidth) continue;
+				shots[i].classList.add('pending');
+				shots[i].addEventListener('load', shown);
+				shots[i].addEventListener('error', shown);
 			}
 		})();
 	</script>
