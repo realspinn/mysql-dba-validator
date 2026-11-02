@@ -132,7 +132,9 @@ How the components and request flows fit together is described in
   page does not protect against that.
 - There is no user authentication. The tool is for a single user on their own
   machine, or a trusted self-hosted setup. It is not an internet-facing
-  service.
+  service, except in the static-only public demo mode (`MDV_PUBLIC_DEMO=1`),
+  where the server refuses every database and connector operation; see
+  [docs/public-demo.md](docs/public-demo.md).
 - Local evidence runs with the privileges of the login you enter, so prefer
   the least-privileged account that can review the SQL. (v0.2.0 instead used a
   plain-text `.env` account for local evidence.)

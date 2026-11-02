@@ -2721,6 +2721,30 @@
 				animation-duration: 1.5s !important
 			}
 		}
+
+		/* Online demo only (html[data-public-demo], set by the server): the SQL privacy
+		   notice is shown, and the connection, connector and database controls are not. */
+		.public-notice {
+			display: none;
+			margin: 0 0 16px;
+			padding: 10px 12px;
+			border: 1px solid var(--border);
+			border-left: 3px solid var(--critical);
+			border-radius: var(--radius);
+			background: var(--surface);
+			color: var(--text);
+			font-size: 13px;
+			line-height: 1.5
+		}
+
+		html[data-public-demo] .public-notice {
+			display: block
+		}
+
+		html[data-public-demo] #connectionDrawer,
+		html[data-public-demo] .stepper {
+			display: none
+		}
 	</style>
 </head>
 
@@ -2760,6 +2784,10 @@
 		</aside>
 
 		<main>
+			<p class="public-notice" id="publicNotice"><strong>Online demo:</strong> SQL is sent to the hosted
+				server for static analysis. Do not paste confidential company scripts, credentials or
+				production-sensitive information. Real database connections are available only in the downloaded
+				application.</p>
 			<div class="update-notice" id="updateNotice" role="status" hidden>
 				<span class="update-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/><circle cx="12" cy="12" r="9"/></svg></span>
 				<div class="update-body">
@@ -2944,6 +2972,11 @@
 		// Target-driven state: backend determines security, not frontend mode selection.
 		// Remote (non-loopback) targets are only ever sent to the local connector, never to the public /api/* routes.
 		const CONNECTOR_URL = 'http://127.0.0.1:8765';
+		// The hosted online demo (the server sets data-public-demo): static analysis only.
+		// The page sends only the SQL text and never contacts a connector; the server
+		// refuses anything else regardless.
+		const PUBLIC_DEMO = document.documentElement.hasAttribute('data-public-demo');
+		const NO_DATABASE = PUBLIC_DEMO ? 'the online demo does not connect to databases.' : 'no database login and database.';
 		const REMOTE_NOT_AVAILABLE = 'Remote targets are handled only through the local connector. ';
 
 		// DOM elements
@@ -3004,7 +3037,9 @@
 			delimiter_not_supported: 'DELIMITER is a mysql client command, not SQL, and is not supported. Stored program definitions are not analysed; validate the statements in the body separately, ending each with a semicolon.',
 			stored_program_not_supported: 'A stored program definition (CREATE PROCEDURE, FUNCTION, TRIGGER or EVENT) cannot be split into statements reliably when its body has several statements or other statements are submitted with it. Stored programs are not analysed; validate the statements in the body separately.',
 			executable_comment_not_supported: 'The SQL contains an executable comment (/*! ... */). MySQL runs the SQL inside such a comment, but the validator cannot analyse it, so nothing was assessed. Move any SQL out of the comment, or remove the comment, and validate again.',
-			request_too_large: 'The SQL is too large. Validation is limited to 64 KiB.'
+			request_too_large: 'The SQL is too large. Validation is limited to 64 KiB.',
+			sql_too_complex: 'The SQL is too deeply nested, or has too long an expression, to analyse. Nothing was assessed. Split it into smaller statements and validate again.',
+			server_busy: 'The online demo is busy. Wait a few seconds and validate again.'
 		};
 		function errorMessage(data, fallback) {
 			if (data && typeof data.message === 'string') return data.message;
@@ -3637,15 +3672,16 @@
 		}
 
 		// LOCAL: loopback or static validation through the public API (unchanged contract).
+		// The online demo sends the SQL text only.
 		async function validateLocal(sql) {
-			const body = {
+			const body = PUBLIC_DEMO ? { sql: sql } : {
 				sql: sql,
 				host: state.credentials.host,
 				port: state.credentials.port,
 				username: state.credentials.username,
 				password: state.credentials.password
 			};
-			if (state.selectedDatabase) body.database = state.selectedDatabase;
+			if (state.selectedDatabase && !PUBLIC_DEMO) body.database = state.selectedDatabase;
 			return requestJson('/api/validate', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -3670,7 +3706,8 @@
 			try {
 				// A selected connector target, or any typed remote host, takes the connector path;
 				// validateRemote refuses locally when no approved target is selected.
-				const data = state.remoteTarget || isRemoteTarget(state.credentials.host)
+				// The online demo never takes the connector path.
+				const data = !PUBLIC_DEMO && (state.remoteTarget || isRemoteTarget(state.credentials.host))
 					? await validateRemote(sql)
 					: await validateLocal(sql);
 
@@ -3699,7 +3736,7 @@
 			// Header shows where SQL is reviewed: Local, or the selected approved remote target.
 			const where = state.remoteTarget
 				? 'Remote: ' + String(state.remoteTarget.display_name || state.remoteTarget.target_id)
-				: 'Local';
+				: PUBLIC_DEMO ? 'Online demo' : 'Local';
 			$('headerContext').textContent = where + ' · ' +
 				(state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only');
 			$('contextStatus').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'No database selected';
@@ -3809,6 +3846,7 @@
 			plan_not_eligible: 'No execution plan was requested: this statement is not eligible for planning (for example SELECT ... INTO, or a function call that is not on the reviewed list of MySQL built-ins).',
 			explain_format_unsupported: 'No execution plan is shown: MySQL returned it in a format the validator does not read. The server explain_format setting must be TRADITIONAL.'
 		};
+		if (PUBLIC_DEMO) EVIDENCE_STATUS_MESSAGES.not_configured = 'Database evidence is available only in the downloaded application.';
 
 		// Why table metadata was not collected, from the stable code the server reports.
 		const METADATA_REASON_MESSAGES = {
@@ -4220,7 +4258,7 @@
 			if (plan.state === 'not_eligible') return 'Not collected: this statement is not eligible for a plan.';
 			if (plan.state === 'not_supported') return 'Not applicable to this statement type.';
 			if (plan.state === 'failed') return 'Collection failed. ' + (fixedMessage(EVIDENCE_STATUS_MESSAGES, plan.reason) || '');
-			return 'Not collected: no database login and database.';
+			return 'Not collected: ' + NO_DATABASE;
 		}
 
 		// The filter and the table's indexes, from table metadata (server: filter_index).
@@ -4233,7 +4271,7 @@
 			if (filter.state === 'no_matching_index') return 'No index' + on + ' starts with ' + text(filter.column) + ' (table metadata).';
 			if (filter.state === 'not_checked') {
 				return 'Not checked: ' + (evidenceOf(s).connection.state === 'connected'
-					? 'complete table and index metadata were not available.' : 'no database login and database.');
+					? 'complete table and index metadata were not available.' : NO_DATABASE);
 			}
 			return 'Not applicable to this statement type.';
 		}
@@ -4297,10 +4335,10 @@
 			if (counts.collected) metadataParts.push('collected for ' + counts.collected + ' statement(s)');
 			if (counts.failed) metadataParts.push('collection failed for ' + counts.failed + ' statement(s)');
 			if (counts.not_attempted) metadataParts.push('not collected for ' + counts.not_attempted + ' statement(s) (no database selected)');
-			const metadataText = connection === 'not_attempted' ? 'Not collected: no database login and database.'
+			const metadataText = connection === 'not_attempted' ? 'Not collected: ' + NO_DATABASE
 				: connection === 'failed' ? 'Collection failed: the database connection failed.'
 					: metadataParts.length ? metadataParts.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : 'Not applicable.';
-			const planText = connection === 'not_attempted' ? 'Not collected: no database login and database.'
+			const planText = connection === 'not_attempted' ? 'Not collected: ' + NO_DATABASE
 				: connection === 'failed' ? 'Collection failed: the database connection failed.'
 					: (countsText(planCounts, PLAN_COUNT_LABELS) || 'not applicable').replace(/^./, c => c.toUpperCase()) + '.';
 			const metadataState = connection !== 'connected' ? 'none'
@@ -4782,11 +4820,13 @@
 		function sendHeartbeat() {
 			fetch('/api/heartbeat', { method: 'POST', cache: 'no-store' }).catch(() => { });
 		}
-		sendHeartbeat();
-		setInterval(sendHeartbeat, HEARTBEAT_MS);
-		document.addEventListener('visibilitychange', () => {
-			if (document.visibilityState === 'visible') sendHeartbeat();
-		});
+		if (!PUBLIC_DEMO) {
+			sendHeartbeat();
+			setInterval(sendHeartbeat, HEARTBEAT_MS);
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') sendHeartbeat();
+			});
+		}
 
 		// Update notice. The backend checks for a newer official release at most once per
 		// start (backend/update_check.py); the page only asks its own backend. Shown only
@@ -4826,12 +4866,20 @@
 			};
 			notice.hidden = false;
 		}
-		fetch('/api/update-status', { method: 'POST', cache: 'no-store' })
+		// The online demo is not an installed copy: there is nothing to update.
+		if (!PUBLIC_DEMO) fetch('/api/update-status', { method: 'POST', cache: 'no-store' })
 			.then(response => response.ok ? response.json() : null)
 			.then(renderUpdateNotice)
 			.catch(() => { });
 
 		// Initial state
+		if (PUBLIC_DEMO) {
+			document.querySelector('#reviewView .view-lede').textContent =
+				'Paste SQL and validate it. The online demo analyses the SQL text only.';
+			document.querySelector('#sqlHeading + .panel-note').textContent = 'Paste up to 16 MySQL statements, up to 64 KiB.';
+			document.querySelector('#results .empty span').textContent =
+				'Paste SQL and choose Validate SQL. The online demo runs static analysis only; database evidence is available in the downloaded application.';
+		}
 		updateContext();
 	</script>
 </body>
