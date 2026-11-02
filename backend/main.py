@@ -907,9 +907,29 @@ app.mount(
 )
 
 
+HOMEPAGE_PREVIEW_ENV = "MDV_HOMEPAGE_PREVIEW"
+
+
+def homepage_preview_enabled() -> bool:
+    """Local development preview of the product homepage (MDV_HOMEPAGE_PREVIEW=1).
+
+    Routing only: it changes no security control and does not make the server safe
+    to expose publicly. The downloaded app never sets it (and does not bundle
+    home.html), so "/" stays the validator there.
+    """
+    return os.environ.get(HOMEPAGE_PREVIEW_ENV) == "1" and (FRONTEND_DIR / "home.html").is_file()
+
+
 @app.get("/")
 def index():
-
+    if homepage_preview_enabled():
+        return FileResponse(str(FRONTEND_DIR / "home.html"))
     return FileResponse(
         str(FRONTEND_DIR / "index.html")
     )
+
+
+@app.get("/demo")
+def demo():
+    """The validator, at the address the homepage links to."""
+    return FileResponse(str(FRONTEND_DIR / "index.html"))
