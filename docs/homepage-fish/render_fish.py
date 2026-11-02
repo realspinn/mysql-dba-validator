@@ -2,33 +2,27 @@
 
 Optional authoring tool, not used by the app, its tests or its packaging. It needs
 Google Chrome (or Chromium) and two packages that are not in requirements.txt:
-Pillow and numpy. websockets comes with uvicorn[standard].
+Pillow and numpy.
 
     pip install pillow numpy
     python docs/homepage-fish/render_fish.py OUTPUT.webp [CHROME_PATH]
 
-Steps: Chrome draws each of the 12 frames at 800 x 400 on a transparent background;
-each frame is bent slightly along the back half of the body (a small travelling
-wave); all frames are cropped to one shared box, scaled to 176 x 61 px and placed side
-by side in one WebP image. The page shows each frame at 72 x 25 CSS px, so the image
-stays sharp on high-density screens.
+Steps: Chrome's command-line screenshot mode draws each of the 12 frames at 800 x 400
+on a transparent background (no debugging port is opened); each frame is bent slightly
+along the back half of the body (a small travelling wave); all frames are cropped to
+one shared box, scaled to 176 x 61 px and placed side by side in one WebP image. The
+page shows each frame at 72 x 25 CSS px, so the image stays sharp on high-density
+screens.
 """
 
-import asyncio
-import base64
-import io
-import json
 import math
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.request
 from pathlib import Path
 
 import numpy as np
-import websockets
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -55,58 +49,29 @@ def bend(img, t):
     return Image.fromarray(out)
 
 
-async def capture(ws_url):
-    async with websockets.connect(ws_url, max_size=None) as ws:
-        n = 0
-
-        async def call(method, **params):
-            nonlocal n
-            n += 1
-            await ws.send(json.dumps({"id": n, "method": method, "params": params}))
-            while True:
-                msg = json.loads(await ws.recv())
-                if msg.get("id") == n:
-                    return msg.get("result", {})
-
-        await call("Emulation.setDefaultBackgroundColorOverride", color={"r": 0, "g": 0, "b": 0, "a": 0})
-        await call("Emulation.setDeviceMetricsOverride", width=W, height=H, deviceScaleFactor=2, mobile=False)
-        frames = []
-        for i in range(FRAMES):
-            t = 2 * math.pi * i / FRAMES
-            page = "<style>html,body{margin:0;background:transparent}svg{display:block}</style>" + svg(t)
-            # Write the frame, then wait for two animation frames so the screenshot shows it painted.
-            await call("Runtime.evaluate", awaitPromise=True, expression=(
-                f"document.open(); document.write({json.dumps(page)}); document.close();"
-                " new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(1))))"))
-            shot = await call("Page.captureScreenshot", format="png")
-            frames.append(bend(Image.open(io.BytesIO(base64.b64decode(shot["data"]))).convert("RGBA"), t))
-        return frames
+def capture(chrome, work):
+    """Screenshot each frame with headless Chrome, one short-lived process per frame."""
+    frames = []
+    for i in range(FRAMES):
+        t = 2 * math.pi * i / FRAMES
+        page, shot = work / f"frame{i}.html", work / f"frame{i}.png"
+        page.write_text("<style>html,body{margin:0;background:transparent}svg{display:block}</style>" + svg(t),
+                        encoding="utf-8")
+        subprocess.run([chrome, "--headless=new", f"--user-data-dir={work / 'profile'}", "--no-first-run",
+                        "--hide-scrollbars", "--default-background-color=00000000", "--force-device-scale-factor=2",
+                        f"--window-size={W},{H}", f"--screenshot={shot}", page.as_uri()],
+                       check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with Image.open(shot) as im:
+            frames.append(bend(im.convert("RGBA"), t))
+    return frames
 
 
 def main(output, chrome=DEFAULT_CHROME):
-    # Port 0: Chrome picks a free port and writes it to DevToolsActivePort in this new
-    # profile, so the script only ever talks to the browser it started.
-    profile = tempfile.mkdtemp(prefix="fish-render-")
-    proc = subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=0", f"--user-data-dir={profile}",
-                             "--no-first-run", "--hide-scrollbars", "about:blank"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    work = Path(tempfile.mkdtemp(prefix="fish-render-"))
     try:
-        ws_url = None
-        for _ in range(50):
-            try:
-                port = (Path(profile) / "DevToolsActivePort").read_text().split()[0]
-                targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json"))
-                ws_url = next(t["webSocketDebuggerUrl"] for t in targets if t["type"] == "page")
-                break
-            except Exception:
-                time.sleep(0.2)
-        if ws_url is None:
-            raise RuntimeError("Chrome did not start its debugging endpoint")
-        frames = asyncio.run(capture(ws_url))
+        frames = capture(chrome, work)
     finally:
-        proc.kill()
-        proc.wait(timeout=10)
-        shutil.rmtree(profile, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
     box = None
     for f in frames:
         b = f.getbbox()
