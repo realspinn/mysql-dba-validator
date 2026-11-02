@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import math
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,6 @@ from fish_drawing import H, W, svg  # noqa: E402
 
 FRAMES = 12
 FRAME_WIDTH = 176
-PORT = 9351
 DEFAULT_CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 
 
@@ -84,22 +84,29 @@ async def capture(ws_url):
 
 
 def main(output, chrome=DEFAULT_CHROME):
+    # Port 0: Chrome picks a free port and writes it to DevToolsActivePort in this new
+    # profile, so the script only ever talks to the browser it started.
     profile = tempfile.mkdtemp(prefix="fish-render-")
-    proc = subprocess.Popen([chrome, "--headless=new", f"--remote-debugging-port={PORT}", f"--user-data-dir={profile}",
+    proc = subprocess.Popen([chrome, "--headless=new", "--remote-debugging-port=0", f"--user-data-dir={profile}",
                              "--no-first-run", "--hide-scrollbars", "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         ws_url = None
         for _ in range(50):
             try:
-                targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json"))
+                port = (Path(profile) / "DevToolsActivePort").read_text().split()[0]
+                targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json"))
                 ws_url = next(t["webSocketDebuggerUrl"] for t in targets if t["type"] == "page")
                 break
             except Exception:
                 time.sleep(0.2)
+        if ws_url is None:
+            raise RuntimeError("Chrome did not start its debugging endpoint")
         frames = asyncio.run(capture(ws_url))
     finally:
         proc.kill()
+        proc.wait(timeout=10)
+        shutil.rmtree(profile, ignore_errors=True)
     box = None
     for f in frames:
         b = f.getbbox()
