@@ -514,11 +514,19 @@ def test_audit_flags_forbidden_files_secrets_and_missing_entry_points(tmp_path):
     assert f"required file missing: {audit_artifact.CONSOLE_EXE_NAME}" in text
 
 
+def _page_files(internal: Path) -> None:
+    """The page's stylesheet and script, which the audit requires beside index.html."""
+    for rel in ("assets/css/validator.css", "assets/js/validator.js"):
+        (internal / "frontend" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (internal / "frontend" / rel).write_text("", encoding="utf-8")
+
+
 def test_audit_passes_clean_folder_and_ignores_variable_names(tmp_path):
     app_dir = tmp_path / "app"
     (app_dir / "_internal" / "frontend").mkdir(parents=True)
     (app_dir / "_internal" / "frontend" / "index.html").write_text(
         '<input id="password" type="password"> token secret key', encoding="utf-8")
+    _page_files(app_dir / "_internal")
     for name in audit_artifact.EXE_NAMES:
         (app_dir / name).write_bytes(b"")
     original = audit_artifact.embedded_entries
@@ -528,7 +536,7 @@ def test_audit_passes_clean_folder_and_ignores_variable_names(tmp_path):
     finally:
         audit_artifact.embedded_entries = original
     assert findings == []
-    assert stats["files"] == 3
+    assert stats["files"] == 5
 
 
 def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tmp_path, monkeypatch):
@@ -541,9 +549,10 @@ def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tm
     internal = app_dir / "_internal"
     (internal / "frontend").mkdir(parents=True)
     (internal / "frontend" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    _page_files(internal)
     for name in audit_artifact.EXE_NAMES:
         (app_dir / name).write_bytes(b"")
-    cargo = rb"\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-0.25.1\src\err.rs"
+    cargo =rb"\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-0.25.1\src\err.rs"
     # Allowed: upstream Rust wheel build paths (both separator styles) inside .pyd/.dll.
     (internal / "_rust.pyd").write_bytes(b"\x00MZ" + home.encode() + cargo + b"\x00")
     (internal / "_rust_notify.dll").write_bytes(home.encode() + b"/.cargo\\registry\\src\\x.rs")

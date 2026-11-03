@@ -9,6 +9,8 @@ These are static checks on the served HTML/JS. They guard against:
 """
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from backend.db import EVIDENCE_STATUSES
 from backend.main import app
+from tests.frontend_page import with_page_files
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -36,13 +39,24 @@ REQUIRED_HELPERS = [
 ]
 
 
+PAGE_FILE_TYPES = {".css": "text/css", ".js": "text/javascript"}
+
+
+def _fetch_page_file(client: TestClient, path: str) -> str:
+    response = client.get(path)
+    assert response.status_code == 200, path
+    assert response.headers["content-type"].startswith(PAGE_FILE_TYPES[Path(path).suffix]), path
+    return response.text
+
+
 @pytest.fixture(scope="module")
 def served_html() -> str:
+    """The page at GET / with the stylesheet and script it loads, as served, inline."""
     client = TestClient(app, base_url="http://127.0.0.1:8420")
     response = client.get("/")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    return response.text
+    return with_page_files(response.text, lambda path: _fetch_page_file(client, path))
 
 
 def _function_body(source: str, name: str) -> str:
@@ -62,9 +76,41 @@ def _function_body(source: str, name: str) -> str:
 
 
 def test_root_serves_the_intended_frontend(served_html):
-    expected = (FRONTEND_DIR / "index.html").read_bytes()
-    assert served_html.encode("utf-8") == expected
+    response = TestClient(app, base_url="http://127.0.0.1:8420").get("/")
+    assert response.content == (FRONTEND_DIR / "index.html").read_bytes()
     assert "<title>MySQL DBA Validator</title>" in served_html
+
+
+def test_page_loads_its_own_stylesheet_and_script_in_place():
+    page = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    head, body = page.split("</head>")
+    # The appearance is set before first paint (inline), then the stylesheet loads.
+    assert head.index("localStorage.getItem('mdv-theme')") < head.index(
+        '<link rel="stylesheet" href="/static/assets/css/validator.css" />')
+    # The script runs where the inline script ran: after the markup, at the end of
+    # the body, as an ordinary script (no defer, async or module).
+    assert body.count("<script") == 1
+    assert body.rstrip().endswith('<script src="/static/assets/js/validator.js"></script>\n</body>\n\n</html>')
+
+
+def test_page_files_keep_their_types_when_the_system_says_text_plain():
+    # On Windows, Python's mimetypes reads the registry, where some programs register
+    # .js as text/plain; with nosniff a browser would then not run the page's script.
+    code = """
+import mimetypes
+mimetypes.add_type("text/plain", ".js")
+mimetypes.add_type("text/plain", ".css")
+from fastapi.testclient import TestClient
+from backend.main import app
+client = TestClient(app, base_url="http://127.0.0.1:8420")
+print(client.get("/static/assets/js/validator.js").headers["content-type"])
+print(client.get("/static/assets/css/validator.css").headers["content-type"])
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                            cwd=FRONTEND_DIR.parent, timeout=120)
+    assert result.returncode == 0, result.stderr[-2000:]
+    js, css = result.stdout.splitlines()[-2:]
+    assert js.startswith("text/javascript") and css.startswith("text/css"), result.stdout
 
 
 def test_favicon_is_a_local_self_contained_svg(served_html):

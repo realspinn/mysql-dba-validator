@@ -16,8 +16,6 @@ the fake MySQL from test_local_evidence_credentials.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -26,6 +24,7 @@ from backend.db_evidence import _safe_explain_sql
 from backend.main import app
 from backend.parser import parse_sql
 from tests.test_frontend_evidence_rendering import local_fixture
+from tests.frontend_page import page_source
 from tests.test_local_evidence_credentials import (  # noqa: F401  (mysql is a fixture)
     FakeMySQL,
     assert_read_only_boundary,
@@ -37,7 +36,6 @@ from tests.test_local_evidence_credentials import (  # noqa: F401  (mysql is a f
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
 NOT_ANALYSED_CHECK = "Do not execute a statement that the validator could not analyze."
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 
 
 def validate(sql: str) -> dict:
@@ -242,7 +240,7 @@ def test_a_plan_without_a_large_scan_is_not_presented_as_low_execution_risk():
 
 def test_the_page_makes_no_execution_claim_of_its_own():
     # The page shows findings, not the dimensions; it has no execution-risk wording.
-    page = FRONTEND.read_text(encoding="utf-8").lower()
+    page = page_source("index.html").lower()
     assert "low execution risk" not in page and "execution risk" not in page
 
 

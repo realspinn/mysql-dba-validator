@@ -24,9 +24,9 @@ from fastapi.encoders import jsonable_encoder
 
 import backend.db as backend_db
 from tests import test_connector_remote_evidence as remote
+from tests.frontend_page import page_source
 from tests.test_local_evidence_credentials import DECOY, FakeMySQL, explain_row, mysql_error, post
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 CHROME_CANDIDATES = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -349,7 +349,7 @@ def rendered(tmp_path_factory):
     if chrome is None:
         pytest.skip("Chrome is not installed")
     fixtures = build_fixtures()
-    page = FRONTEND.read_text(encoding="utf-8")
+    page = page_source("index.html")
     payload = json.dumps(fixtures).replace("</", "<\\/")
     work = tmp_path_factory.mktemp("render")
     harness = work / "harness.html"
@@ -647,9 +647,9 @@ def test_closing_the_ai_advisor_lasts_until_the_page_is_reloaded(rendered):
     assert out["__states"]["aiClose"] == {"before": 1, "afterClick": 0, "focusAfterClick": True,
                                           "afterNextResult": 0, "storageUnchanged": True, "afterReload": 1}
     # In memory only: the dismissal code never touches browser storage or cookies.
-    page = FRONTEND.read_text(encoding="utf-8")
+    page = page_source("index.html")
     start = page.index("let aiTeaserClosed")
-    code = page[start:page.index("\n\t\t}\n", page.index("function aiAdvisorNote(", start))]
+    code = page[start:page.index("\n}\n", page.index("function aiAdvisorNote(", start))]
     for persistent in ("localStorage", "sessionStorage", "cookie", "indexedDB"):
         assert persistent not in code, persistent
 

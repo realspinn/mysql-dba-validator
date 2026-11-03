@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 import connector.server as connector_server
 from backend.db_evidence import DatabaseEvidence
 from backend.main import app as public_app
+from tests.frontend_page import page_source
 from backend.metadata import MetadataEvidence
 from connector.policy import CompanyTarget, TARGET_MODE_COMPANY
 from connector.registry_store import TargetRegistryStore
@@ -313,7 +314,7 @@ def test_browser_credential_provisioning_endpoint_is_gone():
 
 
 def test_served_page_sends_login_per_request_to_connector_only():
-    html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+    html = page_source("index.html")
     assert "/credentials" not in html
     assert "provisionConnectorCredentials" not in html
     start = html.index("async function validateRemote(")

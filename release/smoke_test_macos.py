@@ -204,6 +204,11 @@ def main() -> int:
         status, headers, body = request("GET", PAGE + "/")
         check("page served", status == 200 and b"targetSelect" in body, status)
         check("page has security headers", "default-src 'self'" in headers.get("content-security-policy", ""))
+        for path, kind in (("/static/assets/css/validator.css", "text/css"),
+                           ("/static/assets/js/validator.js", "text/javascript")):
+            status, headers, _ = request("GET", PAGE + path)
+            check(f"page file {path} served as {kind}",
+                  status == 200 and headers.get("content-type", "").startswith(kind), status)
         status, _, body = request("GET", PAGE + "/api/health")
         health = as_json(body) or {}
         check("API health ok and reports the release version",

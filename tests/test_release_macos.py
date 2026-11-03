@@ -433,6 +433,8 @@ def _audit_bundle(tmp_path: Path, version: str = VERSION) -> Path:
         "MacOS/MySQL-DBA-Validator Console": MACHO,
         "Frameworks/lib-dynload/_ssl.so": MACHO,
         "Resources/frontend/index.html": (ROOT / "frontend" / "index.html").read_bytes(),
+        "Resources/frontend/assets/css/validator.css": (ROOT / "frontend" / "assets" / "css" / "validator.css").read_bytes(),
+        "Resources/frontend/assets/js/validator.js": (ROOT / "frontend" / "assets" / "js" / "validator.js").read_bytes(),
         "Resources/frontend/assets/favicon.svg": (ROOT / "frontend" / "assets" / "favicon.svg").read_bytes(),
         "Resources/mysql-dba-validator.icns": b"icns",
     }.items():
@@ -459,7 +461,7 @@ def embedded(monkeypatch):
 def test_macos_audit_passes_a_clean_bundle(tmp_path, embedded):
     findings, stats = audit_macos.audit(_audit_bundle(tmp_path), VERSION, tmp_path / "no.env", [])
     assert findings == []
-    assert stats["embedded_modules"] == 4 and stats["files"] == 7
+    assert stats["embedded_modules"] == 4 and stats["files"] == 9
 
 
 def test_macos_audit_requires_executable_bits(tmp_path, embedded):
