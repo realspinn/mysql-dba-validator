@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app as public_app
+from tests.frontend_page import page_source
 from connector import launcher
 from connector.policy import CompanyTarget
 from connector.server import (
@@ -33,7 +34,6 @@ OTHER_ALLOWED_ORIGIN = "http://localhost:8420"
 EVIL_ORIGIN = "https://evil.example"
 OLD_TUNNEL_ORIGIN = "https://inf-extends-gardening-retrieval.trycloudflare.com"
 SECRET_PASSWORD = "company-db-password-do-not-leak-91"
-FRONTEND_INDEX = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 
 
 # ---------------------------------------------------------------- fixtures
@@ -400,7 +400,8 @@ def test_no_origin_is_trusted_by_default():
 
 def test_temporary_tunnel_origin_is_not_in_production_code():
     root = Path(__file__).resolve().parent.parent
-    for relative in ("connector/server.py", "connector/launcher.py", "frontend/index.html", "backend/main.py"):
+    for relative in ("connector/server.py", "connector/launcher.py", "frontend/index.html",
+                     "frontend/assets/js/validator.js", "backend/main.py"):
         assert "trycloudflare" not in (root / relative).read_text(encoding="utf-8"), relative
 
 
@@ -470,7 +471,7 @@ def test_cors_preflight_only_allows_configured_origin(client):
 
 
 def test_served_page_does_not_set_origin_header_itself():
-    html = FRONTEND_INDEX.read_text(encoding="utf-8")
+    html = page_source("index.html")
     assert re.search(r"['\"]Origin['\"]\s*:", html) is None
 
 
@@ -576,7 +577,7 @@ def _function_body(source, name):
 
 
 def test_remote_browser_flow_never_falls_back_to_public_api():
-    html = FRONTEND_INDEX.read_text(encoding="utf-8")
+    html = page_source("index.html")
     # B2: host/port matching (findApprovedRemoteTarget) was replaced by target_id selection.
     for name in ("connectorRequest", "pairConnector", "unpairConnector", "ensureConnectorSession",
                  "loadApprovedTargets", "selectTarget", "selectedRemoteTarget", "discoverRemote",
@@ -596,7 +597,7 @@ def test_remote_browser_flow_never_falls_back_to_public_api():
 
 
 def test_pairing_code_and_session_are_never_persisted_or_put_in_urls():
-    html = FRONTEND_INDEX.read_text(encoding="utf-8")
+    html = page_source("index.html")
     for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
                       "URLSearchParams", "location.search", "location.hash", "window.__"):
         assert forbidden not in html, forbidden

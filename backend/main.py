@@ -56,6 +56,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi import FastAPI, HTTPException, Request
 
 import ipaddress
+import mimetypes
 import os
 import posixpath
 import re
@@ -1065,6 +1066,12 @@ def run_evidence(req: EvidenceRequest):
         "message": "Public arbitrary evidence queries are disabled. Use Local validation or the Company connector-only evidence contract.",
     }
 
+
+# The page's styles and scripts are separate files. On Windows, Python takes file
+# types from the registry, where some installed programs register .js as text/plain;
+# with nosniff the browser would then refuse the page's script. Fix the two types.
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("text/javascript", ".js")
 
 app.mount(
     "/static",

@@ -64,6 +64,8 @@ CONSOLE_EXE = "MySQL-DBA-Validator Console"
 EXECUTABLES = (f"Contents/MacOS/{MAIN_EXE}", f"Contents/MacOS/{CONSOLE_EXE}")
 FRONTEND_FILES = {
     "Contents/Resources/frontend/index.html": ROOT / "frontend" / "index.html",
+    "Contents/Resources/frontend/assets/css/validator.css": ROOT / "frontend" / "assets" / "css" / "validator.css",
+    "Contents/Resources/frontend/assets/js/validator.js": ROOT / "frontend" / "assets" / "js" / "validator.js",
     "Contents/Resources/frontend/assets/favicon.svg": ROOT / "frontend" / "assets" / "favicon.svg",
 }
 DMG_ALLOWED_TOP_LEVEL = {APP_NAME, "README.txt", "LICENSE.txt", "Applications"}

@@ -28,6 +28,7 @@ import asyncio
 import importlib
 import json
 import logging
+import re
 import socket
 
 import pymysql
@@ -123,6 +124,14 @@ def test_public_pages_and_assets(public):
             "database connections are available only in the downloaded application."
             ) in notice.replace("<strong>", "").replace("</strong>", "")
     assert public.get("/static/assets/fish-swim.webp").status_code == 200
+    # Each page's own stylesheet and script are under the allowed assets folder.
+    files = re.findall(r'(?:href|src)="(/static/assets/(?:css|js)/[\w-]+\.(?:css|js))"', home.text + demo.text)
+    assert sorted(set(files)) == ["/static/assets/css/home.css", "/static/assets/css/validator.css",
+                                  "/static/assets/js/home.js", "/static/assets/js/validator.js"]
+    for path in files:
+        response = public.get(path)
+        kind = "text/css" if path.endswith(".css") else "text/javascript"
+        assert response.status_code == 200 and response.headers["content-type"].startswith(kind), path
 
 
 @pytest.mark.parametrize("method, path", [

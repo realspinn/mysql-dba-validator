@@ -31,7 +31,7 @@ flowchart LR
 
 | Component | Code | Role |
 | --- | --- | --- |
-| Page | `frontend/index.html` | Single static page, no build step. Sends SQL to the web app, or to the connector for company targets. |
+| Page | `frontend/index.html`, `frontend/assets/css/validator.css`, `frontend/assets/js/validator.js` | Single static page (markup, styles, script), no build step. Sends SQL to the web app, or to the connector for company targets. |
 | Web app | `backend/main.py` (FastAPI) | Serves the page and `/api/*` on `127.0.0.1:8420`. Runs static analysis and local evidence. |
 | Static analysis | `backend/parser.py`, `analyzer.py`, `risk_engine.py`, `evidence.py`, `recommendations.py`, `models.py` | Turns SQL into facts (SQLGlot, MySQL dialect) and applies explicit rules: score, findings, checklist, confidence. Needs no database. |
 | Local evidence | `backend/db.py`, `db_evidence.py`, `metadata.py` | One read-only connection per validation to loopback MySQL, with the login supplied for that validation. |

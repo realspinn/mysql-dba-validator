@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 import backend.main as backend_main
 from backend.main import app
+from tests.frontend_page import page_source
 
 ROOT = Path(__file__).resolve().parent.parent
 HOME = ROOT / "frontend" / "home.html"
@@ -144,18 +145,21 @@ def test_homepage_links_lead_somewhere(preview):
 
 
 def test_footer_credits_the_author():
-    text = " ".join(HOME.read_text(encoding="utf-8").split())
+    text = " ".join(page_source("home.html").split())
     assert "© 2026 Israel Adeleye" in text
     assert f'Built by <a href="{LINKEDIN}">Israel Adeleye' in text
     assert "All rights reserved" not in text  # the project is MIT licensed
 
 
 def test_scripts_store_only_the_theme_and_make_no_requests():
-    text = HOME.read_text(encoding="utf-8")
+    # The theme before first paint stays inline so it runs before anything is drawn;
+    # the rest is the page's own script from this server (script-src 'self').
+    markup = HOME.read_text(encoding="utf-8")
+    assert re.findall(r"<script\b([^>]*)>", markup) == ["", ' src="/static/assets/js/home.js"']
+    text = page_source("home.html")
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", text, re.S)
-    assert len(scripts) == 3  # theme before paint, theme control, the fish
+    assert len(scripts) == 2  # theme before paint; theme control, menus, screenshots and the fish
     for attrs, body in scripts:
-        assert "src" not in attrs  # inline only, allowed by the existing script-src
         for forbidden in ("fetch", "XMLHttpRequest", "sendBeacon", "WebSocket", "eval(", "cookie", "sessionStorage"):
             assert forbidden not in body, forbidden
     keys = set(re.findall(r"localStorage\.\w+\(\s*['\"]?([\w-]+)", text)) | set(re.findall(r"KEY = '([\w-]+)'", text))
@@ -167,7 +171,7 @@ def test_scripts_store_only_the_theme_and_make_no_requests():
 
 
 def test_the_fish_is_decorative_local_and_respects_reduced_motion(preview):
-    text = HOME.read_text(encoding="utf-8")
+    text = page_source("home.html")
     assert '<div class="fish" aria-hidden="true"><i></i></div>' in text  # nothing to focus or follow
     css = " ".join(text.split())
     assert ".fish { display: none; position: fixed;" in css and "pointer-events: none;" in css
@@ -202,13 +206,18 @@ def test_homepage_loads_only_local_assets(preview):
     for src in links.srcs:
         assert src.startswith("/static/assets/"), src
         response = client.get(src)
-        assert response.status_code == 200 and response.headers["content-type"].startswith("image/"), src
-    text = HOME.read_text(encoding="utf-8")
+        kind = "text/javascript" if src.endswith(".js") else "image/"
+        assert response.status_code == 200 and response.headers["content-type"].startswith(kind), src
+    stylesheet = "/static/assets/css/home.css"
+    assert stylesheet in links.hrefs
+    response = client.get(stylesheet)
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/css")
+    text = page_source("home.html")
     assert not re.search(r"@import|url\(\s*['\"]?https?:", text)  # no remote fonts or stylesheets
 
 
 def test_homepage_states_the_demo_limits():
-    text = " ".join(HOME.read_text(encoding="utf-8").split())
+    text = " ".join(page_source("home.html").split())
     assert "sends your SQL to the hosted server" in text
     assert "Do not paste confidential company scripts, credentials or production-sensitive information." in text
     assert "None. Static analysis only." in text
@@ -217,7 +226,7 @@ def test_homepage_states_the_demo_limits():
 def test_download_menu_offers_only_the_current_release_files():
     # Direct links must match the release the README names, with honest labels: an
     # x64 Windows build, and a macOS build for Apple Silicon only that is unsigned.
-    text = " ".join(HOME.read_text(encoding="utf-8").split())
+    text = " ".join(page_source("home.html").split())
     version = _current_release()
     files = _release_files(version)
     downloads = re.findall(rf'href="({REPO}/releases/download/[^"]+)"', text)
@@ -230,7 +239,7 @@ def test_download_menu_offers_only_the_current_release_files():
 
 
 def test_menus_are_native_disclosures_closed_by_escape_or_outside_click():
-    text = HOME.read_text(encoding="utf-8")
+    text = page_source("home.html")
     assert text.count('<details class="menu') == 2  # download and theme
     assert "<summary" in text and "role=\"menu\"" not in text  # links and radios, not an ARIA menu
     css = " ".join(text.split())
@@ -247,7 +256,7 @@ def _webp_size(data: bytes) -> tuple[int, int]:
 
 
 def test_screenshots_are_lossless_and_twice_their_display_size(preview):
-    text = HOME.read_text(encoding="utf-8")
+    text = page_source("home.html")
     for name in ("validator-review.webp", "validator-review-dark.webp"):
         response = client.get(f"/static/assets/{name}")
         assert response.status_code == 200 and response.headers["content-type"] == "image/webp"
@@ -258,7 +267,7 @@ def test_screenshots_are_lossless_and_twice_their_display_size(preview):
 
 
 def test_screenshot_motion_is_optional():
-    css = " ".join(HOME.read_text(encoding="utf-8").split())
+    css = " ".join(page_source("home.html").split())
     frame = css[css.index(".frame { display: block;"):]
     frame = frame[:frame.index("}")]
     assert "animation" not in frame  # still unless scroll-driven animation is supported

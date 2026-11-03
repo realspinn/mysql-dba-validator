@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 EXE_NAME = "MySQL-DBA-Validator.exe"  # windowed app
 CONSOLE_EXE_NAME = "MySQL-DBA-Validator Console.exe"  # console app with the connector
 EXE_NAMES = (EXE_NAME, CONSOLE_EXE_NAME)
-REQUIRED = (*EXE_NAMES, "_internal/frontend/index.html")
+REQUIRED = (*EXE_NAMES, "_internal/frontend/index.html", "_internal/frontend/assets/css/validator.css",
+            "_internal/frontend/assets/js/validator.js")
 
 FORBIDDEN_NAME_PATTERNS = [
     (re.compile(r"(^|/)\.env(\..*)?$", re.I), ".env file"),

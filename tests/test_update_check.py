@@ -27,11 +27,11 @@ from fastapi.testclient import TestClient
 import backend.update_check as update_check
 from backend.main import app
 from backend.version import APP_VERSION
+from tests.frontend_page import page_source
 from tests.test_frontend_evidence_rendering import dump_dom, find_chrome
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
 REAL_OPEN = update_check._open  # the autouse fixture replaces it in every test
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 OWN_PAGE = {"Origin": "http://127.0.0.1:8420", "Host": "127.0.0.1:8420"}
 RELEASE = "https://github.com/realspinn/mysql-dba-validator/releases/tag/"
 CURRENT = tuple(int(part) for part in APP_VERSION.split("."))
@@ -350,16 +350,16 @@ def test_the_content_security_policy_is_unchanged():
 # ---------------------------------------------------------------- the page (source)
 
 def test_the_page_asks_only_its_own_backend_and_writes_text_not_html():
-    page = FRONTEND.read_text(encoding="utf-8")
+    page = page_source("index.html")
     assert "fetch('/api/update-status', { method: 'POST', cache: 'no-store' })" in page
     assert "api.github.com" not in page
     start = page.index("function renderUpdateNotice(")
-    render = page[start:page.index("\n\t\t}\n", start)]
+    render = page[start:page.index("\n}\n", start)]
     assert "innerHTML" not in render and "insertAdjacentHTML" not in render
     assert "data.url !== RELEASE_PAGE + version" in render
     for name in ("readUpdateDismissal", "saveUpdateDismissal", "renderUpdateNotice"):
         start = page.index(f"function {name}(")
-        body = page[start:page.index("\n\t\t}\n", start)]
+        body = page[start:page.index("\n}\n", start)]
         for secret in ("password", "username", "credentials", "sessionToken", "pairing", "CONNECTOR_URL",
                        "state.", "fetch"):
             assert secret not in body, (name, secret)
@@ -461,7 +461,7 @@ def banner(tmp_path_factory):
         pytest.skip("Chrome is not installed")
     work = tmp_path_factory.mktemp("update")
     harness = work / "harness.html"
-    page = FRONTEND.read_text(encoding="utf-8")
+    page = page_source("index.html")
     harness.write_text(page.replace("</body>", HARNESS % json.dumps(UPDATE), 1), encoding="utf-8")
     document, stderr, code = dump_dom(
         [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",

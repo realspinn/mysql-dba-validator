@@ -13,12 +13,11 @@ Contract:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from tests.frontend_page import page_source
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
 
@@ -81,7 +80,7 @@ def test_heartbeat_accepts_no_other_method_and_ignores_any_body(beats):
 
 
 def test_page_sends_a_bodyless_heartbeat_every_minute_and_when_shown_again():
-    html = (Path(__file__).resolve().parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    html = page_source("index.html")
     assert "fetch('/api/heartbeat', { method: 'POST', cache: 'no-store' })" in html
     assert "const HEARTBEAT_MS = 60000;" in html
     assert "setInterval(sendHeartbeat, HEARTBEAT_MS)" in html

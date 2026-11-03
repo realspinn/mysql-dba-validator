@@ -17,7 +17,8 @@ MySQL-DBA-Validator-v<version>-windows-x64/
   LICENSE.txt               if the repository has a LICENSE
   _internal/                Python runtime and dependencies, plus the web page:
     frontend/index.html     the served page
-    frontend/assets/        favicon.svg (the README logo mark is not shipped)
+    frontend/assets/        favicon.svg, css/validator.css and js/validator.js
+                            (the README logo mark is not shipped)
 ```
 
 The executable's Windows icon comes from `release/mysql-dba-validator.ico` and is

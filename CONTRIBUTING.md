@@ -55,8 +55,9 @@ python -m connector --allow-origin http://localhost:8420
 ```
 
 Open `http://localhost:8420`. The frontend is a single static page,
-`frontend/index.html`, served by the backend. It has no build step: edit it and
-reload. The connector's options (`--tls-ca`, `--registry`, operator commands)
+`frontend/index.html`, served by the backend, with its styles in
+`frontend/assets/css/validator.css` and its script in
+`frontend/assets/js/validator.js`. It has no build step: edit them and reload. The connector's options (`--tls-ca`, `--registry`, operator commands)
 are in [connector/README.md](connector/README.md).
 
 You do not need a MySQL server to develop or run the tests. For local evidence

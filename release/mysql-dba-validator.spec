@@ -19,8 +19,10 @@ a = Analysis(
     [str(ROOT / "release" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    # Only the served page and its favicon.
+    # Only the served page, its stylesheet, script and favicon.
     datas=[(str(ROOT / "frontend" / "index.html"), "frontend"),
+           (str(ROOT / "frontend" / "assets" / "css" / "validator.css"), "frontend/assets/css"),
+           (str(ROOT / "frontend" / "assets" / "js" / "validator.js"), "frontend/assets/js"),
            (str(ROOT / "frontend" / "assets" / "favicon.svg"), "frontend/assets")],
     hiddenimports=hiddenimports,
     hookspath=[],
