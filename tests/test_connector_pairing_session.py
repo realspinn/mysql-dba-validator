@@ -601,9 +601,10 @@ def test_pairing_code_and_session_are_never_persisted_or_put_in_urls():
     for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
                       "URLSearchParams", "location.search", "location.hash", "window.__"):
         assert forbidden not in html, forbidden
-    # localStorage holds only the appearance preference and a dismissed update's version
+    # localStorage holds only the appearance preference and update version numbers
     # (see test_frontend_served_page).
-    uses = re.findall(r"localStorage\.(getItem|setItem)\('(mdv-theme|mdv-update-dismissed)'", html)
+    uses = re.findall(r"localStorage\.(getItem|setItem|removeItem)\('(mdv-theme|mdv-update-dismissed|mdv-update-pending)'",
+                      html)
     assert html.count("localStorage") == len(uses)
     pair = _function_body(html, "pairConnector")
     assert "pairingCode.value = ''" in pair  # code is cleared from the input immediately

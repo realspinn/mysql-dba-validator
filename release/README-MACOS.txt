@@ -65,7 +65,9 @@ Update notice: once per start, the web app asks GitHub (api.github.com) for
 the latest official release, and the page shows a dismissible notice with a
 link to its release notes when it is newer. GitHub sees your IP address and
 the installed version; no SQL, login or connection details are sent, and
-nothing is downloaded or installed. This check has not been tested on a Mac;
+the app downloads and installs nothing itself: the notice's Download link
+gets the release file through your browser, and you install it as the first
+time. This check has not been tested on a Mac;
 if the app cannot verify GitHub's certificate, no notice is shown. To turn it
 off, add the line MDV_UPDATE_CHECK=off to a file named .env in the folder
 above (or set it as an environment variable).

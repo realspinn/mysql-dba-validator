@@ -59,9 +59,16 @@ Update notice: once per start, the web app asks GitHub
 (api.github.com) for the latest official release, and the page shows a
 dismissible notice with a link to its release notes when it is newer. GitHub
 sees your IP address and the installed version; no SQL, login or connection
-details are sent, and nothing is downloaded or installed. To turn it off, add
-the line MDV_UPDATE_CHECK=off to a file named .env in the folder above (or
-set it as an environment variable).
+details are sent. To turn it off, add the line MDV_UPDATE_CHECK=off to a file
+named .env in the folder above (or set it as an environment variable).
+
+Updating: choose Update in the notice. The app downloads the new release ZIP
+into the updates folder inside the folder above and verifies it (size, the
+SHA-256 digest published by GitHub, archive contents). It does not install or
+run anything. When it says Ready to install: choose Show in folder, close
+MySQL DBA Validator, right-click the ZIP > Extract All, and open
+MySQL-DBA-Validator.exe in the new folder. Your saved settings stay in the
+folder above. Keep the old folder until the new version works, then delete it.
 
 
 LOCAL MYSQL EVIDENCE

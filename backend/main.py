@@ -47,6 +47,7 @@ from .optimization import advise
 from .parser import has_executable_comment, parse_sql, unsupported_script
 from .version import APP_VERSION
 from .update_check import check_for_update
+from . import update_check, update_download
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -1050,7 +1051,49 @@ def update_status(request: Request):
     """
     if not is_own_loopback_page(request):
         return Response(status_code=403)
-    return check_for_update()
+    result = check_for_update()
+    if update_check.in_app_download_supported():
+        update_download.remove_installed_downloads()
+    return result
+
+
+# Download and verify a newer release in the Windows desktop app (backend.update_download).
+# Same caller rule as the update check; nothing is installed or run. Not in the public
+# demo's route allowlist, so 404 there.
+@app.post("/api/update-download")
+def update_download_start(request: Request):
+    if not is_own_loopback_page(request):
+        return Response(status_code=403)
+    asset = update_check.checked_asset()
+    if asset is None or not update_check.in_app_download_supported():
+        return JSONResponse(status_code=409, content={"error": "update_download_unavailable"})
+    if not update_download.start(asset):
+        return JSONResponse(status_code=409, content={"error": "update_download_running"})
+    return update_download.snapshot()
+
+
+@app.post("/api/update-progress")
+def update_download_progress(request: Request):
+    if not is_own_loopback_page(request):
+        return Response(status_code=403)
+    return update_download.snapshot()
+
+
+@app.post("/api/update-cancel")
+def update_download_cancel(request: Request):
+    if not is_own_loopback_page(request):
+        return Response(status_code=403)
+    update_download.cancel()
+    return update_download.snapshot()
+
+
+@app.post("/api/update-show")
+def update_download_show(request: Request):
+    if not is_own_loopback_page(request):
+        return Response(status_code=403)
+    if not update_check.in_app_download_supported() or not update_download.show_in_folder():
+        return JSONResponse(status_code=409, content={"error": "update_not_ready"})
+    return Response(status_code=204)
 
 
 class EvidenceRequest(PydanticBaseModel):

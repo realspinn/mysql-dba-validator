@@ -111,14 +111,15 @@ def test_a_strictly_newer_release_is_reported_with_its_official_page(github, tag
 
 def test_the_installed_version_is_up_to_date(github):
     github.answer = release("v" + APP_VERSION)
-    assert status().json() == {"state": "up_to_date"}
+    # The installed version is included, so a freshly updated copy can confirm it.
+    assert status().json() == {"state": "up_to_date", "current": APP_VERSION}
 
 
 @pytest.mark.parametrize("tag", ["v0.0.0", "v0.5.9", "v0.5.10"])
 def test_an_older_release_is_up_to_date(github, tag):
     assert tuple(int(p) for p in tag[1:].split(".")) < CURRENT
     github.answer = release(tag)
-    assert status().json() == {"state": "up_to_date"}
+    assert status().json() == {"state": "up_to_date", "current": APP_VERSION}
 
 
 def test_versions_compare_as_numbers_not_text():
@@ -357,7 +358,14 @@ def test_the_page_asks_only_its_own_backend_and_writes_text_not_html():
     render = page[start:page.index("\n}\n", start)]
     assert "innerHTML" not in render and "insertAdjacentHTML" not in render
     assert "data.url !== RELEASE_PAGE + version" in render
-    for name in ("readUpdateDismissal", "saveUpdateDismissal", "renderUpdateNotice"):
+    # The whole update block writes text only and calls only this server's update endpoints.
+    block = page[page.index("// Update notice and download."):page.index("// Initial state")]
+    assert "innerHTML" not in block and "insertAdjacentHTML" not in block and "eval(" not in block
+    assert set(re.findall(r"'(/api/[^']*)'", block)) == {
+        "/api/update-status", "/api/update-download", "/api/update-progress", "/api/update-cancel",
+        "/api/update-show"}
+    assert block.count("fetch(") == 2  # postUpdate and the initial check
+    for name in ("readUpdateDismissal", "saveUpdateDismissal", "renderUpdateNotice", "updateDownloadOffer"):
         start = page.index(f"function {name}(")
         body = page[start:page.index("\n}\n", start)]
         for secret in ("password", "username", "credentials", "sessionToken", "pairing", "CONNECTOR_URL",
@@ -368,44 +376,66 @@ def test_the_page_asks_only_its_own_backend_and_writes_text_not_html():
 # ---------------------------------------------------------------- the page (headless Chrome)
 
 UPDATE = {"state": "update_available", "current": "0.6.0", "version": "0.7.0", "url": RELEASE + "v0.7.0"}
+DOWNLOAD = "https://github.com/realspinn/mysql-dba-validator/releases/download/v0.7.0/"
+WINDOWS = {**UPDATE, "download": {"name": "MySQL-DBA-Validator-v0.7.0-windows-x64.zip", "size": 33361621,
+                                  "platform": "Windows x64", "in_app": True,
+                                  "url": DOWNLOAD + "MySQL-DBA-Validator-v0.7.0-windows-x64.zip"}}
+MACOS = {**UPDATE, "download": {"name": "MySQL-DBA-Validator-v0.7.0-macos-arm64-unsigned.zip", "size": 34068693,
+                                "platform": "macOS Apple Silicon", "in_app": False,
+                                "url": DOWNLOAD + "MySQL-DBA-Validator-v0.7.0-macos-arm64-unsigned.zip"}}
 
+# Drives the real page code with synthetic backend answers: fetch is replaced after the
+# page's own (failing, file://) request, and every call is recorded.
 HARNESS = """
 <script>
-const UPDATE = %s;
+const UPDATE = %s, WINDOWS = %s, MACOS = %s;
 const notice = document.getElementById('updateNotice');
-const shown = () => !notice.hidden && getComputedStyle(notice).display !== 'none';
-const OUT = { initial: shown() };
-const settle = () => new Promise(resolve => setTimeout(resolve, 50));
+const byId = id => document.getElementById(id);
+const shown = node => !node.hidden && getComputedStyle(node).display !== 'none';
+const OUT = { initial: shown(notice) };
+const settle = (ms = 60) => new Promise(resolve => setTimeout(resolve, ms));
+const answers = {}, calls = [];
+const view = () => ({
+  stage: notice.dataset.stage, title: byId('updateTitle').textContent, text: byId('updateNoticeText').textContent,
+  detail: byId('updateNoticeDetail').textContent, live: byId('updateLive').textContent,
+  action: shown(byId('updateAction')) ? byId('updateAction').textContent : null,
+  link: shown(byId('updateDownloadLink')) ? byId('updateDownloadLink').getAttribute('href') : null,
+  secondary: byId('updateNoticeDismiss').textContent,
+  indeterminate: byId('updateProgress').classList.contains('indeterminate'),
+  valuenow: byId('updateProgress').getAttribute('aria-valuenow'),
+  ring: byId('updateRing').style.strokeDashoffset, bar: byId('updateBar').style.transform,
+  track: getComputedStyle(notice.querySelector('.update-track')).display,
+});
 (async () => {
   await settle();  // the page's own request fails on file:// and must leave it hidden
-  OUT.afterFailedRequest = shown();
+  OUT.afterFailedRequest = shown(notice);
+  window.fetch = (path, options) => {
+    calls.push([path, options && options.method, options && 'body' in options]);
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(answers[path] || null) });
+  };
   renderUpdateNotice(UPDATE);
-  OUT.visible = shown();
-  OUT.text = document.getElementById('updateNoticeText').textContent;
-  OUT.href = document.getElementById('updateNoticeLink').getAttribute('href');
-  OUT.rel = document.getElementById('updateNoticeLink').getAttribute('rel');
-  OUT.target = document.getElementById('updateNoticeLink').getAttribute('target');
+  OUT.plain = view();
+  OUT.visible = shown(notice);
+  OUT.href = byId('updateNoticeLink').getAttribute('href');
+  OUT.rel = byId('updateNoticeLink').getAttribute('rel');
+  OUT.target = byId('updateNoticeLink').getAttribute('target');
   OUT.position = getComputedStyle(notice).position;
-  const dismiss = document.getElementById('updateNoticeDismiss');
   OUT.look = {
-    title: notice.querySelector('.update-title').textContent,
-    note: notice.querySelector('.update-note').textContent,
-    iconHidden: notice.querySelector('.update-icon').getAttribute('aria-hidden'),
-    dismissLabel: dismiss.getAttribute('aria-label'), dismissText: dismiss.textContent.trim(),
-    dismissType: dismiss.type, controls: notice.querySelectorAll('a, button, input, select, textarea').length,
+    heading: byId('updateTitle').tagName, labelledBy: notice.getAttribute('aria-labelledby'),
+    meter: byId('updateProgress').getAttribute('role'), meterLabel: byId('updateProgress').getAttribute('aria-label'),
+    live: byId('updateLive').getAttribute('role'),
+    glyphsHidden: [...notice.querySelectorAll('svg')].every(svg => svg.getAttribute('aria-hidden') === 'true'),
     external: notice.querySelectorAll('img, image, use, iframe, [src]').length,
   };
   OUT.themes = {};
   for (const theme of ['light', 'dark']) {
     document.documentElement.setAttribute('data-theme', theme);
-    getComputedStyle(dismiss).color;  // start the button's colour transition, then end it
     document.getAnimations().forEach(animation => animation.finish());
     const colour = node => getComputedStyle(node).color;
     OUT.themes[theme] = {
       surface: getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
-      title: colour(notice.querySelector('.update-title')), text: colour(document.getElementById('updateNoticeText')),
-      note: colour(notice.querySelector('.update-note')), link: colour(document.getElementById('updateNoticeLink')),
-      dismiss: colour(dismiss), dismissBackground: getComputedStyle(dismiss).backgroundColor,
+      title: colour(byId('updateTitle')), text: colour(byId('updateNoticeText')),
+      note: colour(byId('updateNoticeDetail')), link: colour(byId('updateNoticeLink')),
     };
   }
   document.documentElement.removeAttribute('data-theme');
@@ -420,30 +450,92 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 50));
   })) {
     renderUpdateNotice(UPDATE);
     renderUpdateNotice(data);
-    OUT.rejected[name] = shown();
+    OUT.rejected[name] = shown(notice);
   }
   OUT.injected = document.querySelectorAll('#updateNotice img').length;
+  // A download offer that is not exactly the official file is not offered.
+  OUT.badDownloads = {};
+  for (const [name, change] of Object.entries({
+    otherHost: { url: 'https://evil.example/MySQL-DBA-Validator-v0.7.0-windows-x64.zip' },
+    otherName: { name: 'setup.exe' }, otherPlatform: { platform: 'Linux' }, noSize: { size: 0 },
+  })) {
+    renderUpdateNotice({ ...WINDOWS, download: { ...WINDOWS.download, ...change } });
+    OUT.badDownloads[name] = [view().action, view().link, view().detail];
+  }
+  renderUpdateNotice({ ...MACOS, download: { ...MACOS.download, in_app: true } });
+  OUT.macInAppRefused = [view().action, view().link];
+
+  // Windows desktop app: download, verify, ready (the backend's answers are synthetic).
+  answers['/api/update-progress'] = { stage: 'idle' };
+  renderUpdateNotice(WINDOWS);
+  await settle();
+  OUT.offer = view();
+  answers['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 12345678, total: 33361621 };
+  byId('updateAction').click();
+  await settle(600);
+  OUT.downloading = view();
+  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 5000000, total: 0 };
+  await settle(600);
+  OUT.unknownTotal = view();
+  answers['/api/update-progress'] = { stage: 'verifying', version: '0.7.0' };
+  await settle(600);
+  OUT.verifying = view();
+  answers['/api/update-progress'] = { stage: 'ready', version: '0.7.0', file: 'x.zip' };
+  await settle(600);
+  OUT.ready = view();
+  OUT.pendingAfterReady = localStorage.getItem('mdv-update-pending');
+  answers['/api/update-show'] = null;
+  byId('updateAction').click();
+  await settle();
+  followUpdate({ stage: 'failed', version: '0.7.0', error: 'digest',
+                 message: 'The downloaded file did not match the official release, so it was deleted.' });
+  OUT.failed = view();
+  followUpdate({ stage: 'cancelled', version: '0.7.0' });
+  OUT.cancelled = view();
+  followUpdate({ stage: 'ready', version: '9.9.9' });
+  OUT.otherVersionIgnored = view().stage;
+  OUT.calls = calls;
+
+  // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
+  localStorage.removeItem('mdv-update-pending');
+  renderUpdateNotice(MACOS);
+  OUT.mac = view();
+  byId('updateDownloadLink').onclick();
+  OUT.pendingAfterMacLink = localStorage.getItem('mdv-update-pending');
+
+  // The older copy opened again leaves the pending version; the new copy confirms it.
+  renderUpdateNotice({ ...UPDATE, current: '0.6.0' });
+  OUT.oldCopyKeepsPending = localStorage.getItem('mdv-update-pending');
+  renderUpdateNotice({ state: 'up_to_date', current: '0.7.0' });
+  OUT.updated = view();
+  OUT.updatedShown = shown(notice);
+  OUT.pendingAfterConfirm = localStorage.getItem('mdv-update-pending');
+  byId('updateNoticeDismiss').click();
+  OUT.afterClose = shown(notice);
+
   renderUpdateNotice(UPDATE);
-  document.getElementById('updateNoticeDismiss').click();
-  OUT.afterDismiss = shown();
+  byId('updateNoticeDismiss').click();
+  OUT.afterDismiss = shown(notice);
   OUT.stored = localStorage.getItem('mdv-update-dismissed');
   updateDismissedHere = '';  // as after a reload: only storage remembers it
   renderUpdateNotice(UPDATE);
-  OUT.sameVersionAfterReload = shown();
+  OUT.sameVersionAfterReload = shown(notice);
   renderUpdateNotice({ ...UPDATE, version: '0.8.0', url: UPDATE.url.replace('0.7.0', '0.8.0') });
-  OUT.newerVersionShown = shown();
+  OUT.newerVersionShown = shown(notice);
   // Storage unavailable (blocked, private mode): the page still works.
   Storage.prototype.getItem = () => { throw new Error('blocked') };
   Storage.prototype.setItem = () => { throw new Error('blocked') };
+  Storage.prototype.removeItem = () => { throw new Error('blocked') };
   const blocked = { ...UPDATE, version: '0.9.0', url: UPDATE.url.replace('0.7.0', '0.9.0') };
   OUT.blocked = {};
   try {
     renderUpdateNotice(blocked);
-    OUT.blocked.shown = shown();
-    document.getElementById('updateNoticeDismiss').click();
-    OUT.blocked.afterDismiss = shown();
+    OUT.blocked.shown = shown(notice);
+    byId('updateNoticeDismiss').click();
+    OUT.blocked.afterDismiss = shown(notice);
     renderUpdateNotice(blocked);
-    OUT.blocked.samePage = shown();
+    OUT.blocked.samePage = shown(notice);
   } catch (error) { OUT.blocked.error = String(error) }
   const out = document.createElement('pre');
   out.id = 'update-out';
@@ -462,10 +554,11 @@ def banner(tmp_path_factory):
     work = tmp_path_factory.mktemp("update")
     harness = work / "harness.html"
     page = page_source("index.html")
-    harness.write_text(page.replace("</body>", HARNESS % json.dumps(UPDATE), 1), encoding="utf-8")
+    script = HARNESS % (json.dumps(UPDATE), json.dumps(WINDOWS), json.dumps(MACOS))
+    harness.write_text(page.replace("</body>", script, 1), encoding="utf-8")
     document, stderr, code = dump_dom(
         [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-         "--virtual-time-budget=5000", f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()],
+         "--virtual-time-budget=15000", f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()],
         work)
     match = re.search(r'<pre id="update-out">(.*?)</pre>', document, re.S)
     assert match, f"page did not render (exit {code}): {stderr[-500:]}"
@@ -475,14 +568,20 @@ def banner(tmp_path_factory):
 def test_the_banner_is_hidden_until_a_newer_release_is_reported(banner):
     assert banner["initial"] is False and banner["afterFailedRequest"] is False
     assert banner["visible"] is True
-    assert banner["text"] == "MySQL DBA Validator 0.7.0 · you have 0.6.0"
+    assert banner["plain"]["text"] == "MySQL DBA Validator 0.7.0 · you have 0.6.0"
 
 
-def test_the_banner_is_a_compact_notice_with_an_accessible_close_control(banner):
+def test_without_a_file_for_this_computer_the_banner_links_to_the_release_page(banner):
+    plain = banner["plain"]
+    assert plain["title"] == "Update available" and plain["stage"] == "available"
+    assert plain["detail"] == "Download it from the release notes page."
+    assert plain["action"] is None and plain["link"] is None and plain["secondary"] == "Later"
+
+
+def test_the_banner_is_an_accessible_region_with_a_progress_meter(banner):
     assert banner["look"] == {
-        "title": "Update available", "note": "Nothing is downloaded or installed automatically.",
-        "iconHidden": "true", "dismissLabel": "Dismiss update notice", "dismissText": "",
-        "dismissType": "button", "controls": 2, "external": 0,
+        "heading": "H2", "labelledBy": "updateTitle", "meter": "progressbar",
+        "meterLabel": "Update download", "live": "status", "glyphsHidden": True, "external": 0,
     }
 
 
@@ -492,10 +591,8 @@ def test_the_banner_reads_well_in_light_and_dark_themes(banner):
     themes = banner["themes"]
     assert themes["light"]["surface"] != themes["dark"]["surface"]
     for theme, look in themes.items():
-        for part in ("title", "text", "note", "link", "dismiss"):
+        for part in ("title", "text", "note", "link"):
             assert contrast(look[part], look["surface"]) >= 4.5, (theme, part)
-        # The close control is quiet: no filled button background until hovered.
-        assert look["dismissBackground"] == "rgba(0, 0, 0, 0)", theme
     for part in ("title", "text", "link"):
         assert themes["light"][part] != themes["dark"][part], part
 
@@ -510,6 +607,89 @@ def test_the_banner_is_never_shown_for_an_unavailable_or_untrusted_answer(banner
     assert banner["rejected"] == {name: False for name in banner["rejected"]}
     assert len(banner["rejected"]) == 8
     assert banner["injected"] == 0
+
+
+def test_only_the_exact_official_file_is_offered_for_download(banner):
+    for name, (action, link, detail) in banner["badDownloads"].items():
+        assert action is None and link is None, name
+        assert detail == "Download it from the release notes page.", name
+    # Only the Windows desktop app downloads in the app; a macOS file never does.
+    assert banner["macInAppRefused"] == [None, MACOS["download"]["url"]]
+
+
+def test_the_windows_app_offers_an_update_with_platform_and_size(banner):
+    offer = banner["offer"]
+    assert offer["stage"] == "available" and offer["action"] == "Update" and offer["link"] is None
+    assert offer["detail"] == "Windows x64 · 33.4 MB"
+    assert offer["secondary"] == "Later" and offer["track"] == "none"
+
+
+def test_download_progress_shows_the_real_bytes(banner):
+    down = banner["downloading"]
+    assert down["title"] == "Downloading update" and down["stage"] == "downloading"
+    assert down["detail"] == "12.3 MB of 33.4 MB · 37%"
+    assert down["valuenow"] == "37" and down["indeterminate"] is False
+    assert float(down["ring"]) == pytest.approx(100 - 12345678 / 33361621 * 100)
+    assert down["bar"].startswith("scaleX(0.37")
+    assert down["track"] == "block"
+    assert down["action"] is None and down["secondary"] == "Cancel"
+    assert down["live"] == "Downloading update. MySQL DBA Validator 0.7.0"
+
+
+def test_an_unknown_total_shows_no_percentage(banner):
+    unknown = banner["unknownTotal"]
+    assert unknown["indeterminate"] is True and unknown["valuenow"] is None
+    assert unknown["detail"] == "5.0 MB" and "%" not in unknown["detail"]
+
+
+def test_verification_is_a_separate_unmeasured_stage(banner):
+    verify = banner["verifying"]
+    assert verify["title"] == "Verifying download" and verify["stage"] == "verifying"
+    assert verify["indeterminate"] is True and verify["valuenow"] is None
+    assert verify["detail"] == "Checking the size, the SHA-256 digest from GitHub and the archive contents."
+    assert verify["secondary"] == "Cancel" and verify["track"] == "none"
+
+
+def test_ready_to_install_says_what_the_user_does_and_never_claims_installed(banner):
+    ready = banner["ready"]
+    assert ready["title"] == "Ready to install" and ready["text"] == "MySQL DBA Validator 0.7.0 · verified"
+    assert ready["detail"] == ("Close MySQL DBA Validator, extract the ZIP, then open MySQL-DBA-Validator.exe "
+                               "in the new folder. Your saved settings are kept.")
+    assert ready["action"] == "Show in folder" and ready["valuenow"] == "100"
+    assert banner["pendingAfterReady"] == "0.7.0"
+    for stage in ("offer", "downloading", "verifying", "ready", "failed", "cancelled", "mac"):
+        assert "nstalled" not in banner[stage]["title"] + banner[stage]["detail"], stage
+
+
+def test_failure_and_cancellation_offer_a_retry(banner):
+    failed = banner["failed"]
+    assert failed["title"] == "Update not downloaded" and failed["action"] == "Try again"
+    assert failed["detail"] == "The downloaded file did not match the official release, so it was deleted."
+    cancelled = banner["cancelled"]
+    assert cancelled["stage"] == "available" and cancelled["action"] == "Update"
+    assert cancelled["detail"] == "Download cancelled. Nothing was changed."
+    assert banner["otherVersionIgnored"] == "available"
+
+
+def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):
+    paths = {path for path, method, has_body in banner["calls"]}
+    assert paths == {"/api/update-progress", "/api/update-download", "/api/update-show"}
+    assert all(method == "POST" and has_body is False for path, method, has_body in banner["calls"])
+
+
+def test_other_copies_link_to_the_official_file_for_the_browser_to_download(banner):
+    mac = banner["mac"]
+    assert mac["action"] is None and mac["link"] == MACOS["download"]["url"]
+    assert mac["detail"] == "macOS Apple Silicon · 34.1 MB · downloaded by your browser"
+    assert banner["pendingAfterMacLink"] == "0.7.0"
+
+
+def test_the_new_copy_confirms_the_version_it_runs(banner):
+    assert banner["oldCopyKeepsPending"] == "0.7.0"
+    updated = banner["updated"]
+    assert banner["updatedShown"] is True and updated["stage"] == "updated"
+    assert updated["title"] == "Update complete" and updated["text"] == "MySQL DBA Validator 0.7.0 is running."
+    assert banner["pendingAfterConfirm"] is None and banner["afterClose"] is False
 
 
 def test_dismissal_is_remembered_per_version(banner):
