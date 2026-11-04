@@ -70,6 +70,15 @@ MySQL DBA Validator, right-click the ZIP > Extract All, and open
 MySQL-DBA-Validator.exe in the new folder. Your saved settings stay in the
 folder above. Keep the old folder until the new version works, then delete it.
 
+Updating from v0.8.0 or earlier: those versions only link to the release
+page, so install this version by hand once. Download the windows-x64 ZIP from
+the release page, check it against its .sha256 file, and extract it to a new
+folder. Close the old version first: close its console window, or close its
+browser page and wait up to 15 minutes for it to stop (if it is still running,
+this version says so instead of starting). Then open MySQL-DBA-Validator.exe in
+the new folder. Saved targets, the .env file and logs in the folder above, and
+the theme in your browser, are kept; logins were never saved.
+
 
 LOCAL MYSQL EVIDENCE
 --------------------
@@ -140,6 +149,9 @@ TROUBLESHOOTING
 - "port(s) ... already in use": the validator is already running (close its
   page and wait, or close the Console window), or another program uses port
   8420 or 8765.
+- "... is still running, so this copy cannot start yet": another version of
+  the validator (usually the one you updated from) is still running. Close it
+  as the message says, then open this copy again.
 - The page does not open: browse to http://127.0.0.1:8420 yourself.
 - "cannot load target registry": the registry file named in the message could
   not be loaded. The program refuses to start rather than change it. After an

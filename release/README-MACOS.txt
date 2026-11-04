@@ -72,6 +72,15 @@ if the app cannot verify GitHub's certificate, no notice is shown. To turn it
 off, add the line MDV_UPDATE_CHECK=off to a file named .env in the folder
 above (or set it as an environment variable).
 
+Updating (from any version): close the app (close its Terminal window, or
+close its browser page and wait up to 15 minutes for it to stop; if it is
+still running, the new copy says so instead of starting). Download the
+macos-arm64-unsigned ZIP from the release page, check it against its .sha256
+file, and replace the app in Applications with the new one. macOS asks again
+before opening it, as on the first install. Saved targets, the .env file and
+logs in the folder above, and the theme in your browser, are kept; logins were
+never saved.
+
 
 LOCAL MYSQL EVIDENCE
 --------------------
@@ -132,6 +141,9 @@ TROUBLESHOOTING
 - "port ... already in use": the validator is already running (close its page
   and wait, or stop the Console in its Terminal window), or another program
   uses port 8420 or 8765.
+- "... is still running, so this copy cannot start yet": another version of
+  the validator (usually the one you updated from) is still running. Close it
+  as the message says, then open this copy again.
 - The page does not open: browse to http://127.0.0.1:8420 yourself.
 - "cannot load target registry": the registry file named in the message could
   not be loaded. The program refuses to start rather than change it. After an

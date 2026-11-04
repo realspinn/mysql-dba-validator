@@ -141,6 +141,16 @@ def test_the_exact_official_windows_file_is_selected():
                      "platform": "Windows x64", "version": VERSION}
 
 
+def test_the_exact_official_macos_file_is_selected():
+    mac = f"MySQL-DBA-Validator-v{VERSION}-macos-arm64-unsigned.zip"
+    mac_url = URL.replace(NAME, mac)
+    assets = [api_asset(), api_asset(name=mac + ".sha256", browser_download_url=mac_url + ".sha256"),
+              api_asset(name=mac, browser_download_url=mac_url, size=34068693)]
+    found = update_check.platform_asset({"assets": assets}, VERSION, update_check.MACOS)
+    assert found == {"name": mac, "size": 34068693, "sha256": "a" * 64, "url": mac_url,
+                     "platform": "macOS Apple Silicon", "version": VERSION}
+
+
 @pytest.mark.parametrize("changes", [
     {"browser_download_url": "https://evil.example/" + NAME},
     {"browser_download_url": URL.replace("https://", "http://")},
