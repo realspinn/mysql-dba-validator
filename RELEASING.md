@@ -140,6 +140,15 @@ MySQL server. Releases are still built only by the tag workflows below.
    smoke test.
 5. Add release notes that include the verification status, then publish the
    draft.
+   Publish it as a normal release (not a prerelease) marked **Latest**: copies
+   find new versions through GitHub's `releases/latest`, which skips drafts and
+   prereleases. Keep the tag `vX.Y.Z` and the asset names unchanged; v0.7.0 and
+   v0.8.0 recognise only that tag form, and the in-app download only those
+   names. In the first release with the in-app download, tell v0.7.0 and v0.8.0
+   users that they install it by hand once (their notice only links to the
+   release page; see the README files' updating sections). From then on the
+   Windows app's **Update** downloads and verifies new versions, and on macOS
+   the notice's **Download** link gets the release file through the browser.
 
 ## macOS (Apple Silicon)
 

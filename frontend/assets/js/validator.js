@@ -1816,7 +1816,7 @@ sqlInput.addEventListener('keydown', event => {
 });
 
 // Appearance: Light / Dark / System. Only the theme word is stored, under 'mdv-theme';
-// the only other stored value is a dismissed update's version (below).
+// the only other stored values are update versions (below).
 const THEMES = ['light', 'dark', 'system'];
 function applyTheme(choice) {
 	if (choice === 'light' || choice === 'dark') document.documentElement.setAttribute('data-theme', choice);
@@ -1857,14 +1857,27 @@ if (!PUBLIC_DEMO) {
 	});
 }
 
-// Update notice. The backend checks for a newer official release at most once per
-// start (backend/update_check.py); the page only asks its own backend. Shown only
-// for a newer version whose link is the official release page. Dismissal is
-// remembered per version under 'mdv-update-dismissed' (just the version, and only
+// Update notice and download. The backend checks for a newer official release at most
+// once per start (backend/update_check.py); the page only asks its own backend. Shown
+// only for a newer version whose link is the official release page. Dismissal ("Later")
+// is remembered per version under 'mdv-update-dismissed' (just the version, and only
 // when storage is available; otherwise only for this page).
+//
+// The packaged Windows app can download and verify the release ZIP itself
+// (backend/update_download.py); the ring and bar show the bytes actually received.
+// It never installs: once verified, the user extracts the ZIP and opens the new copy.
+// Elsewhere the Download link is the official file, downloaded by the browser. The
+// version being installed is kept under 'mdv-update-pending' so that the new copy can
+// confirm it is running.
 const UPDATE_VERSION = /^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$/;
 const RELEASE_PAGE = 'https://github.com/realspinn/mysql-dba-validator/releases/tag/v';
+const RELEASE_DOWNLOAD = 'https://github.com/realspinn/mysql-dba-validator/releases/download/v';
+const UPDATE_BUILDS = { 'Windows x64': 'windows-x64', 'macOS Apple Silicon': 'macos-arm64-unsigned' };
+const UPDATE_POLL_MS = 400;
 let updateDismissedHere = '';
+let updateOffer = null;
+let updateAnnounced = '';
+let updatePollTimer = 0;
 function readUpdateDismissal() {
 	try {
 		const stored = localStorage.getItem('mdv-update-dismissed');
@@ -1875,8 +1888,173 @@ function saveUpdateDismissal(version) {
 	if (!UPDATE_VERSION.test(version)) return;
 	try { localStorage.setItem('mdv-update-dismissed', version) } catch (_) { }
 }
+function readUpdatePending() {
+	try {
+		const stored = localStorage.getItem('mdv-update-pending');
+		return UPDATE_VERSION.test(stored || '') ? stored : '';
+	} catch (_) { return '' }
+}
+function saveUpdatePending(version) {
+	if (!UPDATE_VERSION.test(version)) return;
+	try { localStorage.setItem('mdv-update-pending', version) } catch (_) { }
+}
+function clearUpdatePending() {
+	try { localStorage.removeItem('mdv-update-pending') } catch (_) { }
+}
+function updateDownloadOffer(download, version) {
+	if (!download || typeof download !== 'object' || !Object.hasOwn(UPDATE_BUILDS, download.platform)) return null;
+	const name = 'MySQL-DBA-Validator-v' + version + '-' + UPDATE_BUILDS[download.platform] + '.zip';
+	if (download.name !== name || download.url !== RELEASE_DOWNLOAD + version + '/' + name
+		|| !Number.isSafeInteger(download.size) || download.size <= 0) return null;
+	return {
+		name, url: download.url, size: download.size, platform: download.platform,
+		inApp: download.in_app === true && download.platform === 'Windows x64',
+	};
+}
+function megabytes(bytes) { return (bytes / 1e6).toFixed(1) + ' MB' }
+// Draws one stage. `progress` is a fraction of real bytes, or null for "not measured".
+function showUpdateStage(stage, texts, progress, actions) {
+	const notice = $('updateNotice');
+	notice.dataset.stage = stage;
+	$('updateTitle').textContent = texts.title;
+	$('updateNoticeText').textContent = texts.text;
+	$('updateNoticeDetail').textContent = texts.detail;
+	const meter = $('updateProgress');
+	meter.classList.toggle('indeterminate', progress === null);
+	if (progress === null) meter.removeAttribute('aria-valuenow');
+	else meter.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
+	const percent = progress === null ? 0 : Math.min(100, Math.max(0, progress * 100));
+	$('updateRing').style.strokeDashoffset = String(100 - percent);
+	$('updateBar').style.transform = 'scaleX(' + percent / 100 + ')';
+	const hadFocus = notice.contains(document.activeElement);
+	const action = $('updateAction');
+	action.hidden = !actions.primary;
+	if (actions.primary) {
+		action.textContent = actions.primary;
+		action.onclick = actions.onPrimary;
+	}
+	const link = $('updateDownloadLink');
+	link.hidden = !actions.link;
+	if (actions.link) {
+		link.href = actions.link;
+		link.onclick = actions.onLink;
+	}
+	const dismiss = $('updateNoticeDismiss');
+	dismiss.textContent = actions.secondary;
+	dismiss.onclick = actions.onSecondary;
+	// Screen readers hear each new stage once, not every byte count.
+	if (updateAnnounced !== stage) {
+		updateAnnounced = stage;
+		$('updateLive').textContent = texts.title + '. ' + texts.text;
+		if (hadFocus) (actions.primary ? action : dismiss).focus();
+	}
+	notice.hidden = false;
+}
+function laterUpdate() {
+	updateDismissedHere = updateOffer.version;
+	saveUpdateDismissal(updateOffer.version);
+	$('updateNotice').hidden = true;
+}
+function postUpdate(path) {
+	return fetch(path, { method: 'POST', cache: 'no-store' })
+		.then(response => response.ok || response.status === 409 ? response.json() : null)
+		.catch(() => null);
+}
+function showUpdateOffer(note) {
+	const offer = updateOffer;
+	const download = offer.download;
+	const text = 'MySQL DBA Validator ' + offer.version + (offer.current ? ' · you have ' + offer.current : '');
+	let detail = 'Download it from the release notes page.';
+	if (download) detail = download.platform + ' · ' + megabytes(download.size)
+		+ (download.inApp ? '' : ' · downloaded by your browser');
+	showUpdateStage('available', { title: 'Update available', text, detail: note || detail }, 0, {
+		primary: download && download.inApp ? 'Update' : '', onPrimary: startUpdateDownload,
+		link: download && !download.inApp ? download.url : '',
+		onLink: () => saveUpdatePending(offer.version),
+		secondary: 'Later', onSecondary: laterUpdate,
+	});
+}
+function startUpdateDownload() {
+	$('updateAction').disabled = true;
+	postUpdate('/api/update-download').then(snapshot => {
+		$('updateAction').disabled = false;
+		if (snapshot && snapshot.error === 'update_download_running') postUpdate('/api/update-progress').then(followUpdate);
+		else if (snapshot && typeof snapshot.stage === 'string') followUpdate(snapshot);
+		else showUpdateOffer('The download could not be started. Try again.');
+	});
+}
+function pollUpdate() {
+	updatePollTimer = setTimeout(() => postUpdate('/api/update-progress').then(followUpdate), UPDATE_POLL_MS);
+}
+// Shows the backend's download state and keeps polling while it is under way: one
+// timer at a time, and a failed poll during a download is tried again.
+function followUpdate(snapshot) {
+	clearTimeout(updatePollTimer);
+	const offer = updateOffer;
+	if (!offer) return;
+	if (!snapshot) {
+		if (['downloading', 'verifying'].includes($('updateNotice').dataset.stage)) pollUpdate();
+		return;
+	}
+	if (snapshot.version !== offer.version) return;
+	const received = Number.isSafeInteger(snapshot.received) ? snapshot.received : 0;
+	const total = Number.isSafeInteger(snapshot.total) && snapshot.total > 0 ? snapshot.total : 0;
+	const text = 'MySQL DBA Validator ' + offer.version;
+	const cancel = { secondary: 'Cancel', onSecondary: () => postUpdate('/api/update-cancel').then(followUpdate) };
+	if (snapshot.stage === 'downloading') {
+		const fraction = total ? Math.min(1, received / total) : null;
+		const detail = total ? megabytes(received) + ' of ' + megabytes(total) + ' · ' + Math.floor(fraction * 100) + '%'
+			: megabytes(received);
+		showUpdateStage('downloading', { title: 'Downloading update', text, detail }, fraction, cancel);
+	} else if (snapshot.stage === 'verifying') {
+		showUpdateStage('verifying', {
+			title: 'Verifying download', text,
+			detail: 'Checking the size, the SHA-256 digest from GitHub and the archive contents.',
+		}, null, cancel);
+	} else if (snapshot.stage === 'ready') {
+		saveUpdatePending(offer.version);
+		showUpdateStage('ready', {
+			title: 'Ready to install', text: text + ' · verified',
+			detail: 'Close MySQL DBA Validator, extract the ZIP, then open MySQL-DBA-Validator.exe in the new folder. Your saved settings are kept.',
+		}, 1, {
+			primary: 'Show in folder', onPrimary: () => postUpdate('/api/update-show'),
+			secondary: 'Later', onSecondary: laterUpdate,
+		});
+	} else if (snapshot.stage === 'failed') {
+		const message = typeof snapshot.message === 'string' && snapshot.message.length <= 200
+			? snapshot.message : 'The update could not be downloaded.';
+		showUpdateStage('failed', { title: 'Update not downloaded', text, detail: message }, 0, {
+			primary: 'Try again', onPrimary: startUpdateDownload, secondary: 'Later', onSecondary: laterUpdate,
+		});
+	} else if (snapshot.stage === 'cancelled') {
+		showUpdateOffer('Download cancelled. Nothing was changed.');
+	}
+	if (snapshot.stage === 'downloading' || snapshot.stage === 'verifying') pollUpdate();
+}
+function versionParts(version) { return version.split('.').map(Number) }
+function versionBefore(a, b) {
+	const [x, y] = [versionParts(a), versionParts(b)];
+	for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i];
+	return false;
+}
+// After an update: the new copy confirms the version it is actually running. The older
+// copy, opened again before the new one is installed, leaves the pending version alone.
+function confirmUpdated(current) {
+	const pending = readUpdatePending();
+	if (!pending || !current || versionBefore(current, pending)) return false;
+	clearUpdatePending();
+	if (pending !== current) return false;
+	updateOffer = { version: current };
+	$('updateNoticeLink').href = RELEASE_PAGE + current;
+	showUpdateStage('updated', {
+		title: 'Update complete', text: 'MySQL DBA Validator ' + current + ' is running.', detail: '',
+	}, 1, { secondary: 'Close', onSecondary: () => { $('updateNotice').hidden = true } });
+	return true;
+}
 function renderUpdateNotice(data) {
 	const notice = $('updateNotice');
+	const current = data && typeof data.current === 'string' && UPDATE_VERSION.test(data.current) ? data.current : '';
+	if (confirmUpdated(current)) return;
 	const version = data && data.state === 'update_available' && typeof data.version === 'string'
 		&& UPDATE_VERSION.test(data.version) ? data.version : '';
 	if (!version || data.url !== RELEASE_PAGE + version || version === updateDismissedHere
@@ -1884,16 +2062,11 @@ function renderUpdateNotice(data) {
 		notice.hidden = true;
 		return;
 	}
-	const current = typeof data.current === 'string' && UPDATE_VERSION.test(data.current) ? data.current : '';
-	$('updateNoticeText').textContent = 'MySQL DBA Validator ' + version
-		+ (current ? ' · you have ' + current : '');
+	updateOffer = { version, current, download: updateDownloadOffer(data.download, version) };
 	$('updateNoticeLink').href = RELEASE_PAGE + version;
-	$('updateNoticeDismiss').onclick = () => {
-		updateDismissedHere = version;
-		saveUpdateDismissal(version);
-		notice.hidden = true;
-	};
-	notice.hidden = false;
+	showUpdateOffer('');
+	// A download started earlier (or in another tab) carries on where it is.
+	if (updateOffer.download && updateOffer.download.inApp) postUpdate('/api/update-progress').then(followUpdate);
 }
 // The online demo is not an installed copy: there is nothing to update.
 if (!PUBLIC_DEMO) fetch('/api/update-status', { method: 'POST', cache: 'no-store' })

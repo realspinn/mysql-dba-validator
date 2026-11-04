@@ -65,10 +65,24 @@ Update notice: once per start, the web app asks GitHub (api.github.com) for
 the latest official release, and the page shows a dismissible notice with a
 link to its release notes when it is newer. GitHub sees your IP address and
 the installed version; no SQL, login or connection details are sent, and
-nothing is downloaded or installed. This check has not been tested on a Mac;
+the app downloads and installs nothing itself: the notice's Download link
+gets the release file through your browser, and you install it as the first
+time. This check has not been tested on a Mac;
 if the app cannot verify GitHub's certificate, no notice is shown. To turn it
 off, add the line MDV_UPDATE_CHECK=off to a file named .env in the folder
 above (or set it as an environment variable).
+
+Updating (from any version): close the app (close its Terminal window, or
+close its browser page and wait up to 15 minutes for it to stop; if it is
+still running, the new copy says so instead of starting). Download the macOS
+file from the release page (the macos-arm64-unsigned ZIP, checked against its
+.sha256 file, or a signed disk image if the release provides one), and replace
+the app in Applications with the new one. macOS asks again before opening an
+unsigned app, as on the first install. Saved targets and the .env file in the
+folder above, and the theme in your browser, are kept. logs/backend.log is
+replaced when the new version starts: copy it first if you need it. The app
+never saves logins; if you put MYSQL_* settings in .env yourself, that file
+stays as it is.
 
 
 LOCAL MYSQL EVIDENCE
@@ -130,6 +144,9 @@ TROUBLESHOOTING
 - "port ... already in use": the validator is already running (close its page
   and wait, or stop the Console in its Terminal window), or another program
   uses port 8420 or 8765.
+- "... is still running, so this copy cannot start yet": another version of
+  the validator (usually the one you updated from) is still running. Close it
+  as the message says, then open this copy again.
 - The page does not open: browse to http://127.0.0.1:8420 yourself.
 - "cannot load target registry": the registry file named in the message could
   not be loaded. The program refuses to start rather than change it. After an

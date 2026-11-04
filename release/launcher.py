@@ -315,15 +315,26 @@ def show_error(message: str, platform: str | None = None) -> None:
         sys.stderr.write(message + "\n")
 
 
-def validator_already_running(timeout: float = 3.0) -> bool:
-    """True when this machine's page is already served by a running validator backend."""
+def running_validator_version(timeout: float = 3.0) -> str | None:
+    """The version of the validator backend already serving this machine's page, or None
+    when none is (every released version reports it in /api/health)."""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(f"{PAGE_URL}/api/health", timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
     except Exception:
-        return False
-    return isinstance(body, dict) and body.get("status") == "ok" and "version" in body
+        return None
+    if isinstance(body, dict) and body.get("status") == "ok" and isinstance(body.get("version"), str):
+        return body["version"]
+    return None
+
+
+def other_version_running_message(running: str) -> str:
+    """After an update the old copy may still be running (the windowed app stops only
+    15 minutes after its page closes): say so instead of opening the old page."""
+    return (f"{APP_TITLE} {running} is still running, so this copy cannot start yet.\n\n"
+            "Close that version first: close its console window, or close its browser page and "
+            f"wait up to 15 minutes for it to stop. Then open this copy again.")
 
 
 def idle_shutdown_seconds(environ: Mapping[str, str]) -> int | None:
@@ -526,11 +537,15 @@ def run_windowed(argv: Sequence[str]) -> int:
     app_data = data_dir()
     app_data.mkdir(parents=True, exist_ok=True)
     if port_in_use(BACKEND_PORT):
-        if validator_already_running():
+        running = running_validator_version()
+        if running == APP_VERSION:
             # Already running (this app or the console version): just show the page.
             if open_browser:
                 webbrowser.open(PAGE_URL)
             return 0
+        if running is not None:
+            show_error(other_version_running_message(running))
+            return 5
         show_error(f"{APP_TITLE} {APP_VERSION} cannot start: port {BACKEND_PORT} on 127.0.0.1 is "
                    "already in use by another program.")
         return 3

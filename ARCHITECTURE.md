@@ -290,8 +290,8 @@ for an empty batch).
   target registry, logs, URLs or browser storage. There is no credential
   vault. (Python cannot guarantee that memory is wiped.)
 - Company logins go only to the connector; the web app refuses them.
-- The page stores only its theme choice and, when an update notice is
-  dismissed, that release's version number in browser storage.
+- The page stores only its theme choice and update version numbers (a
+  dismissed release, and a release being installed) in browser storage.
 - Per-user data lives in `%LOCALAPPDATA%\MySQLDBAValidator\`: the connector's
   target registry (destinations and approval state, never credentials) and
   `logs\backend.log`. The program folder is never written to.
@@ -305,8 +305,20 @@ One fixed `GET` with no body and fixed headers, a 5 s timeout, verified TLS
 and no redirects. A release is reported only when its tag is a strict
 `vX.Y.Z`, numerically newer than `backend/version.py`, and its page is
 exactly the official release page for that tag; every failure is
-`unavailable`, shown as nothing. It never downloads or installs anything.
-`MDV_UPDATE_CHECK=off` disables it. Details: [SECURITY.md](SECURITY.md).
+`unavailable`, shown as nothing. It also picks the release file for this
+computer (Windows x64 or macOS Apple Silicon) when exactly one valid one exists.
+`MDV_UPDATE_CHECK=off` disables it.
+
+In the packaged Windows app, **Update** downloads that ZIP through
+`backend/update_download.py` (`POST /api/update-download`, `-progress`,
+`-cancel`, `-show`): one download at a time into
+`%LOCALAPPDATA%\MySQLDBAValidator\updates\`, real byte progress, then size,
+SHA-256 and archive checks and the Mark of the Web. It never installs or runs
+it: the user extracts the ZIP and opens the new folder, and the new copy
+confirms its version. The running app's files are never replaced, because the
+portable app cannot safely replace itself while running. Elsewhere the page
+links to the release file for the browser to download. Details:
+[SECURITY.md](SECURITY.md).
 
 ## Packaged application
 

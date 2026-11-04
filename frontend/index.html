@@ -60,16 +60,27 @@
 				server for static analysis. Do not paste confidential company scripts, credentials or
 				production-sensitive information. Real database connections are available only in the downloaded
 				application.</p>
-			<div class="update-notice" id="updateNotice" role="status" hidden>
-				<span class="update-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/><circle cx="12" cy="12" r="9"/></svg></span>
-				<div class="update-body">
-					<strong class="update-title">Update available</strong>
-					<span id="updateNoticeText"></span>
-					<span class="update-note">Nothing is downloaded or installed automatically.</span>
+			<section class="update-notice" id="updateNotice" data-stage="available" aria-labelledby="updateTitle" hidden>
+				<div class="update-progress" id="updateProgress" role="progressbar" aria-label="Update download" aria-valuemin="0" aria-valuemax="100">
+					<svg class="update-ring" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><circle class="ring-track" cx="20" cy="20" r="17"/><circle class="ring-value" id="updateRing" cx="20" cy="20" r="17" pathLength="100"/></svg>
+					<svg class="update-glyph glyph-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v10M7.5 11.5 12 16l4.5-4.5M7 19h10"/></svg>
+					<svg class="update-glyph glyph-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 12.5l3.5 3.5 7.5-8"/></svg>
+					<svg class="update-glyph glyph-alert" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7.5v5.5M12 16.5v.5"/></svg>
 				</div>
-				<a id="updateNoticeLink" target="_blank" rel="noopener noreferrer">Release notes</a>
-				<button type="button" class="close-x" id="updateNoticeDismiss" aria-label="Dismiss update notice" title="Dismiss"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-			</div>
+				<div class="update-body">
+					<h2 class="update-title" id="updateTitle">Update available</h2>
+					<span id="updateNoticeText"></span>
+					<span class="update-note" id="updateNoticeDetail"></span>
+					<span class="update-track" aria-hidden="true"><span id="updateBar"></span></span>
+				</div>
+				<div class="update-actions">
+					<a id="updateNoticeLink" class="update-link" target="_blank" rel="noopener noreferrer">Release notes</a>
+					<button type="button" class="secondary" id="updateNoticeDismiss">Later</button>
+					<a id="updateDownloadLink" class="update-button" download hidden>Download</a>
+					<button type="button" id="updateAction" hidden>Update</button>
+				</div>
+				<span class="visually-hidden" id="updateLive" role="status"></span>
+			</section>
 			<section class="view" id="dashboardView" aria-labelledby="dashboardHeading">
 				<header class="view-head">
 					<div>

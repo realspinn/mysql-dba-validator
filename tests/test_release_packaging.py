@@ -214,7 +214,7 @@ def test_console_app_restarts_right_after_previous_runs_stopped(monkeypatch, tmp
 
 def test_windowed_app_restarts_right_after_a_previous_run_stopped(windowed, monkeypatch):
     monkeypatch.setattr(launcher, "BACKEND_PORT", _run_that_closed_its_connections())
-    monkeypatch.setattr(launcher, "validator_already_running", lambda: pytest.fail("port wrongly seen in use"))
+    monkeypatch.setattr(launcher, "running_validator_version", lambda: pytest.fail("port wrongly seen in use"))
     monkeypatch.setattr(launcher.subprocess, "Popen", _start_backend)
     with pytest.raises(_BackendStarted):
         launcher.run_windowed(["--no-browser"])
@@ -350,15 +350,59 @@ def test_windowed_rejects_connector_options_with_a_visible_message(windowed):
 
 def test_windowed_reuses_a_running_validator(windowed, monkeypatch):
     monkeypatch.setattr(launcher, "port_in_use", lambda port: port == launcher.BACKEND_PORT)
-    monkeypatch.setattr(launcher, "validator_already_running", lambda: True)
+    monkeypatch.setattr(launcher, "running_validator_version", lambda: APP_VERSION)
     assert launcher.run_windowed([]) == 0
     assert windowed["browser"] == [launcher.PAGE_URL]
     assert windowed["errors"] == [] and windowed["popen"] == []
 
 
+@pytest.mark.parametrize("running", ["0.6.0", "0.7.0", "99.0.0"])
+def test_windowed_says_when_another_version_is_still_running(windowed, monkeypatch, running):
+    """After an update the old copy can still be serving 127.0.0.1:8420 (the windowed app
+    stops 15 minutes after its page closes). The new copy must not open the old page."""
+    assert running != APP_VERSION
+    monkeypatch.setattr(launcher, "port_in_use", lambda port: port == launcher.BACKEND_PORT)
+    monkeypatch.setattr(launcher, "running_validator_version", lambda: running)
+    assert launcher.run_windowed([]) == 5
+    assert windowed["browser"] == [] and windowed["popen"] == []
+    assert len(windowed["errors"]) == 1
+    message = windowed["errors"][0]
+    assert f"{launcher.APP_TITLE} {running} is still running" in message
+    assert "console window" in message and "15 minutes" in message
+
+
+@pytest.mark.parametrize("body, expected", [
+    (b'{"status": "ok", "version": "0.8.0", "database": {}}', "0.8.0"),  # v0.7.0 / v0.8.0 shape
+    (b'{"status": "ok"}', None),                                          # no version: not ours
+    (b'{"status": "ok", "version": 8}', None),
+    (b'{"status": "down", "version": "0.8.0"}', None),
+    (b"not json", None),
+])
+def test_running_validator_version_reads_the_health_answer(monkeypatch, body, expected):
+    class Answer(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Opener:
+        def open(self, url, timeout):
+            assert url == f"{launcher.PAGE_URL}/api/health"
+            return Answer(body)
+
+    monkeypatch.setattr(launcher.urllib.request, "build_opener", lambda *handlers: Opener())
+    assert launcher.running_validator_version() == expected
+
+
+def test_the_idle_shutdown_in_the_message_matches_the_launcher():
+    assert launcher.DEFAULT_IDLE_SHUTDOWN_SECONDS == 15 * 60
+    assert "15 minutes" in launcher.other_version_running_message("0.8.0")
+
+
 def test_windowed_port_taken_by_another_program_is_a_visible_error(windowed, monkeypatch):
     monkeypatch.setattr(launcher, "port_in_use", lambda port: port == launcher.BACKEND_PORT)
-    monkeypatch.setattr(launcher, "validator_already_running", lambda: False)
+    monkeypatch.setattr(launcher, "running_validator_version", lambda: None)
     assert launcher.run_windowed([]) == 3
     assert len(windowed["errors"]) == 1 and "already in use" in windowed["errors"][0]
     assert windowed["browser"] == [] and windowed["popen"] == []

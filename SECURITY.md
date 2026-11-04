@@ -106,22 +106,42 @@ How the components and request flows fit together is described in
   They are silenced since v0.7.0. The log is replaced each time the app starts
   and can be deleted: `%LOCALAPPDATA%\MySQLDBAValidator\logs\backend.log` on
   Windows, `~/.local/state/MySQLDBAValidator/logs/backend.log` on macOS.
-- **Update check (the only request to the internet).** When the page opens,
+- **Update check and update download (the only requests to the internet).** When the page opens,
   the web app asks GitHub for the latest official release, at most once per
   start: one `GET` with no body to
   `https://api.github.com/repos/realspinn/mysql-dba-validator/releases/latest`,
   over TLS with certificate and host-name verification. It sends no SQL,
   login, host name, schema or other connection details. GitHub sees your IP
   address and a User-Agent naming the installed version
-  (`MySQL-DBA-Validator/<version>`). Nothing is downloaded or installed; a
-  newer release is only shown as a dismissible notice with a link to its
-  official release page. Any failure (offline, timeout, failed TLS
-  verification, rate limit, unexpected answer) shows nothing. Only this
-  server's own loopback page can trigger it (`POST /api/update-status`,
-  checked like the heartbeat), so it does not run when the page is served to
-  other machines. To turn it off, set the environment variable
-  `MDV_UPDATE_CHECK=off` (or add that line to the `.env` file in the data
-  folder, `%LOCALAPPDATA%\MySQLDBAValidator\` on Windows): nothing is sent.
+  (`MySQL-DBA-Validator/<version>`). A newer release is shown as a
+  dismissible notice with a link to its official release page. Any failure
+  (offline, timeout, failed TLS verification, rate limit, unexpected answer)
+  shows nothing. Only this server's own loopback page can trigger it
+  (`POST /api/update-status`, checked like the heartbeat), so it does not run
+  when the page is served to other machines. To turn it off, set the
+  environment variable `MDV_UPDATE_CHECK=off` (or add that line to the `.env`
+  file in the data folder, `%LOCALAPPDATA%\MySQLDBAValidator\` on Windows):
+  nothing is sent, and no update is offered.
+
+  Only when the user chooses **Update**, the packaged Windows app downloads the
+  release ZIP for Windows x64 (`backend/update_download.py`). It fetches only
+  the file the check found: exact name, uploaded state, plausible size, a
+  SHA-256 digest from GitHub's API and the official download address, over
+  verified HTTPS, following redirects only to GitHub's download hosts. It
+  checks the size, the SHA-256 digest and the archive (one release folder, no
+  absolute, drive, backslash or `..` paths, the app inside, intact data), then
+  marks the ZIP as downloaded from the internet (Mark of the Web), so
+  SmartScreen checks the extracted program as after a browser download.
+  Anything that fails is deleted. It **never installs or runs** the download:
+  the user closes the app, extracts the ZIP and opens the new folder. The
+  digest shows the file is the one published on the official release page,
+  not who built it (the app is not code signed). Downloads live only in
+  `%LOCALAPPDATA%\MySQLDBAValidator\updates\` and are removed once that
+  version or a later one runs. The download endpoints
+  (`/api/update-download`, `-progress`, `-cancel`, `-show`) are checked like
+  the update check and are not served by the public demo. On macOS, and when
+  running from source, the notice links to the release file and the browser
+  downloads it, so Gatekeeper checks it as any download.
 
 ## Known limitations
 

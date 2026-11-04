@@ -103,8 +103,16 @@ section). The suite covers, among others:
   failure path (HTTP 403/404/429, offline, timeout, TLS, malformed or
   unexpected JSON, a non-official release page), the exact request, caching,
   the off switch, origin protection, an unchanged CSP, and the banner in real
-  Chrome (skipped if Chrome is not installed). GitHub is never contacted: the
-  network is faked.
+  Chrome (skipped if Chrome is not installed): every download stage drawn
+  from synthetic backend answers. GitHub is never contacted: the network is
+  faked.
+- **Update download:** `test_update_download.py`: the exact release file is
+  chosen (name, state, size, digest, official address, platform), redirects
+  only to GitHub's download hosts over HTTPS, wrong or incomplete sizes,
+  digest mismatch, unsafe or corrupt archives, low disk space, network
+  failures, interruption, cancel and retry, one download at a time, real byte
+  progress, cleanup, the Mark of the Web (Windows only) and the loopback-only
+  endpoints. Synthetic ZIPs in a temporary folder; nothing is installed.
 
 `.github/workflows/ci.yml` runs the suite and `pip check` on GitHub-hosted
 Windows and macOS (Apple Silicon) runners, Python 3.14, for every pull request

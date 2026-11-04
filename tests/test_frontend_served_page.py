@@ -208,17 +208,20 @@ def test_no_hidden_pairing_global_in_served_page(served_html):
 
 def test_browser_storage_holds_only_the_theme_preference(served_html):
     """The appearance toggle may remember Light/Dark/System, and the update notice the
-    version it was dismissed for. Nothing else on the page may touch browser storage: no
-    session token, credentials or connector state."""
+    version it was dismissed for and the version being installed. Nothing else on the
+    page may touch browser storage: no session token, credentials or connector state."""
     uses = re.findall(r"localStorage\.(\w+)\(([^)]*)\)", served_html)
     assert uses, "theme preference is expected to use localStorage"
     assert served_html.count("localStorage") == len(uses)  # no other kind of access
     for method, args in uses:
-        assert method in ("getItem", "setItem"), method
-        assert args.split(",")[0].strip() in ("'mdv-theme'", "'mdv-update-dismissed'"), args
-    # Only saveTheme and saveUpdateDismissal write, and only a checked value.
+        assert method in ("getItem", "setItem", "removeItem"), method
+        assert args.split(",")[0].strip() in ("'mdv-theme'", "'mdv-update-dismissed'",
+                                              "'mdv-update-pending'"), args
+    # Only saveTheme, saveUpdateDismissal and saveUpdatePending write, and only a checked value.
     writes = [args for method, args in uses if method == "setItem"]
-    assert writes == ["'mdv-theme', choice", "'mdv-update-dismissed', version"]
+    assert writes == ["'mdv-theme', choice", "'mdv-update-dismissed', version",
+                      "'mdv-update-pending', version"]
+    assert "if (!UPDATE_VERSION.test(version)) return;" in _function_body(served_html, "saveUpdatePending")
     save = _function_body(served_html, "saveTheme")
     assert "if (!THEMES.includes(choice)) return;" in save
     assert "const THEMES = ['light', 'dark', 'system'];" in served_html
@@ -227,7 +230,8 @@ def test_browser_storage_holds_only_the_theme_preference(served_html):
     assert ("const UPDATE_VERSION = /^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$/;"
             in served_html)
     # The theme and dismissal code never sees credentials, the session or the network.
-    for name in ("saveTheme", "readTheme", "applyTheme", "saveUpdateDismissal", "readUpdateDismissal"):
+    for name in ("saveTheme", "readTheme", "applyTheme", "saveUpdateDismissal", "readUpdateDismissal",
+                 "saveUpdatePending", "readUpdatePending", "clearUpdatePending"):
         body = _function_body(served_html, name)
         for secret in ("password", "username", "credentials", "SessionToken", "sessionToken",
                        "pairing", "fetch", "CONNECTOR_URL", "state."):
