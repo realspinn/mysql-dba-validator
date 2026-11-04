@@ -1877,6 +1877,7 @@ const UPDATE_POLL_MS = 400;
 let updateDismissedHere = '';
 let updateOffer = null;
 let updateAnnounced = '';
+let updatePollTimer = 0;
 function readUpdateDismissal() {
 	try {
 		const stored = localStorage.getItem('mdv-update-dismissed');
@@ -1982,10 +1983,20 @@ function startUpdateDownload() {
 		else showUpdateOffer('The download could not be started. Try again.');
 	});
 }
-// Shows the backend's download state and keeps polling while it is under way.
+function pollUpdate() {
+	updatePollTimer = setTimeout(() => postUpdate('/api/update-progress').then(followUpdate), UPDATE_POLL_MS);
+}
+// Shows the backend's download state and keeps polling while it is under way: one
+// timer at a time, and a failed poll during a download is tried again.
 function followUpdate(snapshot) {
+	clearTimeout(updatePollTimer);
 	const offer = updateOffer;
-	if (!offer || !snapshot || snapshot.version !== offer.version) return;
+	if (!offer) return;
+	if (!snapshot) {
+		if (['downloading', 'verifying'].includes($('updateNotice').dataset.stage)) pollUpdate();
+		return;
+	}
+	if (snapshot.version !== offer.version) return;
 	const received = Number.isSafeInteger(snapshot.received) ? snapshot.received : 0;
 	const total = Number.isSafeInteger(snapshot.total) && snapshot.total > 0 ? snapshot.total : 0;
 	const text = 'MySQL DBA Validator ' + offer.version;
@@ -2018,9 +2029,7 @@ function followUpdate(snapshot) {
 	} else if (snapshot.stage === 'cancelled') {
 		showUpdateOffer('Download cancelled. Nothing was changed.');
 	}
-	if (snapshot.stage === 'downloading' || snapshot.stage === 'verifying') {
-		setTimeout(() => postUpdate('/api/update-progress').then(followUpdate), UPDATE_POLL_MS);
-	}
+	if (snapshot.stage === 'downloading' || snapshot.stage === 'verifying') pollUpdate();
 }
 function versionParts(version) { return version.split('.').map(Number) }
 function versionBefore(a, b) {

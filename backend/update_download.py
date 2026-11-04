@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import ssl
+import stat
 import subprocess
 import threading
 import urllib.parse
@@ -46,6 +47,7 @@ FREE_SPACE_MARGIN_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 20000
 MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
 APP_EXE = "MySQL-DBA-Validator.exe"
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400  # Windows attribute, in the low bits of external_attr
 _OWN_FILE = re.compile(r"MySQL-DBA-Validator-v(\d{1,4})\.(\d{1,4})\.(\d{1,4})-windows-x64\.zip(\.part)?\Z")
 
 IDLE, DOWNLOADING, VERIFYING, READY, FAILED, CANCELLED = (
@@ -188,7 +190,10 @@ def _run(asset: dict) -> None:
         check_archive(part, asset["name"][:-len(".zip")])
         if _cancel.is_set():
             raise _Cancelled()
-        os.replace(part, final)
+        try:
+            os.replace(part, final)
+        except OSError:
+            raise UpdateFailure("storage")
         mark_from_internet(final, asset["url"])
         _set(stage=READY, path=str(final), file=final.name)
     except _Cancelled:
@@ -253,7 +258,9 @@ def _download(asset: dict, directory: Path, part: Path) -> None:
 
 def check_archive(path: Path, top: str) -> None:
     """The ZIP must be the release folder `top` and nothing else: no absolute, drive,
-    backslash or '..' paths, no encryption, a sane size, the app inside, intact data."""
+    backslash or '..' paths, no encryption, only plain files and folders (no symbolic
+    links or reparse points, which extraction could follow out of the folder), a sane
+    size, the app inside, intact data."""
     try:
         with zipfile.ZipFile(path) as archive:
             entries = archive.infolist()
@@ -263,9 +270,12 @@ def check_archive(path: Path, top: str) -> None:
             for entry in entries:
                 name = entry.filename
                 parts = PurePosixPath(name).parts
+                kind = stat.S_IFMT(entry.external_attr >> 16)  # Unix file type, if recorded
                 if ("\\" in name or ":" in name or name.startswith("/") or not parts
                         or parts[0] != top or any(part in ("..", ".") for part in parts)
-                        or entry.flag_bits & 0x1):
+                        or entry.flag_bits & 0x1
+                        or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
+                        or entry.external_attr & FILE_ATTRIBUTE_REPARSE_POINT):
                     raise UpdateFailure("archive")
                 unpacked += entry.file_size
             if unpacked > MAX_UNPACKED_BYTES or f"{top}/{APP_EXE}" not in archive.namelist():

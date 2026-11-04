@@ -13,6 +13,7 @@ import hashlib
 import io
 import os
 import socket
+import stat
 import sys
 import threading
 import time
@@ -269,6 +270,58 @@ def test_an_unsafe_or_wrong_archive_is_refused(isolated, entries):
     update_download.start(asset_for(body))
     state = finish()
     assert state["error"] == "archive" and leftovers(isolated.folder) == []
+
+
+def _with_entry(info: zipfile.ZipInfo, data: bytes = b"target") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"{TOP}/MySQL-DBA-Validator.exe", b"MZ")
+        archive.writestr(info, data)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("kind", ["unix_symlink", "windows_reparse_point"])
+def test_links_inside_the_archive_are_refused(isolated, kind):
+    info = zipfile.ZipInfo(f"{TOP}/_internal/link")
+    if kind == "unix_symlink":
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+    else:
+        info.create_system = 0
+        info.external_attr = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+    body = _with_entry(info, b"../../../Windows")
+    isolated.response = FakeResponse(body)
+    update_download.start(asset_for(body))
+    assert finish()["error"] == "archive"
+    assert leftovers(isolated.folder) == []
+
+
+def test_plain_files_and_folders_from_windows_or_unix_zips_are_accepted(tmp_path):
+    folder = zipfile.ZipInfo(f"{TOP}/_internal/")
+    folder.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
+    unix_file = zipfile.ZipInfo(f"{TOP}/README.txt")
+    unix_file.create_system, unix_file.external_attr = 3, (stat.S_IFREG | 0o644) << 16
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"{TOP}/MySQL-DBA-Validator.exe", b"MZ")
+        archive.writestr(folder, b"")
+        archive.writestr(unix_file, b"text")
+    path = tmp_path / NAME
+    path.write_bytes(buffer.getvalue())
+    update_download.check_archive(path, TOP)  # no exception
+
+
+def test_a_failed_rename_is_a_storage_error(isolated, monkeypatch):
+    body = release_zip()
+    isolated.response = FakeResponse(body)
+
+    def refuse(*args):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(update_download.os, "replace", refuse)
+    update_download.start(asset_for(body))
+    assert finish()["error"] == "storage"
+    assert leftovers(isolated.folder) == []
 
 
 def test_a_corrupt_archive_is_refused(isolated):

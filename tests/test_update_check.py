@@ -436,6 +436,8 @@ const view = () => ({
       surface: getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
       title: colour(byId('updateTitle')), text: colour(byId('updateNoticeText')),
       note: colour(byId('updateNoticeDetail')), link: colour(byId('updateNoticeLink')),
+      dismiss: colour(byId('updateNoticeDismiss')),
+      dismissBackground: getComputedStyle(byId('updateNoticeDismiss')).backgroundColor,
     };
   }
   document.documentElement.removeAttribute('data-theme');
@@ -475,6 +477,20 @@ const view = () => ({
   byId('updateAction').click();
   await settle(600);
   OUT.downloading = view();
+  // Cancel asks the backend; while it still reports downloading, one poll chain remains.
+  answers['/api/update-cancel'] = answers['/api/update-progress'];
+  byId('updateNoticeDismiss').click();
+  const progressCalls = () => calls.filter(([path]) => path === '/api/update-progress').length;
+  let before = progressCalls();
+  await settle(2000);
+  OUT.pollsIn2s = progressCalls() - before;
+  // A failed poll (backend busy or briefly unreachable) is tried again.
+  answers['/api/update-progress'] = null;
+  before = progressCalls();
+  await settle(1000);
+  OUT.pollsWhileFailing = progressCalls() - before;
+  OUT.stageWhileFailing = view().stage;
+  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 12345678, total: 33361621 };
   answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 5000000, total: 0 };
   await settle(600);
   OUT.unknownTotal = view();
@@ -593,7 +609,9 @@ def test_the_banner_reads_well_in_light_and_dark_themes(banner):
     for theme, look in themes.items():
         for part in ("title", "text", "note", "link"):
             assert contrast(look[part], look["surface"]) >= 4.5, (theme, part)
-    for part in ("title", "text", "link"):
+        # Later / Cancel: a secondary button, its label against its own background.
+        assert contrast(look["dismiss"], look["dismissBackground"]) >= 4.5, theme
+    for part in ("title", "text", "link", "dismiss"):
         assert themes["light"][part] != themes["dark"][part], part
 
 
@@ -636,6 +654,13 @@ def test_download_progress_shows_the_real_bytes(banner):
     assert down["live"] == "Downloading update. MySQL DBA Validator 0.7.0"
 
 
+def test_cancel_asks_the_backend_and_polling_never_doubles_or_stalls(banner):
+    # One chain polls every 400 ms: 5 polls in 2 s (two chains would make about 10).
+    assert 4 <= banner["pollsIn2s"] <= 6
+    # A failed poll during a download is retried rather than leaving the ring frozen.
+    assert banner["pollsWhileFailing"] >= 2 and banner["stageWhileFailing"] == "downloading"
+
+
 def test_an_unknown_total_shows_no_percentage(banner):
     unknown = banner["unknownTotal"]
     assert unknown["indeterminate"] is True and unknown["valuenow"] is None
@@ -673,7 +698,7 @@ def test_failure_and_cancellation_offer_a_retry(banner):
 
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):
     paths = {path for path, method, has_body in banner["calls"]}
-    assert paths == {"/api/update-progress", "/api/update-download", "/api/update-show"}
+    assert paths == {"/api/update-progress", "/api/update-download", "/api/update-cancel", "/api/update-show"}
     assert all(method == "POST" and has_body is False for path, method, has_body in banner["calls"])
 
 

@@ -822,13 +822,17 @@ def test_skip_guard_fails_without_a_report_or_without_tests(tmp_path):
     assert check_pytest_skips.main([str(empty), "--platform", "macos"]) == 1
 
 
-def test_only_the_windows_job_object_test_may_skip_on_macos():
+def test_only_windows_only_tests_may_skip_on_macos():
     assert list(MACOS_SKIPS) == [
-        "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes"]
-    # That test exists and really is Windows-only.
+        "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes",
+        "tests.test_update_download::test_the_mark_of_the_web_is_written_and_read_back"]
+    # Those tests exist and really are Windows-only.
     source = (ROOT / "tests" / "test_release_packaging.py").read_text(encoding="utf-8")
     assert re.search(r'@pytest\.mark\.skipif\(os\.name != "nt", reason="Windows Job Object"\)\s+'
                      r"def test_job_object_kills_child_when_launcher_handle_closes\(", source)
+    source = (ROOT / "tests" / "test_update_download.py").read_text(encoding="utf-8")
+    assert re.search(r'@pytest\.mark\.skipif\(sys\.platform != "win32", reason="[^"]+"\)\s+'
+                     r"def test_the_mark_of_the_web_is_written_and_read_back\(", source)
 
 
 # ----------------------------------------------------------------------------- release workflow

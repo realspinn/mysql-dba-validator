@@ -22,6 +22,8 @@ EXPECTED_SKIPS = {
     "macos": {
         "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes":
             "Windows Job Object; macOS uses the parent pipe (tests/test_release_macos.py)",
+        "tests.test_update_download::test_the_mark_of_the_web_is_written_and_read_back":
+            "NTFS alternate data stream; only the Windows app downloads updates itself",
     },
     "windows": {
         "tests.test_release_macos::test_macos_audit_follows_link_chains_physically":
@@ -32,6 +34,8 @@ EXPECTED_SKIPS = {
     "linux": {
         "tests.test_release_packaging::test_job_object_kills_child_when_launcher_handle_closes":
             "Windows Job Object; not used on Linux",
+        "tests.test_update_download::test_the_mark_of_the_web_is_written_and_read_back":
+            "NTFS alternate data stream; only the Windows app downloads updates itself",
     },
 }
 
