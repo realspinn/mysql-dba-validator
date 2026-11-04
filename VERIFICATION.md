@@ -329,6 +329,31 @@ stored-function probes (plan cases 3(b) and 4), and server version detection
 (the validator has none). Linux is a run-from-source check, not a release
 platform.
 
+## Unreleased: v0.9.0 candidate
+
+Branch `release/v0.9.0-prep`, 2026-11-04 (not released), on `b3d64df`:
+`main` after pull request #42 (the update download) plus the version bump to
+0.9.0. Packages built by the release workflows run by hand on the branch
+(`workflow_dispatch`): the draft, upload and publish steps run only for a
+`v*` tag, so they were skipped and no release was created.
+
+| Check | Result | Where |
+| --- | --- | --- |
+| Full suite and `pip check` | 2495 passed, 4 skipped; no broken requirements | Maintainer's Windows 10 machine, Python 3.13.5 |
+| Windows release build | Tests 2497 passed, 2 skipped; audit passed (123 files, 2200 embedded modules); smoke test 57/57; `MySQL-DBA-Validator-v0.9.0-windows-x64.zip`, SHA256 `942dc28d816fabdeb8f11c1409dfbd6dcd6e4f4508112506e20dc992bf49cb0e` | [Run 41910730509](https://github.com/realspinn/mysql-dba-validator/actions/runs/41910730509), Python 3.14 |
+| macOS release build | Tests 2497 passed, 2 skipped; skip check 0 unexpected; audit passed (114 files, expected version 0.9.0); smoke test 51/51; `MySQL-DBA-Validator-v0.9.0-macos-arm64-unsigned.zip`, SHA256 `a4c2870cda081b3d92052beddc39ef998a98b948b00671dc0b2abc2d7dd6a372` | [Run 41910738124](https://github.com/realspinn/mysql-dba-validator/actions/runs/41910738124), Apple Silicon runner |
+| The two zips, downloaded from those runs | Each matches its `.sha256` file (one LF line); CRCs intact; one top-level folder (`MySQL-DBA-Validator-v0.9.0-windows-x64`, `MySQL DBA Validator.app`). The Windows zip contains both executables, `README.txt`, `LICENSE.txt` and the page's `assets/css` and `assets/js` files, and passes the in-app updater's own archive check | Maintainer's machine |
+| Windows zip, repeated locally | Artifact audit passed (pinned PyInstaller 6.22.3 in a separate venv; no local secrets to check); smoke test 57/57 from the extracted zip | Maintainer's machine |
+| Packaged v0.9.0 against the real GitHub API | `/api/health` 0.9.0; `/api/update-status` `up_to_date` (v0.8.0 is the latest release); `/api/update-download` 409 (nothing newer to download); a foreign `Origin` 403. Data folder redirected to a scratch folder | Maintainer's machine |
+| v0.7.0 and v0.8.0 finding v0.9.0 | Each tag's own `update_check.py`, against synthetic metadata: v0.9.0 and v0.10.0 reported, the same and older versions up to date, drafts, prereleases and non-official pages ignored. Each tag's page shows the notice linked to the v0.9.0 release page (headless Chrome) | Maintainer's machine, no network |
+
+Not shown before publication: an older copy finding the real published
+v0.9.0; the in-app download inside a packaged build (it needs a release newer
+than the running copy, and the packaged app has no test hook for a synthetic
+release, by design); the "other version still running" message in a packaged
+build (unit tests only); any real Mac; a screen reader; any MySQL server for
+this candidate.
+
 ## Unreleased: v0.8.0 candidate, local checks
 
 Branch `release/v0.8.0-prep`, 2026-10-29 (not released), on `57e0614`
