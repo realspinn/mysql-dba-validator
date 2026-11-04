@@ -53,17 +53,10 @@ def _home_links() -> _Links:
     return parser
 
 
-def _current_release() -> str:
-    """The release the README names as current, e.g. v0.8.0."""
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    return re.search(r"\*\*Current release: \[(v\d+\.\d+\.\d+)\]", readme).group(1)
-
-
-def _release_files(version: str) -> dict[str, str]:
-    # The two packages each release publishes (RELEASING.md): Windows x64 and an
-    # unsigned macOS build for Apple Silicon only.
-    base = f"{REPO}/releases/download/{version}/MySQL-DBA-Validator-{version}"
-    return {"windows": f"{base}-windows-x64.zip", "macos": f"{base}-macos-arm64-unsigned.zip"}
+# GitHub redirects this to the release marked Latest: never a draft, and a prerelease
+# only if someone marks it Latest by hand. Asset names carry the version, so there is
+# no stable direct file URL; the release page lists both downloads.
+LATEST = f"{REPO}/releases/latest"
 
 
 @pytest.fixture
@@ -126,10 +119,8 @@ def test_preview_keeps_the_host_check_and_security_headers(preview):
 def test_homepage_links_lead_somewhere(preview):
     links = _home_links()
     internal = {"/", "/demo", "/#how-it-works", "#main"}
-    version = _current_release()
     external = {REPO, f"{REPO}/releases", f"{REPO}#readme", f"{REPO}/blob/main/SECURITY.md",
-                f"{REPO}/blob/main/VERIFICATION.md", f"{REPO}/blob/main/LICENSE", LINKEDIN,
-                f"{REPO}/releases/tag/{version}", *_release_files(version).values()}
+                f"{REPO}/blob/main/VERIFICATION.md", f"{REPO}/blob/main/LICENSE", LINKEDIN, LATEST}
     for href in links.hrefs:
         if href.startswith("/static/"):
             assert client.get(href).status_code == 200, href
@@ -223,19 +214,31 @@ def test_homepage_states_the_demo_limits():
     assert "None. Static analysis only." in text
 
 
-def test_download_menu_offers_only_the_current_release_files():
-    # Direct links must match the release the README names, with honest labels: an
-    # x64 Windows build, and a macOS build for Apple Silicon only that is unsigned.
+def _download_menu() -> str:
     text = " ".join(page_source("home.html").split())
-    version = _current_release()
-    files = _release_files(version)
-    downloads = re.findall(rf'href="({REPO}/releases/download/[^"]+)"', text)
-    assert sorted(downloads) == sorted(files.values()), downloads
-    windows = text[text.index(files["windows"]):text.index(files["macos"])]
-    macos = text[text.index(files["macos"]):]
-    assert "<strong>Windows</strong><small>x64 ·" in windows
-    assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · unsigned, not notarized" in macos
-    assert f'href="{REPO}/releases/tag/{version}"' in text  # checksums and release notes
+    start = text.index('<details class="menu download">')
+    return text[start:text.index("</details>", start)]
+
+
+def test_download_menu_follows_the_latest_release():
+    # Windows, macOS and the release-notes line all open the release GitHub marks
+    # Latest, so publishing a release needs no homepage change or redeploy.
+    menu = _download_menu()
+    links = re.findall(r'<a class="(menu-item|menu-foot)" href="([^"]+)"', menu)
+    assert links == [("menu-item", LATEST), ("menu-item", LATEST), ("menu-foot", LATEST)], links
+    # Honest labels: an x64 Windows build, and a macOS build for Apple Silicon only, unsigned.
+    windows, macos = menu.split('<a class="menu-item"')[1:3]
+    assert "<strong>Windows</strong><small>x64 · portable ZIP, no installer</small>" in windows
+    assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · unsigned, not notarized</small>" in macos
+    assert "choose the ZIP for your computer" in menu
+
+
+def test_homepage_names_no_fixed_release():
+    # A pinned version, file or size would go stale at the next release.
+    text = page_source("home.html")
+    assert not re.search(r"\bv\d+\.\d+\.\d+", text), re.search(r"\bv\d+\.\d+\.\d+", text)
+    for pinned in ("/releases/download/", "/releases/tag/", "MySQL-DBA-Validator-v", " MB<"):
+        assert pinned not in text, pinned
 
 
 def test_menus_are_native_disclosures_closed_by_escape_or_outside_click():

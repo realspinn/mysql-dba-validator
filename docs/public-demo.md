@@ -37,6 +37,20 @@ On Render (which sets `RENDER=true` in every service) it also refuses to start u
 
 `MDV_HOMEPAGE_PREVIEW=1` is different: a local routing preview with none of the above.
 
+## Download links and releases
+
+The homepage's download menu opens GitHub's
+`https://github.com/realspinn/mysql-dba-validator/releases/latest`, which GitHub
+redirects to the release marked **Latest** (never a draft or, unless marked Latest by
+hand, a prerelease). Publishing a desktop release therefore updates where visitors go
+without redeploying the demo. The menu opens the release page rather than a file
+because the asset names include the version.
+
+Publishing a release does not redeploy the demo itself; it keeps running the commit
+last deployed. A change to the demo's code still needs CI and a manual deploy of the
+verified commit. The desktop app's update check and download read GitHub's release API
+on the user's machine and are independent of these links.
+
 ## SQL privacy
 
 Submitted SQL is sent to the hosted server and analysed in memory. The application does
