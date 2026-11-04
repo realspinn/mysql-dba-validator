@@ -74,12 +74,15 @@ above (or set it as an environment variable).
 
 Updating (from any version): close the app (close its Terminal window, or
 close its browser page and wait up to 15 minutes for it to stop; if it is
-still running, the new copy says so instead of starting). Download the
-macos-arm64-unsigned ZIP from the release page, check it against its .sha256
-file, and replace the app in Applications with the new one. macOS asks again
-before opening it, as on the first install. Saved targets, the .env file and
-logs in the folder above, and the theme in your browser, are kept; logins were
-never saved.
+still running, the new copy says so instead of starting). Download the macOS
+file from the release page (the macos-arm64-unsigned ZIP, checked against its
+.sha256 file, or a signed disk image if the release provides one), and replace
+the app in Applications with the new one. macOS asks again before opening an
+unsigned app, as on the first install. Saved targets and the .env file in the
+folder above, and the theme in your browser, are kept. logs/backend.log is
+replaced when the new version starts: copy it first if you need it. The app
+never saves logins; if you put MYSQL_* settings in .env yourself, that file
+stays as it is.
 
 
 LOCAL MYSQL EVIDENCE

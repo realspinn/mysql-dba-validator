@@ -76,8 +76,10 @@ the release page, check it against its .sha256 file, and extract it to a new
 folder. Close the old version first: close its console window, or close its
 browser page and wait up to 15 minutes for it to stop (if it is still running,
 this version says so instead of starting). Then open MySQL-DBA-Validator.exe in
-the new folder. Saved targets, the .env file and logs in the folder above, and
-the theme in your browser, are kept; logins were never saved.
+the new folder. Saved targets and the .env file in the folder above, and the
+theme in your browser, are kept. logs\backend.log is replaced when the new
+version starts: copy it first if you need it. The app never saves logins; if
+you put MYSQL_* settings in .env yourself, that file stays as it is.
 
 
 LOCAL MYSQL EVIDENCE
