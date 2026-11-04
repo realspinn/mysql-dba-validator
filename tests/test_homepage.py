@@ -234,6 +234,7 @@ def test_download_menu_follows_the_latest_release():
     assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · signing status in the release notes</small>" in macos
     assert "ZIP" not in macos and "unsigned" not in macos
     assert "choose the file for your computer" in menu
+    assert "unsigned" not in " ".join(page_source("home.html").split())
 
 
 def test_homepage_names_no_fixed_release():
