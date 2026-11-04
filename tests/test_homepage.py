@@ -226,11 +226,14 @@ def test_download_menu_follows_the_latest_release():
     menu = _download_menu()
     links = re.findall(r'<a class="(menu-item|menu-foot)" href="([^"]+)"', menu)
     assert links == [("menu-item", LATEST), ("menu-item", LATEST), ("menu-foot", LATEST)], links
-    # Honest labels: an x64 Windows build, and a macOS build for Apple Silicon only, unsigned.
+    # Honest labels for any future release: Windows is always an x64 ZIP; macOS is
+    # Apple Silicon only, and is an unsigned ZIP or, once signing is enabled, a
+    # notarized DMG (release-macos.yml), so its label names no package or signing.
     windows, macos = menu.split('<a class="menu-item"')[1:3]
     assert "<strong>Windows</strong><small>x64 · portable ZIP, no installer</small>" in windows
-    assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · unsigned, not notarized</small>" in macos
-    assert "choose the ZIP for your computer" in menu
+    assert "<strong>macOS</strong><small>Apple Silicon (M1 or later) only · signing status in the release notes</small>" in macos
+    assert "ZIP" not in macos and "unsigned" not in macos
+    assert "choose the file for your computer" in menu
 
 
 def test_homepage_names_no_fixed_release():

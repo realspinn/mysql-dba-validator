@@ -48,8 +48,9 @@ because the asset names include the version.
 
 Publishing a release does not redeploy the demo itself; it keeps running the commit
 last deployed. A change to the demo's code still needs CI and a manual deploy of the
-verified commit. The desktop app's update check and download read GitHub's release API
-on the user's machine and are independent of these links.
+verified commit. The desktop app's update check reads GitHub's release API on the
+user's machine; the Windows app then downloads the release file itself, and on macOS the
+browser does. Neither uses these links.
 
 ## SQL privacy
 
