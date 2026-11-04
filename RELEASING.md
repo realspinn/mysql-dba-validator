@@ -116,7 +116,10 @@ MySQL server. Releases are still built only by the tag workflows below.
 
 ## Publish
 
-1. Update `APP_VERSION`, then run the tests, build and smoke test.
+1. Update `APP_VERSION`, then run the tests, build and smoke test. The same
+   change moves the README's current release and the homepage download links
+   to the new version; they work only once it is published, so do not deploy
+   the online demo between merging that change and publishing the release.
 2. Tag and push the version, for example `git tag v0.2.0` then
    `git push origin v0.2.0`.
 3. The **Windows portable release** workflow
