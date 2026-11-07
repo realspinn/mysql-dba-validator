@@ -49,7 +49,10 @@ const state = {
 	// Which target/login/session produced the current remote database list. A
 	// database is only sent with a remote validation while all three still match;
 	// the connector re-checks the same binding server-side.
-	discovery: null
+	discovery: null,
+	// The last historical workload result (memory only) and the context it was read
+	// for; dropped when the target, login or database changes.
+	performance: { result: null, key: null, loading: false, seen: null, generation: 0, loadingGeneration: null }
 };
 const pairingCode = $('pairingCode'), pairBtn = $('pairBtn'), unpairBtn = $('unpairBtn');
 const targetSelect = $('targetSelect'), loadTargetsBtn = $('loadTargetsBtn'), reapproveBtn = $('reapproveBtn');
@@ -774,6 +777,7 @@ function updateContext() {
 	$('drawerDot').classList.toggle('on', Boolean(state.selectedDatabase));
 	$('drawerStatus').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only';
 	updateStepper();
+	updatePerformanceContext();
 }
 
 function updateStepper() {
@@ -1744,6 +1748,408 @@ function renderError(message) {
 	renderOverview('failed', null, message);
 }
 
+// ---------------------------------------------------------------- observed performance
+// Historical schema workload: statement families MySQL already recorded in
+// performance_schema.events_statements_summary_by_digest, read only when the DBA asks.
+// Separate from SQL review: nothing here reads or changes a validation result. The
+// online demo has no such view and never calls these routes.
+const PERF_DOCS = 'https://github.com/realspinn/mysql-dba-validator/blob/main/docs/historical-schema-workload.md';
+const perfLoadBtn = $('perfLoadBtn');
+
+// What the snapshot was read for. The password is never part of it.
+function perfContextKey() {
+	const where = state.remoteTarget ? 'remote:' + state.remoteTarget.target_id
+		: 'local:' + state.credentials.host + ':' + state.credentials.port;
+	return [where, state.credentials.username, state.selectedDatabase].join('|');
+}
+
+// Milliseconds from the API (rounded there to 0.001 ms, so microseconds are exact).
+// Null means MySQL recorded no time: never shown as 0.
+function formatDuration(ms) {
+	if (ms == null) return 'Not recorded';
+	if (ms >= 1000) return (ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' s';
+	if (ms >= 1) return ms.toLocaleString(undefined, { maximumFractionDigits: ms >= 100 ? 0 : 1 }) + ' ms';
+	const us = Math.round(ms * 1000);
+	return us >= 1 ? us + ' µs' : 'Under 1 µs';
+}
+
+function exactDuration(ms) {
+	if (ms == null) return 'Not recorded';
+	if (ms === 0) return 'Under 0.001 ms';  // recorded, but below the API's 0.001 ms resolution
+	return ms.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' ms';
+}
+
+function formatCount(value) { return typeof value === 'number' ? value.toLocaleString() : 'n/a' }
+
+// FIRST_SEEN / LAST_SEEN as MySQL returned them (server time, no zone).
+function serverTime(value) {
+	return typeof value === 'string' ? value.replace('T', ' ').replace(/\.\d+$/, '') : 'n/a';
+}
+
+const PERF_STATES = {
+	no_observations: {
+		title: 'No observations recorded',
+		text: db => 'MySQL has no statement families recorded for ' + db + ' since the digest table was last reset or the server restarted. Run the workload you want to inspect, then refresh the snapshot.'
+	},
+	insufficient_privileges: {
+		title: 'Unable to read Performance Schema',
+		text: () => 'Your MySQL account cannot read the statement digest summary for this database. A DBA can grant SELECT on the columns this view reads. That privilege is server-wide: the account can then read normalized statements from every schema, so granting it is a DBA decision. The validator never requests or changes privileges.',
+		docs: 'Required privileges'
+	},
+	performance_schema_disabled: {
+		title: 'Performance Schema is disabled',
+		text: () => 'This server runs with performance_schema off, so MySQL records no statement families. It can only be enabled at server startup. The validator never changes server settings.'
+	},
+	digest_consumer_disabled: {
+		title: 'Statement digests are not being collected',
+		text: () => 'The statements_digest or global_instrumentation consumer is disabled in performance_schema.setup_consumers, so MySQL is not aggregating statement families. The validator never changes instrumentation.'
+	},
+	collection_failed: {
+		title: 'Collection did not complete',
+		text: () => 'The Performance Schema read did not complete, for example because the connection was lost. Nothing more was sent on that connection. Refresh the snapshot to try again.'
+	},
+	unexpected_response: {
+		title: 'Unexpected server response',
+		text: () => 'MySQL returned values that do not match the documented digest summary, so no partial result is shown.'
+	},
+	auth_failed: {
+		title: 'MySQL login failed',
+		text: () => 'Check the username and password in the SQL review connection settings, then refresh the snapshot.',
+		settings: true
+	},
+	unreachable: {
+		title: 'Database connection unavailable',
+		text: () => 'MySQL could not be reached. Check that the server is running and reachable, then refresh the snapshot.'
+	},
+	database_not_found: {
+		title: 'Database not found',
+		text: db => db + ' does not exist or your account cannot see it. Discover databases again in the connection settings.',
+		settings: true
+	}
+};
+
+function settingsButton() {
+	const button = el('button', 'secondary', 'Open connection settings');
+	button.type = 'button';
+	button.addEventListener('click', () => {
+		showView('review');
+		$('connectionDrawer').open = true;
+		(state.remoteTarget ? username : host).focus();
+	});
+	return button;
+}
+
+function docsLink(label) {
+	const link = el('a', 'perf-docs', label);
+	link.href = PERF_DOCS;
+	link.target = '_blank';
+	link.rel = 'noopener noreferrer';
+	return link;
+}
+
+function perfState(title, text, extras, kind) {
+	const box = el('div', 'perf-state' + (kind ? ' ' + kind : ''));
+	box.append(el('strong', '', title), el('p', '', text));
+	if (extras && extras.length) {
+		const actions = el('div', 'perf-state-actions');
+		actions.append(...extras);
+		box.append(actions);
+	}
+	return box;
+}
+
+// Why nothing can be loaded yet, or null when a snapshot can be requested.
+function perfBlocker() {
+	if (state.remoteTarget) {
+		if (!state.selectedDatabase || !discoveryMatches(state.remoteTarget))
+			return 'Historical workload is read for one database. Enter your MySQL login for ' +
+				String(state.remoteTarget.display_name || state.remoteTarget.target_id) +
+				' and discover and select a database in the connection settings.';
+		return null;
+	}
+	if (isRemoteTarget(state.credentials.host))
+		return REMOTE_NOT_AVAILABLE + 'Select an approved connector target in the connection settings.';
+	if (!validConnection() || !state.selectedDatabase)
+		return 'Historical workload is read for one database. Enter your MySQL login and choose a database in the SQL review connection settings.';
+	return null;
+}
+
+function renderPerfIdle() {
+	const blocker = perfBlocker();
+	if (blocker) {
+		$('perfBody').replaceChildren(perfState('Select a database first', blocker, [settingsButton()]));
+		return;
+	}
+	const box = el('div', 'perf-state perf-intro');
+	const list = el('ul', 'perf-facts');
+	[
+		['Historical', 'Counts and recorded time accumulate from when MySQL first saw each statement family. They describe past workload, not the SQL you are reviewing.'],
+		['Fixed queries', 'The validator sends four fixed Performance Schema queries of its own. Submitted SQL is never executed and no risk assessment changes.'],
+		['Permissions', 'Your MySQL account needs SELECT on the digest summary columns. That privilege is server-wide.']
+	].forEach(([term, detail]) => {
+		const item = el('li');
+		item.append(el('b', '', term + '. '), document.createTextNode(detail));
+		list.append(item);
+	});
+	box.append(el('strong', '', 'No snapshot loaded'),
+		el('p', '', 'Load the statement families MySQL has recorded for ' + state.selectedDatabase + ': executions, recorded time and rows examined, ranked by total recorded time.'),
+		list);
+	const actions = el('div', 'perf-state-actions');
+	actions.append(docsLink('What this reads and why'));
+	box.append(actions);
+	$('perfBody').replaceChildren(box);
+}
+
+function familyLabel(family) {
+	return family.digest_text || 'Digest ' + family.digest.slice(0, 12) + ' (no text recorded)';
+}
+
+function detailRow(list, term, value, mono) {
+	list.append(el('dt', '', term));
+	const dd = el('dd', mono ? 'mono' : '', value);
+	list.append(dd);
+	return dd;
+}
+
+function renderFamilyDetail(family) {
+	const pane = $('perfDetail');
+	if (!pane) return;
+	const heading = el('h3', 'details-heading', 'Statement family');
+	heading.id = 'perfDetailHeading';
+	const statement = el('pre', 'perf-sql', familyLabel(family));
+	const list = el('dl', 'perf-detail-list');
+	detailRow(list, 'Digest', family.digest, true);
+	detailRow(list, 'Executions', formatCount(family.executions));
+	detailRow(list, 'Total time', exactDuration(family.total_time_ms));
+	detailRow(list, 'Average time', exactDuration(family.avg_time_ms));
+	detailRow(list, 'Maximum time', exactDuration(family.max_time_ms));
+	detailRow(list, '95th percentile', family.p95_time_ms == null ? 'Not recorded'
+		: exactDuration(family.p95_time_ms) + ' (approximate, a high estimate from MySQL\'s histogram)');
+	detailRow(list, 'Lock time', exactDuration(family.lock_time_ms) + (family.lock_time_ms == null ? '' : ' in total'));
+	detailRow(list, 'Rows examined', formatCount(family.rows_examined));
+	detailRow(list, 'Rows sent', formatCount(family.rows_sent));
+	detailRow(list, 'Rows affected', formatCount(family.rows_affected));
+	detailRow(list, 'Executions without an index', formatCount(family.no_index_used));
+	detailRow(list, 'First seen', serverTime(family.first_seen) + ' (server time)');
+	detailRow(list, 'Last seen', serverTime(family.last_seen) + ' (server time)');
+	const notes = el('ul', 'perf-notes');
+	notes.append(el('li', '', 'Totals cover every execution in this family since it was first seen. They are not a measurement of the SQL in your review.'));
+	if (family.timing === 'not_recorded')
+		notes.append(el('li', '', 'MySQL counted these executions but recorded no time for them, so time values are not shown.'));
+	if (family.digest_text_truncated)
+		notes.append(el('li', '', 'The statement text is shortened to 1024 characters.'));
+	pane.replaceChildren(heading, statement, list, notes);
+}
+
+function selectFamily(rows, index, families) {
+	rows.forEach((row, i) => {
+		row.classList.toggle('selected', i === index);
+		const button = row.querySelector('button');
+		button.setAttribute('aria-pressed', String(i === index));
+	});
+	renderFamilyDetail(families[index]);
+}
+
+function renderPerfSnapshot(data) {
+	const families = data.families;
+	const head = el('div', 'perf-summary');
+	const count = el('h3', 'perf-count', 'Statement families (' + families.length + ')');
+	head.append(count, el('p', 'perf-rank', 'Ranked by total recorded time across all executions of each family. ' +
+		(data.more_families ? 'MySQL recorded more families for this database; only the top ' + data.limit + ' are shown.'
+			: 'These are all the families MySQL recorded for this database.') +
+		' Not a view of all server activity.'));
+	const notes = el('ul', 'perf-notes');
+	if (data.digest_consumer === 'unverified')
+		notes.append(el('li', '', 'Collection state not verified: your account cannot read performance_schema.setup_consumers.'));
+	if (data.overflow_executions > 0)
+		notes.append(el('li', '', formatCount(data.overflow_executions) + ' statements were counted in MySQL\'s catch-all row because the digest table is full, so these families may not be representative.'));
+	if (families.some(family => family.timing === 'not_recorded'))
+		notes.append(el('li', '', 'Some families have no recorded time: MySQL counted their executions without timing them.'));
+	notes.append(el('li', '', 'The validator\'s own connection statements and evidence queries are recorded here too.'));
+
+	const table = el('table', 'data-table perf-table');
+	table.setAttribute('aria-describedby', 'perfRankNote');
+	head.querySelector('.perf-rank').id = 'perfRankNote';
+	const caption = el('caption', 'visually-hidden', 'Statement families for ' + data.schema);
+	const thead = el('thead');
+	const headRow = el('tr');
+	[['Statement family', ''], ['Executions', 'num'], ['Total time', 'num'], ['Average', 'num opt'],
+		['Maximum', 'num opt'], ['Rows examined', 'num opt-phone'], ['Rows sent', 'num opt'], ['Last seen', 'opt']]
+		.forEach(([label, cls]) => { const th = el('th', cls, label); th.scope = 'col'; headRow.append(th); });
+	thead.append(headRow);
+	const tbody = el('tbody');
+	const rows = families.map((family, index) => {
+		const row = el('tr');
+		const first = el('td', 'perf-stmt');
+		const button = el('button', 'perf-row-btn', familyLabel(family));
+		button.type = 'button';
+		button.setAttribute('aria-controls', 'perfDetail');
+		button.addEventListener('click', () => selectFamily(rows, index, families));
+		first.append(button);
+		row.append(first,
+			el('td', 'num', formatCount(family.executions)),
+			el('td', 'num', formatDuration(family.total_time_ms)),
+			el('td', 'num opt', formatDuration(family.avg_time_ms)),
+			el('td', 'num opt', formatDuration(family.max_time_ms)),
+			el('td', 'num opt-phone', formatCount(family.rows_examined)),
+			el('td', 'num opt', formatCount(family.rows_sent)),
+			el('td', 'opt nowrap', serverTime(family.last_seen)));
+		tbody.append(row);
+		return row;
+	});
+	table.append(caption, thead, tbody);
+	const wrap = el('div', 'table-wrap');
+	wrap.append(table);
+	const detail = el('section', 'perf-detail');
+	detail.id = 'perfDetail';
+	detail.setAttribute('aria-labelledby', 'perfDetailHeading');
+	detail.setAttribute('aria-live', 'polite');
+	$('perfBody').replaceChildren(head, notes, wrap, detail);
+	selectFamily(rows, 0, families);
+}
+
+function renderPerfResult(data) {
+	if (data.status === 'available' && data.families.length) {
+		renderPerfSnapshot(data);
+		return;
+	}
+	const known = PERF_STATES[data.status] || PERF_STATES.unexpected_response;
+	const extras = [];
+	if (known.settings) extras.push(settingsButton());
+	if (known.docs) extras.push(docsLink(known.docs));
+	const kind = data.status === 'no_observations' ? '' : 'notice';
+	$('perfBody').replaceChildren(perfState(known.title, known.text(state.selectedDatabase), extras, kind));
+}
+
+function updatePerformanceContext() {
+	if (PUBLIC_DEMO || !$('perfBody')) return;
+	const perf = state.performance;
+	$('perfTarget').textContent = state.remoteTarget
+		? String(state.remoteTarget.display_name || state.remoteTarget.target_id) : 'Local';
+	$('perfDatabase').textContent = state.selectedDatabase || 'None selected';
+	const current = perfContextKey();
+	if (current !== perf.seen) {
+		// Any change of target, login or database, even back to an earlier one, starts
+		// a new generation: a read started before it is discarded when it arrives.
+		perf.seen = current;
+		perf.generation += 1;
+	}
+	if (perf.key !== null && perf.key !== current) {
+		// The target, login or database changed: the last result no longer describes it.
+		perf.result = null;
+		perf.key = null;
+	}
+	if (perf.loading) {
+		// A read from an earlier generation is still in flight: show this context at
+		// once and keep the button disabled until that read settles and is discarded.
+		if (perf.loadingGeneration !== perf.generation) {
+			$('perfObservedAt').textContent = 'Not loaded';
+			$('perfObservedAt').removeAttribute('title');
+			renderPerfIdle();
+			perfLoadBtn.disabled = true;
+		}
+		return;
+	}
+	setPerfButton();
+	if (!perf.result) {
+		$('perfObservedAt').textContent = 'Not loaded';
+		$('perfObservedAt').removeAttribute('title');
+		renderPerfIdle();
+	}
+}
+
+// One action: load, or refresh once a result for this context is on screen.
+function setPerfButton() {
+	const loaded = Boolean(state.performance.result);
+	perfLoadBtn.disabled = Boolean(perfBlocker());
+	perfLoadBtn.textContent = loaded ? 'Refresh snapshot' : 'Load historical workload';
+	perfLoadBtn.className = loaded ? 'secondary' : 'primary';
+}
+
+function observedAtText(iso) {
+	const date = new Date(iso);
+	return Number.isNaN(date.getTime()) ? 'n/a' : date.toLocaleString();
+}
+
+// REMOTE: connector only, for an approved target and a discovered database.
+async function requestObservedPerformance() {
+	if (state.remoteTarget) {
+		const target = selectedRemoteTarget();
+		const login = remoteLogin();
+		if (!discoveryMatches(target))
+			throw new Error('The selected database was not discovered for this target, login and session. Discover again.');
+		const sessionToken = await ensureConnectorSession();
+		return connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/observed-performance', {
+			method: 'POST',
+			headers: connectorHeaders(sessionToken, true),
+			body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })
+		});
+	}
+	const data = await requestJson('/api/diagnostics/observed-performance', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			host: state.credentials.host,
+			port: state.credentials.port,
+			username: state.credentials.username,
+			password: state.credentials.password,
+			database: state.selectedDatabase
+		})
+	});
+	// Refusals before any connection come back as {error_code, message}.
+	if (data && typeof data.error_code === 'string' && typeof data.status !== 'string')
+		throw new Error(errorMessage(data, 'The request was refused.'));
+	return data;
+}
+
+async function loadObservedPerformance() {
+	if (PUBLIC_DEMO || state.performance.loading || perfBlocker()) return;
+	const perf = state.performance;
+	const key = perfContextKey();
+	perf.loading = true;
+	perf.loadingGeneration = perf.generation;
+	perfLoadBtn.disabled = true;
+	perfLoadBtn.setAttribute('aria-busy', 'true');
+	$('perfBody').setAttribute('aria-busy', 'true');
+	$('perfLive').textContent = 'Reading Performance Schema.';
+	if (!perf.result) $('perfBody').replaceChildren(perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.'));
+	let data = null, failure = null;
+	try {
+		data = await requestObservedPerformance();
+		if (!data || typeof data.status !== 'string' || !Array.isArray(data.families))
+			throw new Error('The diagnostic returned an unexpected response.');
+	} catch (error) {
+		failure = error.message || 'The request did not complete.';
+	}
+	perf.loading = false;
+	perfLoadBtn.removeAttribute('aria-busy');
+	$('perfBody').removeAttribute('aria-busy');
+	if (perf.loadingGeneration !== perf.generation) {
+		// The context changed while reading (even if it changed back): discard.
+		updatePerformanceContext();
+		return;
+	}
+	perf.key = key;
+	perf.result = failure ? { failure: failure } : data;
+	setPerfButton();
+	if (failure) {
+		$('perfObservedAt').textContent = 'Not loaded';
+		$('perfObservedAt').removeAttribute('title');
+		$('perfBody').replaceChildren(perfState('Request failed', failure, [], 'notice'));
+		$('perfLive').textContent = 'Request failed.';
+		return;
+	}
+	$('perfObservedAt').textContent = observedAtText(data.observed_at);
+	$('perfObservedAt').title = 'Validator clock, UTC: ' + (data.observed_at || 'n/a');
+	renderPerfResult(data);
+	$('perfLive').textContent = data.status === 'available' && data.families.length
+		? 'Snapshot loaded: ' + data.families.length + ' statement families.'
+		: (PERF_STATES[data.status] || PERF_STATES.unexpected_response).title + '.';
+}
+
+if (PUBLIC_DEMO) document.querySelectorAll('.private-only').forEach(node => node.remove());
+else perfLoadBtn.addEventListener('click', loadObservedPerformance);
+
 // Event listeners
 [host, port, username, password].forEach(input => input.addEventListener('input', syncCredentials));
 // Typing while in Local mode means local work: never switch it to a company target.
@@ -1753,10 +2159,12 @@ function renderError(message) {
 testBtn.addEventListener('click', testConnection);
 discoverBtn.addEventListener('click', discoverDatabases);
 validateBtn.addEventListener('click', validateSql);
-// Two views in one page: the dashboard and the SQL review workspace. Switching is
-// page state only; the current review stays in both.
-const VIEWS = ['dashboard', 'review'];
+// Views in one page: the dashboard, the SQL review workspace and (downloaded
+// application only) observed performance. Switching is page state only; the current
+// review stays in all of them.
+const VIEWS = PUBLIC_DEMO ? ['dashboard', 'review'] : ['dashboard', 'review', 'performance'];
 function showView(name) {
+	if (!VIEWS.includes(name)) return;
 	VIEWS.forEach(view => { $(view + 'View').hidden = view !== name; });
 	document.querySelectorAll('.nav-item').forEach(item => {
 		const active = item.getAttribute('data-view') === name;

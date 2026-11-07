@@ -2839,6 +2839,347 @@ details.reasoning>.layer {
 	}
 }
 
+/* ---------------------------------------------------------------- observed performance */
+/* Historical workload: one snapshot context bar, then a compact table of statement
+   families with the selected family's detail below it. Dense on purpose: it is a
+   data view, so rows are tighter than the review cards. */
+.perf-bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px 24px;
+	align-items: center;
+	justify-content: space-between;
+	padding-bottom: 16px;
+	border-bottom: 1px solid var(--border)
+}
+
+.perf-context {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px 28px;
+	margin: 0;
+	min-width: 0
+}
+
+.perf-context div {
+	min-width: 0
+}
+
+.perf-context dt {
+	color: var(--text-3);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .05em;
+	text-transform: uppercase
+}
+
+.perf-context dd {
+	margin: 3px 0 0;
+	color: var(--text);
+	font-size: 13.5px;
+	font-weight: 550;
+	overflow-wrap: anywhere
+}
+
+.perf-context code,
+.perf-detail .mono {
+	font: 12.5px var(--mono);
+	color: var(--code-text)
+}
+
+#perfBody {
+	margin-top: 18px
+}
+
+#perfBody[aria-busy="true"] {
+	opacity: .6;
+	transition: opacity .15s
+}
+
+.perf-state {
+	padding: 22px 24px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface-2);
+	color: var(--text-2);
+	font-size: 13.5px;
+	line-height: 1.55
+}
+
+.perf-state.notice {
+	border-left: 3px solid var(--warn)
+}
+
+.perf-state strong {
+	display: block;
+	margin-bottom: 4px;
+	color: var(--text);
+	font-size: 15px;
+	font-weight: 650
+}
+
+.perf-state p {
+	max-width: 72ch;
+	margin: 0
+}
+
+.perf-facts {
+	display: grid;
+	gap: 6px;
+	max-width: 80ch;
+	margin: 14px 0 0;
+	padding-left: 18px
+}
+
+.perf-facts b {
+	color: var(--text);
+	font-weight: 600
+}
+
+.perf-state-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px 16px;
+	align-items: center;
+	margin-top: 16px
+}
+
+.perf-docs {
+	color: var(--accent-text);
+	font-size: 13px;
+	font-weight: 600
+}
+
+.perf-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 16px;
+	align-items: baseline
+}
+
+.perf-count {
+	font-size: 15px;
+	font-weight: 650
+}
+
+.perf-rank {
+	color: var(--text-3);
+	font-size: 13px
+}
+
+.perf-notes {
+	display: grid;
+	gap: 4px;
+	margin: 10px 0 14px;
+	padding-left: 18px;
+	color: var(--text-3);
+	font-size: 12.5px;
+	line-height: 1.5
+}
+
+/* Scrolls on its own only if a narrow screen still cannot fit the columns. */
+.table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm)
+}
+
+.data-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px
+}
+
+.data-table th {
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--border-strong);
+	background: var(--surface-2);
+	color: var(--text-3);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .05em;
+	text-align: left;
+	text-transform: uppercase;
+	white-space: nowrap
+}
+
+.data-table td {
+	padding: 7px 12px;
+	border-bottom: 1px solid var(--border);
+	color: var(--text-2);
+	vertical-align: top
+}
+
+.data-table tr:last-child td {
+	border-bottom: 0
+}
+
+.data-table .num {
+	text-align: right;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums
+}
+
+.data-table td.num {
+	color: var(--text)
+}
+
+.data-table .nowrap {
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums
+}
+
+.data-table tbody tr:hover td {
+	background: var(--surface-2)
+}
+
+.data-table tbody tr.selected td {
+	background: var(--accent-soft)
+}
+
+.data-table tbody tr.selected td:first-child {
+	box-shadow: inset 3px 0 0 var(--accent)
+}
+
+.perf-stmt {
+	width: 46%;
+	max-width: 0
+}
+
+/* The family's text is the row's control: a full-width text button, not a link. */
+button.perf-row-btn {
+	display: -webkit-box;
+	width: 100%;
+	height: auto;
+	padding: 0;
+	overflow: hidden;
+	border: 0;
+	background: none;
+	color: var(--text);
+	font: 12.5px/1.5 var(--mono);
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2
+}
+
+button.perf-row-btn:hover:not(:disabled) {
+	border: 0;
+	background: none;
+	color: var(--accent-text);
+	text-decoration: underline
+}
+
+.perf-detail {
+	margin-top: 18px;
+	padding: 18px 20px 20px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface)
+}
+
+.perf-sql {
+	margin: 0 0 16px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--code-bg);
+	color: var(--code-text);
+	font: 12.5px/1.6 var(--mono);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere
+}
+
+.perf-detail-list {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 7px 18px;
+	margin: 0;
+	font-size: 13px
+}
+
+.perf-detail-list dt {
+	color: var(--text-3);
+	font-weight: 600
+}
+
+.perf-detail-list dd {
+	margin: 0;
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere
+}
+
+.perf-detail .perf-notes {
+	margin-bottom: 0;
+	margin-top: 16px
+}
+
+/* Narrower main areas: the table keeps family, executions, total time and rows
+   examined; average, maximum, rows sent and last seen stay in the family's detail. */
+@media (max-width: 1180px) {
+	.data-table .opt {
+		display: none
+	}
+
+	.perf-stmt {
+		width: auto
+	}
+}
+
+/* A grid item grows to its content's minimum width unless told otherwise; without
+   this, a wide table widened main instead of scrolling inside .table-wrap. */
+.shell>main {
+	min-width: 0
+}
+
+/* Three views: the nav row wraps instead of widening the page. */
+@media (max-width: 960px) {
+	.nav {
+		flex-wrap: wrap
+	}
+}
+
+@media (max-width: 720px) {
+	.data-table th {
+		white-space: normal
+	}
+
+	.data-table th,
+	.data-table td {
+		padding-left: 8px;
+		padding-right: 8px
+	}
+
+	.perf-detail {
+		padding: 16px
+	}
+
+	.perf-detail-list {
+		grid-template-columns: 1fr;
+		gap: 2px
+	}
+
+	.perf-detail-list dd {
+		margin-bottom: 8px
+	}
+}
+
+/* Phones: family, executions and total time; rows examined is in the detail too. */
+@media (max-width: 480px) {
+	.data-table .opt-phone {
+		display: none
+	}
+}
+
+/* The online demo connects to no database: no diagnostics view or control at all
+   (validator.js also removes them from the page). */
+html[data-public-demo] .private-only {
+	display: none !important
+}
+
 /* Online demo only (html[data-public-demo], set by the server): the SQL privacy
    notice is shown, and the connection, connector and database controls are not. */
 .public-notice {
