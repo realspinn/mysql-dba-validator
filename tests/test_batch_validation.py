@@ -12,7 +12,8 @@ import pytest
 import sqlglot
 from fastapi.testclient import TestClient
 
-from backend.main import MAX_STATEMENTS, app
+from backend.main import app
+from backend.validation_results import MAX_STATEMENTS
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
 
