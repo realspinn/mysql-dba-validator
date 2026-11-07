@@ -110,6 +110,7 @@ BROWSER_SESSION_ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/databases$")),
     ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/validate$")),
     ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/observed-performance$")),
+    ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/lock-waits$")),
     # A request only reaches the console; approval needs the code shown there.
     ("POST", re.compile(r"^/company/target-requests$")),
     ("POST", re.compile(r"^/company/target-requests/confirm$")),
@@ -256,7 +257,7 @@ class CompanyDiscoveryRequest(CompanyLoginFields):
     pass
 
 
-class CompanyObservedPerformanceRequest(CompanyLoginFields):
+class CompanyDiagnosticRequest(CompanyLoginFields):
     """The per-request login and a discovered database. No SQL or query of any kind."""
     database: str = Field(..., min_length=1, max_length=64)
 
@@ -2496,22 +2497,20 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
                 except Exception:
                     pass
 
-    @app.post("/company/targets/{target_id}/observed-performance")
-    async def company_observed_performance_endpoint(request: Request, target_id: str):
-        """Historical schema workload for an approved company target (optional diagnostic).
+    async def _company_diagnostic(request: Request, target_id: str, name: str, collect):
+        """Run one optional diagnostic collector for an approved company target.
 
         Same gates as /validate (origin, session, approved target, database scope,
-        DNS and IP identity, TLS, read-only session) and no SQL in the request.
+        DNS and IP identity, TLS, read-only session) and no SQL in the request. The
+        collector sends only its own fixed queries.
         """
         session_token = _request_session(request)
-        body = await _read_bounded_json(
-            request, runtime.max_payload_bytes, "invalid_observed_performance_request")
+        body = await _read_bounded_json(request, runtime.max_payload_bytes, f"invalid_{name}_request")
         try:
-            payload = CompanyObservedPerformanceRequest.model_validate(body)
+            payload = CompanyDiagnosticRequest.model_validate(body)
         except ValidationError:
             raise HTTPException(status_code=400, detail=_safe_json_error(
-                "invalid_observed_performance_request", status_code=400,
-                error_code="invalid_observed_performance_request"))
+                f"invalid_{name}_request", status_code=400, error_code=f"invalid_{name}_request"))
 
         target = runtime.company_targets.get(target_id)
         if target is None:
@@ -2531,7 +2530,6 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=_safe_json_error(
                 str(exc), status_code=409, error_code=str(exc))) from exc
 
-        from backend.observed_performance import collect_observed_performance
         connection = None
         try:
             destination = runtime.resolve_and_validate_approved_company_target(target_id)
@@ -2546,20 +2544,33 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
                 tls_ca_path=runtime.company_tls_ca_path,
             )
             connection = runtime.require_read_only_session(connection)
-            return collect_observed_performance(connection, payload.database)
+            return collect(connection, payload.database)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=_safe_json_error(
                 str(exc), status_code=400, error_code=str(exc))) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=_safe_json_error(
-                "observed_performance_failed", status_code=500,
-                error_code="observed_performance_failed")) from exc
+                f"{name}_failed", status_code=500, error_code=f"{name}_failed")) from exc
         finally:
             if connection is not None:
                 try:
                     connection.close()
                 except Exception:
                     pass
+
+    @app.post("/company/targets/{target_id}/observed-performance")
+    async def company_observed_performance_endpoint(request: Request, target_id: str):
+        """Historical schema workload for an approved company target (optional diagnostic)."""
+        from backend import observed_performance
+        return await _company_diagnostic(request, target_id, "observed_performance",
+                                         lambda conn, db: observed_performance.collect_observed_performance(conn, db))
+
+    @app.post("/company/targets/{target_id}/lock-waits")
+    async def company_lock_waits_endpoint(request: Request, target_id: str):
+        """A snapshot of InnoDB lock waits for an approved company target (optional diagnostic)."""
+        from backend import lock_diagnostics
+        return await _company_diagnostic(request, target_id, "lock_waits",
+                                         lambda conn, db: lock_diagnostics.collect_lock_waits(conn, db))
 
     @app.post("/company/targets/{target_id}/databases")
     async def discover_company_databases_endpoint(request: Request, target_id: str):
