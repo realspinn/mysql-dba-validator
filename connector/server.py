@@ -109,6 +109,7 @@ BROWSER_SESSION_ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("GET", re.compile(r"^/company/targets$")),
     ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/databases$")),
     ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/validate$")),
+    ("POST", re.compile(r"^/company/targets/" + _TARGET_ID_SEGMENT + r"/observed-performance$")),
     # A request only reaches the console; approval needs the code shown there.
     ("POST", re.compile(r"^/company/target-requests$")),
     ("POST", re.compile(r"^/company/target-requests/confirm$")),
@@ -253,6 +254,11 @@ class CompanyConnectionRequest(CompanyLoginFields):
 
 class CompanyDiscoveryRequest(CompanyLoginFields):
     pass
+
+
+class CompanyObservedPerformanceRequest(CompanyLoginFields):
+    """The per-request login and a discovered database. No SQL or query of any kind."""
+    database: str = Field(..., min_length=1, max_length=64)
 
 
 class CompanyExplainRequest(CompanyLoginFields):
@@ -2483,6 +2489,71 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=_safe_json_error(
                 "database_validation_failed", status_code=500, error_code="database_validation_failed")) from exc
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+    @app.post("/company/targets/{target_id}/observed-performance")
+    async def company_observed_performance_endpoint(request: Request, target_id: str):
+        """Historical schema workload for an approved company target (optional diagnostic).
+
+        Same gates as /validate (origin, session, approved target, database scope,
+        DNS and IP identity, TLS, read-only session) and no SQL in the request.
+        """
+        session_token = _request_session(request)
+        body = await _read_bounded_json(
+            request, runtime.max_payload_bytes, "invalid_observed_performance_request")
+        try:
+            payload = CompanyObservedPerformanceRequest.model_validate(body)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail=_safe_json_error(
+                "invalid_observed_performance_request", status_code=400,
+                error_code="invalid_observed_performance_request"))
+
+        target = runtime.company_targets.get(target_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail=_safe_json_error(
+                "unknown_company_target", status_code=404, error_code="unknown_company_target"))
+        if not runtime.is_company_target_approved(target_id):
+            raise HTTPException(status_code=409, detail=_safe_json_error(
+                "company_target_not_approved", status_code=409, error_code="company_target_not_approved"))
+        if not validate_database_identifier(payload.database):
+            raise HTTPException(status_code=400, detail=_safe_json_error(
+                "invalid_database", status_code=400, error_code="invalid_database"))
+        try:
+            runtime.validate_company_database_scope(
+                target_id, payload.database, session_token=session_token,
+                login_binding=runtime.company_login_binding(payload.username))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=_safe_json_error(
+                str(exc), status_code=409, error_code=str(exc))) from exc
+
+        from backend.observed_performance import collect_observed_performance
+        connection = None
+        try:
+            destination = runtime.resolve_and_validate_approved_company_target(target_id)
+            # Per-request login: used for this connection only, never stored.
+            connection = runtime.connect_company_target_mysql(
+                destination,
+                username=payload.username,
+                password=payload.password.get_secret_value(),
+                database=payload.database,
+                connect_timeout=3,
+                tls_hostname=target.tls_hostname or target.host,
+                tls_ca_path=runtime.company_tls_ca_path,
+            )
+            connection = runtime.require_read_only_session(connection)
+            return collect_observed_performance(connection, payload.database)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=_safe_json_error(
+                str(exc), status_code=400, error_code=str(exc))) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=_safe_json_error(
+                "observed_performance_failed", status_code=500,
+                error_code="observed_performance_failed")) from exc
         finally:
             if connection is not None:
                 try:

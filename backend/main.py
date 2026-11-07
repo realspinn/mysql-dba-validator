@@ -29,7 +29,7 @@ from .parser import parse_sql
 from .validation_results import batch_result, build_statement_result, script_error
 from .version import APP_VERSION
 from .update_check import check_for_update
-from . import update_check, update_download
+from . import observed_performance, update_check, update_download
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -472,6 +472,57 @@ def discover_databases_endpoint(req: ConnectionTestRequest):
             "message": "Only loopback MySQL targets are permitted for Local Mode.",
         }
     return discover_databases(session)
+
+
+class ObservedPerformanceRequest(BaseModel):
+    """A loopback login and the selected database. No SQL or query of any kind."""
+    model_config = ConfigDict(extra="forbid")
+
+    host: str
+    port: int = Field(default=3306, ge=1, le=65535)
+    username: str
+    password: SecretStr
+    database: str
+
+
+@app.post("/api/diagnostics/observed-performance")
+def observed_performance_endpoint(req: ObservedPerformanceRequest):
+    """Historical schema workload for a Local Mode database (optional diagnostic).
+
+    Separate from /api/validate: these are statement families MySQL already recorded,
+    not evidence about any submitted SQL. Same loopback-only target rule and the same
+    per-request, read-only evidence connection as local validation.
+    """
+    if PUBLIC_DEMO:  # also unreachable there (PublicDemoGuard); refused before any lookup
+        return public_demo_refusal()
+    if not validate_database_identifier(req.database):
+        return {"error_code": "invalid_database", "message": "Invalid database selection."}
+    username = req.username.strip()
+    password = req.password.get_secret_value()
+    if not req.host.strip() or not username or not password:
+        return _invalid_connection_config()
+    try:
+        _validate_local_only_target(req.host, req.port)
+    except ValueError:
+        return {
+            "status": "error",
+            "connected": False,
+            "error_code": "local_only_target_required",
+            "message": "Only loopback MySQL targets are permitted for Local Mode.",
+        }
+    connection, status = open_evidence_connection(
+        ConnectionProfile(host=req.host.strip(), port=req.port, username=username, password=password),
+        req.database,
+    )
+    if connection is None:
+        return observed_performance.result(req.database, status or "collection_failed")
+    try:
+        return observed_performance.collect_observed_performance(connection, req.database)
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
 
 
 # Public demo: validations allowed at once. Analysis is CPU-bound, so more would only
