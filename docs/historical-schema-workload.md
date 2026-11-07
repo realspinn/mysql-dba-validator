@@ -1,4 +1,4 @@
-# Historical schema workload (optional diagnostic, API only)
+# Historical schema workload (optional diagnostic)
 
 An optional, read-only diagnostic. It shows the statement families MySQL has
 already recorded for one schema in Performance Schema. It is separate from SQL
@@ -10,7 +10,14 @@ validation:
   scope, findings and recommendations stay exactly as they were.
 
 It runs only when you call its route. Nothing runs it in the background, nothing
-stores its results, and there is no UI for it yet.
+stores its results.
+
+In the downloaded application, the **Observed performance** view in the sidebar
+uses the target, login and database chosen in the SQL review connection settings.
+**Load historical workload** reads one snapshot, and **Refresh snapshot** reads
+again; nothing is read until you choose one of them. The table shows the families
+ranked by total recorded time; selecting a family shows every value for it. The
+public online demo has no such view.
 
 ## Routes
 
