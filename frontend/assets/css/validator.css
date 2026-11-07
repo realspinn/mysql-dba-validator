@@ -2887,11 +2887,13 @@ details.reasoning>.layer {
 	color: var(--code-text)
 }
 
-#perfBody {
+#perfBody,
+#lockBody {
 	margin-top: 18px
 }
 
-#perfBody[aria-busy="true"] {
+#perfBody[aria-busy="true"],
+#lockBody[aria-busy="true"] {
 	opacity: .6;
 	transition: opacity .15s
 }
@@ -3171,6 +3173,85 @@ button.perf-row-btn:hover:not(:disabled) {
 @media (max-width: 480px) {
 	.data-table .opt-phone {
 		display: none
+	}
+}
+
+/* Lock diagnostics: each cell stacks a primary value over its detail. On narrower
+   screens a wait becomes a labelled card instead of a wide row; nothing is hidden. */
+.lock-session,
+.lock-where,
+.lock-mode {
+	display: grid;
+	gap: 2px;
+	min-width: 0
+}
+
+.lock-session strong {
+	color: var(--text);
+	font-weight: 600;
+	white-space: nowrap
+}
+
+.lock-where code {
+	color: var(--code-text);
+	font: 12.5px var(--mono);
+	overflow-wrap: anywhere
+}
+
+.lock-mode span:first-child {
+	color: var(--text)
+}
+
+.lock-mode .muted,
+.lock-where .muted {
+	font-family: var(--mono);
+	font-size: 12px;
+	overflow-wrap: anywhere
+}
+
+@media (max-width: 1180px) {
+	.lock-table thead {
+		display: none
+	}
+
+	.lock-table tr {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px 18px;
+		padding: 14px 12px;
+		border-bottom: 1px solid var(--border)
+	}
+
+	.lock-table tr:last-child {
+		border-bottom: 0
+	}
+
+	.lock-table tbody tr:hover td {
+		background: none
+	}
+
+	.lock-table td,
+	.lock-table td.num {
+		padding: 0;
+		border: 0;
+		text-align: left
+	}
+
+	.lock-table td::before {
+		content: attr(data-label);
+		display: block;
+		margin-bottom: 3px;
+		color: var(--text-3);
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: .05em;
+		text-transform: uppercase
+	}
+}
+
+@media (max-width: 480px) {
+	.lock-table tr {
+		grid-template-columns: minmax(0, 1fr)
 	}
 }
 

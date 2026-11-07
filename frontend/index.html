@@ -41,6 +41,7 @@
 				<button type="button" class="nav-item active" data-view="dashboard" aria-current="page"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 3h6v8H3zM11 3h6v5h-6zM11 10h6v7h-6zM3 13h6v4H3z"/></svg><span>Dashboard</span></button>
 				<button type="button" class="nav-item" data-view="review"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 3h9l3 3v11H4z M7 8h6 M7 11h6 M7 14h4"/></svg><span>SQL review</span></button>
 				<button type="button" class="nav-item private-only" data-view="performance"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 16.5h14 M5 13.5v-3 M9 13.5v-8 M13 13.5v-5"/></svg><span>Observed performance</span></button>
+				<button type="button" class="nav-item private-only" data-view="locks"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 9h10v8H5z M7.5 9V6.5a2.5 2.5 0 0 1 5 0V9 M10 12v2"/></svg><span>Lock diagnostics</span></button>
 			</nav>
 			<button type="button" class="primary new-review" data-action="new-review">New SQL review</button>
 			<div class="sidebar-foot">
@@ -272,6 +273,31 @@
 					</div>
 					<p class="visually-hidden" id="perfLive" role="status"></p>
 					<div id="perfBody"></div>
+				</section>
+			</section>
+
+			<section class="view private-only" id="locksView" aria-labelledby="locksHeading" hidden>
+				<header class="view-head">
+					<div>
+						<div class="kicker">Lock diagnostics</div>
+						<h2 id="locksHeading">InnoDB lock waits</h2>
+						<p class="view-lede">Who is waiting, who is blocking and where, in the selected database, read
+							from Performance Schema when you ask. Nothing is killed, committed or rolled back.</p>
+					</div>
+				</header>
+				<section class="panel perf-panel" aria-labelledby="lockContextHeading">
+					<h3 class="visually-hidden" id="lockContextHeading">Snapshot</h3>
+					<div class="perf-bar">
+						<dl class="perf-context">
+							<div><dt>Target</dt><dd id="lockTarget">Local</dd></div>
+							<div><dt>Database</dt><dd id="lockDatabase">None selected</dd></div>
+							<div><dt>Source</dt><dd><code>data_lock_waits</code></dd></div>
+							<div><dt>Observed at</dt><dd id="lockObservedAt">Not loaded</dd></div>
+						</dl>
+						<button class="primary" id="lockLoadBtn" type="button">Read lock waits</button>
+					</div>
+					<p class="visually-hidden" id="lockLive" role="status"></p>
+					<div id="lockBody"></div>
 				</section>
 			</section>
 		</main>
