@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import backend.main
+import backend.validation_results
 from backend.main import app
 from tests.test_frontend_evidence_rendering import local_fixture
 from tests.test_local_evidence_credentials import FakeMySQL, explain_row
@@ -353,7 +353,7 @@ REPLACEMENTS = {"fails": failing, "advises": advising}
 @pytest.mark.parametrize("replacement", REPLACEMENTS)
 def test_the_advice_changes_nothing_else_in_the_result(sql, replacement, monkeypatch):
     plain = validate(sql)
-    monkeypatch.setattr(backend.main, "advise", REPLACEMENTS[replacement])
+    monkeypatch.setattr(backend.validation_results, "advise", REPLACEMENTS[replacement])
     changed = validate(sql)
     assert without_optimization(changed) == without_optimization(plain)
     if replacement == "fails":
@@ -373,7 +373,7 @@ def test_the_advice_changes_nothing_sent_to_the_database_or_scored_from_it(repla
     plain, plain_sent = run()
     assert plain["statements"][0]["evidence"]["plan"]["state"] == "collected"
     assert plain["statements"][0]["optimization"]["status"] == "advised"
-    monkeypatch.setattr(backend.main, "advise", REPLACEMENTS[replacement])
+    monkeypatch.setattr(backend.validation_results, "advise", REPLACEMENTS[replacement])
     changed, changed_sent = run()
     assert changed_sent == plain_sent
     assert without_optimization(changed) == without_optimization(plain)

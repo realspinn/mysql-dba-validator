@@ -363,7 +363,7 @@ def analyze_statement(facts: StatementFacts) -> models.StatementAnalysis:
     # Recommendations derived from evidence gaps
     recommendations.extend(recommendations_from_gaps(evidence_gaps))
 
-    # Score and risk level are placeholders here; backend.main fills them from the
+    # Score and risk level are placeholders here; backend.validation_results fills them from the
     # final report before the assessment is returned (never 0 / UNKNOWN to a client).
     assessment = models.RiskAssessment(
         overall_score=0,

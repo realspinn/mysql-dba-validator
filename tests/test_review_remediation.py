@@ -567,7 +567,7 @@ def test_unrestricted_and_always_true_writes_stay_critical_with_metadata(schema,
 def test_scope_adjustment_floor_unit():
     from dataclasses import replace
 
-    from backend.main import apply_scope_adjustment, risk_level_from_score
+    from backend.validation_results import apply_scope_adjustment, risk_level_from_score
 
     base = score_statement(parse_sql("UPDATE t SET a = 1 WHERE id = 1")[0], batch_size=1)
     verified = {"basis": "at_most_one_row", "table": "app.t", "index": "PRIMARY"}

@@ -5,7 +5,8 @@ from backend.parser import parse_sql
 from backend.analyzer import analyze_batch
 from backend.recommendations import recommendations_from_gaps
 from backend import evidence as evidence_mod
-from backend.main import MAX_SQL_BYTES, MAX_STATEMENTS, ValidateRequest, validate
+from backend.main import MAX_SQL_BYTES, ValidateRequest, validate
+from backend.validation_results import MAX_STATEMENTS
 from types import SimpleNamespace
 from tests.local_evidence import local_request, use_fake_evidence_connection
 

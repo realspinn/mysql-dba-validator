@@ -94,17 +94,18 @@ POST /api/validate (local)                      POST /company/targets/{id}/valid
         ├─ per statement:                                ├─ per statement:
         │    collect_statement_evidence()  (SELECT only) │    collect_statement_evidence()
         │    collect_metadata()                          │    collect_metadata() (selected database only)
-        └─ build_statement_result()  main.py  ◄──────────┴─ same function
+        └─ build_statement_result()  ◄───────────────────┴─ same function
                ├─ build_evidence_state()        evidence_state.py
                ├─ build_row_scope()             row_scope.py       (static + metadata)
-               ├─ apply_scope_adjustment()      main.py            (−10, verified key only, never below MEDIUM)
+               ├─ apply_scope_adjustment()      validation_results.py (−10, verified key only, never below MEDIUM)
                ├─ apply_evidence_adjustments()  evidence_scoring.py (+10/+10, one-row plans only)
                ├─ apply_m1_adjustment() / apply_m2_adjustment()      (+5 each)
-               └─ final_confidence()            main.py            (raise only by verified scope; caps)
-        batch_result()  main.py   overall_score = max, overall_confidence = min
+               └─ final_confidence()            validation_results.py (raise only by verified scope; caps)
+        batch_result()  validation_results.py   overall_score = max, overall_confidence = min
 ```
 
-Both paths share `build_statement_result()` and `batch_result()`, so equal
+Both paths share `build_statement_result()` and `batch_result()`
+(`backend/validation_results.py`, which does not import the web app), so equal
 evidence yields equal results; `tests/test_connector_remote_evidence.py`
 asserts byte-equal responses for nine scenarios.
 
@@ -415,7 +416,7 @@ penalised. CRITICAL is never reduced.
 | LIMITED | Sound for what is known, but a deciding fact (usually row scope) is not established | Other writes; `INSERT`, `REPLACE`, `CALL`; a `SELECT` with a locking clause (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`) or a call outside the reviewed function list (section 12), in any query block of a `UNION`/`INTERSECT`/`EXCEPT` or parenthesised query, also MEDIUM at least; a plain `EXPLAIN` of a `SELECT` with such a call (section 11: `EXPLAIN` can evaluate functions; no locking finding, as `EXPLAIN` takes no locks), also MEDIUM at least; any statement whose referenced table metadata did not find |
 | LOW | The analysed statement may not be the submitted one, or could not be analysed | Parse error; lossy parse |
 
-Rules (`risk_engine.static_confidence`, `main.final_confidence`):
+Rules (`risk_engine.static_confidence`, `validation_results.final_confidence`):
 
 1. Computed per statement from the SQL; one implementation.
 2. Raised only by a verified `at_most_one_row` (never above LOW for an
@@ -437,8 +438,8 @@ Rules (`risk_engine.static_confidence`, `main.final_confidence`):
 | `scope.basis` | `all_rows` \| `at_most_one_row` \| `not_established` \| `not_applicable` | Always present | `row_scope.build_row_scope` | The matching sentence; never a count |
 | `scope.source` | `sql` \| `table_metadata` \| `null` | `null` unless established | same | "from the SQL" / "confirmed from table metadata" |
 | `scope.table`, `scope.index`, `scope.columns` | string, string, list | `null`/`[]` unless established | same | Names |
-| `scope.factor` | `{label, points, medium_floor_applied}` \| `null` | `null` unless the scope is a verified `at_most_one_row` on a non-CRITICAL statement; `points` is the change applied (0 to −10) | `main.apply_scope_adjustment` | Factor |
-| `confidence` | `HIGH` \| `LIMITED` \| `LOW` | Always | `main.final_confidence` | Label |
+| `scope.factor` | `{label, points, medium_floor_applied}` \| `null` | `null` unless the scope is a verified `at_most_one_row` on a non-CRITICAL statement; `points` is the change applied (0 to −10) | `validation_results.apply_scope_adjustment` | Factor |
+| `confidence` | `HIGH` \| `LIMITED` \| `LOW` | Always | `validation_results.final_confidence` | Label |
 | `static_confidence` | same | Always | `risk_engine.static_confidence` | — |
 | `analysis_text_differs` | boolean | Always (now always `false`; see 10.6) | parser (`lossy_parse`) | Warning |
 | `analysis_status` | `analysed` \| `invalid` \| `unsupported` \| `unreadable` | Always | parser (`_not_analysed`); see 10.6 | Why a statement was not analysed |
@@ -591,7 +592,7 @@ decides these refusals before it opens a connection to the target.
 | `statement_limit_exceeded` | More than 16 statements (unchanged). |
 
 Order: `executable_comment_not_supported`, then `no_statements`, then the
-script checks, then the statement limit (`main.script_error`, shared by both
+script checks, then the statement limit (`validation_results.script_error`, shared by both
 paths). Semicolons and keywords inside strings and comments are never
 boundaries (tokenizer-based).
 

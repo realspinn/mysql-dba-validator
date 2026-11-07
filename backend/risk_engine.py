@@ -235,8 +235,8 @@ def static_confidence(
     established, usually the row scope of a write. LOW: the SQL could not be read, or
     only partly (the analysed text may not be the submitted text).
 
-    This is the only confidence rule; backend.main caps it with evidence
-    (backend.main.final_confidence) and never raises it except through a verified
+    This is the only confidence rule; backend.validation_results caps it with evidence
+    (backend.validation_results.final_confidence) and never raises it except through a verified
     row scope.
     """
 
@@ -504,7 +504,7 @@ def score_statement(
         # write: it can match zero, one, some or all rows. Column names
         # (id, *_id) and an "=" in the predicate prove nothing about
         # uniqueness. The only narrow-scope credit is a unique key confirmed
-        # by table metadata (backend.row_scope, applied in backend.main).
+        # by table metadata (backend.row_scope, applied in backend.validation_results).
 
         else:
 

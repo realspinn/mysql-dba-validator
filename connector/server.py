@@ -2389,7 +2389,7 @@ def create_app(*, runtime: ConnectorRuntime | None = None) -> FastAPI:
         if not sql_text:
             raise HTTPException(status_code=400, detail=_safe_json_error(
                 "invalid_sql", status_code=400, error_code="invalid_sql"))
-        from backend.main import batch_result, build_statement_result, script_error
+        from backend.validation_results import batch_result, build_statement_result, script_error
         try:
             all_facts = parse_sql(sql_text)
             error = script_error(sql_text, all_facts)

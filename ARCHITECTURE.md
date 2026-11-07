@@ -37,6 +37,7 @@ flowchart LR
 | Local evidence | `backend/db.py`, `db_evidence.py`, `metadata.py` | One read-only connection per validation to loopback MySQL, with the login supplied for that validation. |
 | Evidence scoring | `backend/evidence_scoring.py`, `metadata_scoring.py` (M1), `m2_scoring.py` (M2) | Small, bounded adjustments to the static score from collected evidence. |
 | Evidence state | `backend/evidence_state.py` | Builds each statement's `evidence` object from what the collectors returned. Pure result assembly: no database access. |
+| Result construction | `backend/validation_results.py` | Builds each statement's result and the batch result from the static report and collected evidence; shared by the web app and the connector. No FastAPI, settings or database access. |
 | Local connector | `connector/` (`launcher.py`, `server.py`, `policy.py`, `registry_store.py`) | Separate service on `127.0.0.1:8765` for operator-approved company targets. See [connector/README.md](connector/README.md). |
 | Windows launcher | `release/launcher.py`, `release/mysql-dba-validator.spec` | Starts the packaged web app (and, in the Console executable, the connector). |
 
@@ -105,7 +106,8 @@ passing through a web API.
    requires it to be in that list. This binding is not authorization: MySQL
    still decides what the login may do.
 6. The connector runs the same scoring and result assembly as the web app
-   (`backend.main.build_statement_result` and `batch_result`), so local and
+   (`backend.validation_results.build_statement_result` and `batch_result`,
+   which do not import the web app), so local and
    remote results have the same shape and meaning.
 
 ## What may be sent to a database
@@ -237,7 +239,7 @@ v0.5.0 no longer does (see
   metadata did not find caps it at `LIMITED`. Missing or failed evidence never
   raises it. Batch `overall_confidence` is the lowest statement confidence.
   Computed in one place (`risk_engine.static_confidence`, capped in
-  `main.final_confidence`).
+  `validation_results.final_confidence`).
 
 ## Evidence model
 
