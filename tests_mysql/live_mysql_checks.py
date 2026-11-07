@@ -261,7 +261,8 @@ def _errno(cursor, sql):
 
 def _digest_row(statement):
     """The digest summary row of one statement text in the test schema, read as vt_perf."""
-    with _connect(PERF) as connection, connection.cursor() as cursor:
+    # STATEMENT_DIGEST() resolves the unqualified table against the default database.
+    with _connect_db(PERF, DB) as connection, connection.cursor() as cursor:
         cursor.execute(f"SELECT {PERF_COLUMNS} FROM {DIGEST_TABLE} "
                        "WHERE SCHEMA_NAME = %s AND DIGEST = STATEMENT_DIGEST(%s)", (DB, statement))
         return cursor.fetchone()
@@ -297,7 +298,9 @@ def test_perf_gate_column_grant_reads_metrics_but_not_samples(capsys):
         denied["events_statements_history"] = _errno(
             cursor, "SELECT SQL_TEXT FROM performance_schema.events_statements_history LIMIT 1")
         _report(capsys, "vt_perf denied errnos", denied)
-        assert denied == {"QUERY_SAMPLE_TEXT": 1143, "*": 1143, "SUM_CPU_TIME": 1143,
+        # A named ungranted column is 1143 (column access denied); * is 1142 (the
+        # account has no table-level SELECT).
+        assert denied == {"QUERY_SAMPLE_TEXT": 1143, "*": 1142, "SUM_CPU_TIME": 1143,
                           "MIN_TIMER_WAIT": 1143, "events_statements_history": 1142}
     with _connect(EVIDENCE) as connection, connection.cursor() as cursor:
         no_grant = _errno(cursor, f"SELECT COUNT_STAR FROM {DIGEST_TABLE} LIMIT 1")
@@ -408,5 +411,6 @@ def test_perf_gate_quiet_schema_shows_only_the_validators_own_session(capsys):
         connection.close()
     _report(capsys, "quiet schema rows", rows)
     texts = [row["DIGEST_TEXT"] for row in rows]
-    assert all(text.startswith(("SET SESSION TRANSACTION READ ONLY", "SELECT @@SESSION"))
+    # PyMySQL's SET NAMES on connect, then the read-only setting and its read-back.
+    assert all(text.startswith(("SET NAMES", "SET SESSION TRANSACTION READ ONLY", "SELECT @@SESSION"))
                for text in texts), texts
