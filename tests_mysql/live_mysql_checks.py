@@ -513,7 +513,7 @@ def test_route_reports_untimed_families_without_fabricated_times(capsys):
             result = observed(database=UNTIMED_DB)
         finally:
             cursor.executemany("UPDATE performance_schema.setup_instruments SET TIMED = 'YES' "
-                               "WHERE NAME = %s", timed)
+                               "WHERE NAME = %s", [(name,) for name in timed])
     _report(capsys, "untimed route families", result["families"])
     assert result["status"] == "available" and result["families"]
     marker = result["families"][0]
