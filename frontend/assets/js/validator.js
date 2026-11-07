@@ -49,10 +49,7 @@ const state = {
 	// Which target/login/session produced the current remote database list. A
 	// database is only sent with a remote validation while all three still match;
 	// the connector re-checks the same binding server-side.
-	discovery: null,
-	// The last historical workload result (memory only) and the context it was read
-	// for; dropped when the target, login or database changes.
-	performance: { result: null, key: null, loading: false, seen: null, generation: 0, loadingGeneration: null }
+	discovery: null
 };
 const pairingCode = $('pairingCode'), pairBtn = $('pairBtn'), unpairBtn = $('unpairBtn');
 const targetSelect = $('targetSelect'), loadTargetsBtn = $('loadTargetsBtn'), reapproveBtn = $('reapproveBtn');
@@ -777,7 +774,7 @@ function updateContext() {
 	$('drawerDot').classList.toggle('on', Boolean(state.selectedDatabase));
 	$('drawerStatus').textContent = state.selectedDatabase ? 'Database: ' + state.selectedDatabase : 'Static analysis only';
 	updateStepper();
-	updatePerformanceContext();
+	updateDiagnosticsContext();
 }
 
 function updateStepper() {
@@ -1754,7 +1751,7 @@ function renderError(message) {
 // Separate from SQL review: nothing here reads or changes a validation result. The
 // online demo has no such view and never calls these routes.
 const PERF_DOCS = 'https://github.com/realspinn/mysql-dba-validator/blob/main/docs/historical-schema-workload.md';
-const perfLoadBtn = $('perfLoadBtn');
+const LOCK_DOCS = 'https://github.com/realspinn/mysql-dba-validator/blob/main/docs/innodb-lock-waits.md';
 
 // What the snapshot was read for. The password is never part of it.
 function perfContextKey() {
@@ -1839,15 +1836,15 @@ function settingsButton() {
 	return button;
 }
 
-function docsLink(label) {
+function docsLink(label, href) {
 	const link = el('a', 'perf-docs', label);
-	link.href = PERF_DOCS;
+	link.href = href;
 	link.target = '_blank';
 	link.rel = 'noopener noreferrer';
 	return link;
 }
 
-function perfState(title, text, extras, kind) {
+function diagState(title, text, extras, kind) {
 	const box = el('div', 'perf-state' + (kind ? ' ' + kind : ''));
 	box.append(el('strong', '', title), el('p', '', text));
 	if (extras && extras.length) {
@@ -1858,11 +1855,17 @@ function perfState(title, text, extras, kind) {
 	return box;
 }
 
+// ---------------------------------------------------------------- snapshot views
+// Observed performance and lock diagnostics share one mechanism: a read only when the
+// DBA asks, bound to the current target, login and database. Any change of those (even
+// back to an earlier one) starts a new generation and discards a read still in flight;
+// a shown result is dropped as soon as the context changes. Memory only, never stored.
+
 // Why nothing can be loaded yet, or null when a snapshot can be requested.
-function perfBlocker() {
+function snapshotBlocker(view) {
 	if (state.remoteTarget) {
 		if (!state.selectedDatabase || !discoveryMatches(state.remoteTarget))
-			return 'Historical workload is read for one database. Enter your MySQL login for ' +
+			return view.subject + ' is read for one database. Enter your MySQL login for ' +
 				String(state.remoteTarget.display_name || state.remoteTarget.target_id) +
 				' and discover and select a database in the connection settings.';
 		return null;
@@ -1870,34 +1873,178 @@ function perfBlocker() {
 	if (isRemoteTarget(state.credentials.host))
 		return REMOTE_NOT_AVAILABLE + 'Select an approved connector target in the connection settings.';
 	if (!validConnection() || !state.selectedDatabase)
-		return 'Historical workload is read for one database. Enter your MySQL login and choose a database in the SQL review connection settings.';
+		return view.subject + ' is read for one database. Enter your MySQL login and choose a database in the SQL review connection settings.';
 	return null;
 }
 
-function renderPerfIdle() {
-	const blocker = perfBlocker();
-	if (blocker) {
-		$('perfBody').replaceChildren(perfState('Select a database first', blocker, [settingsButton()]));
-		return;
-	}
-	const box = el('div', 'perf-state perf-intro');
+function viewNode(view, name) { return $(view.prefix + name) }
+
+function factList(facts) {
 	const list = el('ul', 'perf-facts');
-	[
-		['Historical', 'Counts and recorded time accumulate from when MySQL first saw each statement family. They describe past workload, not the SQL you are reviewing.'],
-		['Fixed queries', 'The validator sends four fixed Performance Schema queries of its own. Submitted SQL is never executed and no risk assessment changes.'],
-		['Permissions', 'Your MySQL account needs SELECT on the digest summary columns. That privilege is server-wide.']
-	].forEach(([term, detail]) => {
+	facts.forEach(([term, detail]) => {
 		const item = el('li');
 		item.append(el('b', '', term + '. '), document.createTextNode(detail));
 		list.append(item);
 	});
-	box.append(el('strong', '', 'No snapshot loaded'),
-		el('p', '', 'Load the statement families MySQL has recorded for ' + state.selectedDatabase + ': executions, recorded time and rows examined, ranked by total recorded time.'),
-		list);
+	return list;
+}
+
+function renderSnapshotIdle(view) {
+	const blocker = snapshotBlocker(view);
+	if (blocker) {
+		viewNode(view, 'Body').replaceChildren(diagState('Select a database first', blocker, [settingsButton()]));
+		return;
+	}
+	const box = el('div', 'perf-state perf-intro');
 	const actions = el('div', 'perf-state-actions');
-	actions.append(docsLink('What this reads and why'));
-	box.append(actions);
-	$('perfBody').replaceChildren(box);
+	actions.append(docsLink('What this reads and why', view.docs));
+	box.append(el('strong', '', 'No snapshot loaded'), el('p', '', view.intro(state.selectedDatabase)),
+		factList(view.facts), actions);
+	viewNode(view, 'Body').replaceChildren(box);
+}
+
+function renderSnapshotResult(view, data) {
+	if (view.hasData(data)) {
+		view.render(data);
+		return;
+	}
+	const known = view.states[data.status] || view.states.unexpected_response;
+	const extras = [];
+	if (known.settings) extras.push(settingsButton());
+	if (known.docs) extras.push(docsLink(known.docs, view.docs));
+	const kind = data.status === view.emptyStatus ? '' : 'notice';
+	viewNode(view, 'Body').replaceChildren(diagState(known.title, known.text(state.selectedDatabase), extras, kind));
+}
+
+function updateSnapshotContext(view) {
+	if (PUBLIC_DEMO || !viewNode(view, 'Body')) return;
+	viewNode(view, 'Target').textContent = state.remoteTarget
+		? String(state.remoteTarget.display_name || state.remoteTarget.target_id) : 'Local';
+	viewNode(view, 'Database').textContent = state.selectedDatabase || 'None selected';
+	const current = perfContextKey();
+	if (current !== view.seen) {
+		// Any change of target, login or database, even back to an earlier one, starts
+		// a new generation: a read started before it is discarded when it arrives.
+		view.seen = current;
+		view.generation += 1;
+	}
+	if (view.key !== null && view.key !== current) {
+		// The target, login or database changed: the last result no longer describes it.
+		view.result = null;
+		view.key = null;
+	}
+	if (view.loading) {
+		// A read from an earlier generation is still in flight: show this context at
+		// once and keep the button disabled until that read settles and is discarded.
+		if (view.loadingGeneration !== view.generation) {
+			setObservedAt(view, null);
+			renderSnapshotIdle(view);
+			viewNode(view, 'LoadBtn').disabled = true;
+		}
+		return;
+	}
+	setSnapshotButton(view);
+	if (!view.result) {
+		setObservedAt(view, null);
+		renderSnapshotIdle(view);
+	}
+}
+
+function updateDiagnosticsContext() {
+	Object.values(SNAPSHOT_VIEWS).forEach(updateSnapshotContext);
+}
+
+// One action: load, or refresh once a result for this context is on screen.
+function setSnapshotButton(view) {
+	const button = viewNode(view, 'LoadBtn');
+	button.disabled = Boolean(snapshotBlocker(view));
+	button.textContent = view.result ? 'Refresh snapshot' : view.loadLabel;
+	button.className = view.result ? 'secondary' : 'primary';
+}
+
+function observedAtText(iso) {
+	const date = new Date(iso);
+	return Number.isNaN(date.getTime()) ? 'n/a' : date.toLocaleString();
+}
+
+function setObservedAt(view, iso) {
+	const node = viewNode(view, 'ObservedAt');
+	node.textContent = iso ? observedAtText(iso) : 'Not loaded';
+	if (iso) node.title = 'Validator clock, UTC: ' + iso;
+	else node.removeAttribute('title');
+}
+
+// REMOTE: connector only, for an approved target and a discovered database.
+async function requestSnapshot(view) {
+	if (state.remoteTarget) {
+		const target = selectedRemoteTarget();
+		const login = remoteLogin();
+		if (!discoveryMatches(target))
+			throw new Error('The selected database was not discovered for this target, login and session. Discover again.');
+		const sessionToken = await ensureConnectorSession();
+		return connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/' + view.route, {
+			method: 'POST',
+			headers: connectorHeaders(sessionToken, true),
+			body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })
+		});
+	}
+	const data = await requestJson('/api/diagnostics/' + view.route, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			host: state.credentials.host,
+			port: state.credentials.port,
+			username: state.credentials.username,
+			password: state.credentials.password,
+			database: state.selectedDatabase
+		})
+	});
+	// Refusals before any connection come back as {error_code, message}.
+	if (data && typeof data.error_code === 'string' && typeof data.status !== 'string')
+		throw new Error(errorMessage(data, 'The request was refused.'));
+	return data;
+}
+
+async function loadSnapshot(view) {
+	if (PUBLIC_DEMO || view.loading || snapshotBlocker(view)) return;
+	const key = perfContextKey();
+	const body = viewNode(view, 'Body'), button = viewNode(view, 'LoadBtn'), live = viewNode(view, 'Live');
+	view.loading = true;
+	view.loadingGeneration = view.generation;
+	button.disabled = true;
+	button.setAttribute('aria-busy', 'true');
+	body.setAttribute('aria-busy', 'true');
+	live.textContent = 'Reading Performance Schema.';
+	if (!view.result) body.replaceChildren(diagState('Reading Performance Schema', view.reading));
+	let data = null, failure = null;
+	try {
+		data = await requestSnapshot(view);
+		if (!data || typeof data.status !== 'string' || !Array.isArray(data[view.list]))
+			throw new Error('The diagnostic returned an unexpected response.');
+	} catch (error) {
+		failure = error.message || 'The request did not complete.';
+	}
+	view.loading = false;
+	button.removeAttribute('aria-busy');
+	body.removeAttribute('aria-busy');
+	if (view.loadingGeneration !== view.generation) {
+		// The context changed while reading (even if it changed back): discard.
+		updateSnapshotContext(view);
+		return;
+	}
+	view.key = key;
+	view.result = failure ? { failure: failure } : data;
+	setSnapshotButton(view);
+	if (failure) {
+		setObservedAt(view, null);
+		body.replaceChildren(diagState('Request failed', failure, [], 'notice'));
+		live.textContent = 'Request failed.';
+		return;
+	}
+	setObservedAt(view, data.observed_at || null);
+	renderSnapshotResult(view, data);
+	live.textContent = view.hasData(data) ? view.loaded(data)
+		: (view.states[data.status] || view.states.unexpected_response).title + '.';
 }
 
 function familyLabel(family) {
@@ -2008,147 +2155,144 @@ function renderPerfSnapshot(data) {
 	selectFamily(rows, 0, families);
 }
 
-function renderPerfResult(data) {
-	if (data.status === 'available' && data.families.length) {
-		renderPerfSnapshot(data);
-		return;
-	}
-	const known = PERF_STATES[data.status] || PERF_STATES.unexpected_response;
-	const extras = [];
-	if (known.settings) extras.push(settingsButton());
-	if (known.docs) extras.push(docsLink(known.docs));
-	const kind = data.status === 'no_observations' ? '' : 'notice';
-	$('perfBody').replaceChildren(perfState(known.title, known.text(state.selectedDatabase), extras, kind));
+// ---------------------------------------------------------------- lock diagnostics
+// A snapshot of InnoDB lock waits on the selected database's tables: who waits, who
+// blocks, on which table and index. It never acts on a session.
+
+function formatSeconds(value) {
+	if (typeof value !== 'number') return 'Unknown';
+	if (value < 1) return 'Under 1 s';
+	if (value < 60) return value + ' s';
+	return Math.floor(value / 60) + ' min ' + (value % 60) + ' s';
 }
 
-function updatePerformanceContext() {
-	if (PUBLIC_DEMO || !$('perfBody')) return;
-	const perf = state.performance;
-	$('perfTarget').textContent = state.remoteTarget
-		? String(state.remoteTarget.display_name || state.remoteTarget.target_id) : 'Local';
-	$('perfDatabase').textContent = state.selectedDatabase || 'None selected';
-	const current = perfContextKey();
-	if (current !== perf.seen) {
-		// Any change of target, login or database, even back to an earlier one, starts
-		// a new generation: a read started before it is discarded when it arrives.
-		perf.seen = current;
-		perf.generation += 1;
-	}
-	if (perf.key !== null && perf.key !== current) {
-		// The target, login or database changed: the last result no longer describes it.
-		perf.result = null;
-		perf.key = null;
-	}
-	if (perf.loading) {
-		// A read from an earlier generation is still in flight: show this context at
-		// once and keep the button disabled until that read settles and is discarded.
-		if (perf.loadingGeneration !== perf.generation) {
-			$('perfObservedAt').textContent = 'Not loaded';
-			$('perfObservedAt').removeAttribute('title');
-			renderPerfIdle();
-			perfLoadBtn.disabled = true;
-		}
-		return;
-	}
-	setPerfButton();
-	if (!perf.result) {
-		$('perfObservedAt').textContent = 'Not loaded';
-		$('perfObservedAt').removeAttribute('title');
-		renderPerfIdle();
-	}
+function sessionCell(side) {
+	const cell = el('div', 'lock-session');
+	cell.append(el('strong', '', side.session_id == null ? 'Connection not verified' : 'Connection ' + side.session_id),
+		el('span', 'muted', 'Thread ' + side.thread_id));
+	return cell;
 }
 
-// One action: load, or refresh once a result for this context is on screen.
-function setPerfButton() {
-	const loaded = Boolean(state.performance.result);
-	perfLoadBtn.disabled = Boolean(perfBlocker());
-	perfLoadBtn.textContent = loaded ? 'Refresh snapshot' : 'Load historical workload';
-	perfLoadBtn.className = loaded ? 'secondary' : 'primary';
+function labelled(label, content, className) {
+	const cell = el('td', className || '');
+	cell.setAttribute('data-label', label);
+	if (content instanceof Node) cell.append(content);
+	else cell.textContent = content;
+	return cell;
 }
 
-function observedAtText(iso) {
-	const date = new Date(iso);
-	return Number.isNaN(date.getTime()) ? 'n/a' : date.toLocaleString();
-}
+function renderLockSnapshot(data) {
+	const head = el('div', 'perf-summary');
+	const rank = el('p', 'perf-rank', 'One row for each waiting lock and a lock that blocks it, at the time shown. ' +
+		'A blocking session may already have finished: refresh before acting on it.' +
+		(data.more_waits ? ' More waits exist; only the first ' + data.limit + ' are shown.' : ''));
+	rank.id = 'lockRankNote';
+	head.append(el('h3', 'perf-count', 'Lock waits (' + data.waits.length + ')'), rank);
+	const notes = el('ul', 'perf-notes');
+	if (data.sessions === 'unverified')
+		notes.append(el('li', '', 'Connection IDs are not verified: your account cannot read performance_schema.threads.'));
+	notes.append(el('li', '', 'Only InnoDB row and table lock waits on this database\'s tables. Metadata locks and other contention are not included.'));
+	notes.append(el('li', '', 'Time in state is whole seconds in the session\'s current state: for a waiting session, about how long it has waited; for an idle blocker, how long it has been idle.'));
 
-// REMOTE: connector only, for an approved target and a discovered database.
-async function requestObservedPerformance() {
-	if (state.remoteTarget) {
-		const target = selectedRemoteTarget();
-		const login = remoteLogin();
-		if (!discoveryMatches(target))
-			throw new Error('The selected database was not discovered for this target, login and session. Discover again.');
-		const sessionToken = await ensureConnectorSession();
-		return connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/observed-performance', {
-			method: 'POST',
-			headers: connectorHeaders(sessionToken, true),
-			body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })
-		});
-	}
-	const data = await requestJson('/api/diagnostics/observed-performance', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			host: state.credentials.host,
-			port: state.credentials.port,
-			username: state.credentials.username,
-			password: state.credentials.password,
-			database: state.selectedDatabase
-		})
+	const table = el('table', 'data-table lock-table');
+	table.setAttribute('aria-describedby', 'lockRankNote');
+	const thead = el('thead');
+	const headRow = el('tr');
+	['Waiting session', 'Time in state', 'Blocking session', 'Time in state', 'Table and index', 'Lock']
+		.forEach(label => { const th = el('th', '', label); th.scope = 'col'; headRow.append(th); });
+	thead.append(headRow);
+	const tbody = el('tbody');
+	data.waits.forEach(wait => {
+		const where = el('div', 'lock-where');
+		where.append(el('code', '', wait.table + (wait.partition ? ' (' + wait.partition + ')' : '')),
+			el('span', 'muted', wait.index ? 'Index ' + wait.index : 'No index (table lock)'));
+		const lock = el('div', 'lock-mode');
+		lock.append(el('span', '', wait.lock_type === 'RECORD' ? 'Row lock' : 'Table lock'),
+			el('span', 'muted', 'Requested ' + wait.requested_mode),
+			el('span', 'muted', 'Blocked by ' + wait.blocking_mode));
+		const row = el('tr');
+		row.append(labelled('Waiting session', sessionCell(wait.waiting)),
+			labelled('Waiting session time in state', formatSeconds(wait.waiting.seconds_in_state), 'num'),
+			labelled('Blocking session', sessionCell(wait.blocking)),
+			labelled('Blocking session time in state', formatSeconds(wait.blocking.seconds_in_state), 'num'),
+			labelled('Table and index', where),
+			labelled('Lock', lock));
+		tbody.append(row);
 	});
-	// Refusals before any connection come back as {error_code, message}.
-	if (data && typeof data.error_code === 'string' && typeof data.status !== 'string')
-		throw new Error(errorMessage(data, 'The request was refused.'));
-	return data;
+	table.append(el('caption', 'visually-hidden', 'InnoDB lock waits for ' + data.schema), thead, tbody);
+	const wrap = el('div', 'table-wrap');
+	wrap.append(table);
+	$('lockBody').replaceChildren(head, notes, wrap);
 }
 
-async function loadObservedPerformance() {
-	if (PUBLIC_DEMO || state.performance.loading || perfBlocker()) return;
-	const perf = state.performance;
-	const key = perfContextKey();
-	perf.loading = true;
-	perf.loadingGeneration = perf.generation;
-	perfLoadBtn.disabled = true;
-	perfLoadBtn.setAttribute('aria-busy', 'true');
-	$('perfBody').setAttribute('aria-busy', 'true');
-	$('perfLive').textContent = 'Reading Performance Schema.';
-	if (!perf.result) $('perfBody').replaceChildren(perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.'));
-	let data = null, failure = null;
-	try {
-		data = await requestObservedPerformance();
-		if (!data || typeof data.status !== 'string' || !Array.isArray(data.families))
-			throw new Error('The diagnostic returned an unexpected response.');
-	} catch (error) {
-		failure = error.message || 'The request did not complete.';
+const COMMON_STATES = {
+	collection_failed: {
+		title: 'Collection did not complete',
+		text: () => 'The Performance Schema read did not complete, for example because the connection was lost. Nothing more was sent on that connection. Refresh the snapshot to try again.'
+	},
+	unexpected_response: {
+		title: 'Unexpected server response',
+		text: () => 'MySQL returned values that do not match the documented tables, so no partial result is shown.'
+	},
+	auth_failed: PERF_STATES.auth_failed,
+	unreachable: PERF_STATES.unreachable,
+	database_not_found: PERF_STATES.database_not_found
+};
+
+const LOCK_STATES = Object.assign({}, COMMON_STATES, {
+	no_lock_waits: {
+		title: 'No lock waits found',
+		text: db => 'At the time shown, no InnoDB lock wait was found on tables in ' + db + '. This covers row and table lock waits at that moment only: metadata locks, other databases and waits that began or ended a moment earlier are not shown.'
+	},
+	insufficient_privileges: {
+		title: 'Unable to read lock information',
+		text: () => 'Your MySQL account cannot read the InnoDB lock tables in Performance Schema. A DBA can grant SELECT on the lock columns this view reads. Those privileges show lock waits for every schema, so granting them is a DBA decision. The validator never requests or changes privileges.',
+		docs: 'Required privileges'
+	},
+	performance_schema_disabled: {
+		title: 'Performance Schema is disabled',
+		text: () => 'This server runs with performance_schema off, so lock waits cannot be read from it. It can only be enabled at server startup. The validator never changes server settings.'
 	}
-	perf.loading = false;
-	perfLoadBtn.removeAttribute('aria-busy');
-	$('perfBody').removeAttribute('aria-busy');
-	if (perf.loadingGeneration !== perf.generation) {
-		// The context changed while reading (even if it changed back): discard.
-		updatePerformanceContext();
-		return;
+});
+
+const SNAPSHOT_VIEWS = {
+	performance: {
+		prefix: 'perf', route: 'observed-performance', list: 'families', docs: PERF_DOCS,
+		subject: 'Historical workload', loadLabel: 'Load historical workload', emptyStatus: 'no_observations',
+		reading: 'Four fixed queries; nothing you submitted is sent.',
+		intro: db => 'Load the statement families MySQL has recorded for ' + db + ': executions, recorded time and rows examined, ranked by total recorded time.',
+		facts: [
+			['Historical', 'Counts and recorded time accumulate from when MySQL first saw each statement family. They describe past workload, not the SQL you are reviewing.'],
+			['Fixed queries', 'The validator sends four fixed Performance Schema queries of its own. Submitted SQL is never executed and no risk assessment changes.'],
+			['Permissions', 'Your MySQL account needs SELECT on the digest summary columns. That privilege is server-wide.']
+		],
+		states: PERF_STATES,
+		hasData: data => data.status === 'available' && data.families.length > 0,
+		render: data => renderPerfSnapshot(data),
+		loaded: data => 'Snapshot loaded: ' + data.families.length + ' statement families.'
+	},
+	locks: {
+		prefix: 'lock', route: 'lock-waits', list: 'waits', docs: LOCK_DOCS,
+		subject: 'Lock diagnostics', loadLabel: 'Read lock waits', emptyStatus: 'no_lock_waits',
+		reading: 'Three fixed queries; nothing you submitted is sent and no session is touched.',
+		intro: db => 'Read the InnoDB lock waits on tables in ' + db + ' right now: which session waits, which session blocks it, and on which table and index.',
+		facts: [
+			['Snapshot', 'Locks change within seconds. The result describes one moment; refresh it before acting on it.'],
+			['Fixed queries', 'The validator sends three fixed Performance Schema queries of its own. It never kills, commits or rolls back anything, and never reads row values or SQL text.'],
+			['Permissions', 'Your MySQL account needs SELECT on lock columns in Performance Schema. Those privileges show lock waits for every schema.']
+		],
+		states: LOCK_STATES,
+		hasData: data => data.status === 'available' && data.waits.length > 0,
+		render: data => renderLockSnapshot(data),
+		loaded: data => 'Snapshot loaded: ' + data.waits.length + ' lock waits.'
 	}
-	perf.key = key;
-	perf.result = failure ? { failure: failure } : data;
-	setPerfButton();
-	if (failure) {
-		$('perfObservedAt').textContent = 'Not loaded';
-		$('perfObservedAt').removeAttribute('title');
-		$('perfBody').replaceChildren(perfState('Request failed', failure, [], 'notice'));
-		$('perfLive').textContent = 'Request failed.';
-		return;
-	}
-	$('perfObservedAt').textContent = observedAtText(data.observed_at);
-	$('perfObservedAt').title = 'Validator clock, UTC: ' + (data.observed_at || 'n/a');
-	renderPerfResult(data);
-	$('perfLive').textContent = data.status === 'available' && data.families.length
-		? 'Snapshot loaded: ' + data.families.length + ' statement families.'
-		: (PERF_STATES[data.status] || PERF_STATES.unexpected_response).title + '.';
-}
+};
+Object.values(SNAPSHOT_VIEWS).forEach(view => Object.assign(view,
+	{ result: null, key: null, loading: false, seen: null, generation: 0, loadingGeneration: null }));
 
 if (PUBLIC_DEMO) document.querySelectorAll('.private-only').forEach(node => node.remove());
-else perfLoadBtn.addEventListener('click', loadObservedPerformance);
+else Object.values(SNAPSHOT_VIEWS).forEach(view =>
+	viewNode(view, 'LoadBtn').addEventListener('click', () => loadSnapshot(view)));
 
 // Event listeners
 [host, port, username, password].forEach(input => input.addEventListener('input', syncCredentials));
@@ -2160,9 +2304,9 @@ testBtn.addEventListener('click', testConnection);
 discoverBtn.addEventListener('click', discoverDatabases);
 validateBtn.addEventListener('click', validateSql);
 // Views in one page: the dashboard, the SQL review workspace and (downloaded
-// application only) observed performance. Switching is page state only; the current
+// application only) observed performance and lock diagnostics. Switching is page state only; the current
 // review stays in all of them.
-const VIEWS = PUBLIC_DEMO ? ['dashboard', 'review'] : ['dashboard', 'review', 'performance'];
+const VIEWS = PUBLIC_DEMO ? ['dashboard', 'review'] : ['dashboard', 'review', 'performance', 'locks'];
 function showView(name) {
 	if (!VIEWS.includes(name)) return;
 	VIEWS.forEach(view => { $(view + 'View').hidden = view !== name; });

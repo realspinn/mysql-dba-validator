@@ -1,4 +1,4 @@
-# InnoDB lock waits (optional diagnostic, API only)
+# InnoDB lock waits (optional diagnostic)
 
 An optional, read-only diagnostic. It answers four questions for one database:
 
@@ -11,7 +11,20 @@ It is separate from SQL validation: it never changes a score, risk level,
 confidence, row scope, finding or recommendation.
 
 It runs only when its route is called. Nothing polls in the background and
-nothing stores the result. There is no UI for it yet.
+nothing stores the result.
+
+In the downloaded application, the **Lock diagnostics** view in the sidebar uses
+the target, login and database chosen in the SQL review connection settings.
+**Read lock waits** takes one snapshot, and **Refresh snapshot** takes another;
+nothing is read until you choose one of them. Each row shows:
+
+- the waiting and blocking connection IDs and thread IDs
+- the time each has spent in its current state
+- the table and index
+- the lock type, and the requested and blocking modes
+
+Changing the target, login or database drops the snapshot. The view offers no
+action on a session. The public online demo has no such view.
 
 **It never acts on what it finds.** It does not run `KILL`, `COMMIT`, `ROLLBACK`,
 `LOCK TABLES` or any other statement that changes a session or data.
