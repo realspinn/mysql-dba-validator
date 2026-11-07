@@ -322,6 +322,29 @@ Shown on each run:
     trusted only because the same run sees the validator's own `SET SESSION
     TRANSACTION READ ONLY` digest and no digest overflow.
 - The full suite on Linux: 2289 passed, 1 skipped (Windows Job Object).
+- Historical schema workload (unreleased). The checks use `vt_perf`, which has
+  column-level `SELECT` on only the digest columns the collector reads, plus
+  `NAME, ENABLED` of `setup_consumers`. Root changes `setup_instruments` and
+  `setup_consumers` in the container only and restores them afterwards.
+  - The column grant reads the metrics. `QUERY_SAMPLE_TEXT`, `SUM_CPU_TIME`
+    and `MIN_TIMER_WAIT` are refused (1143); `SELECT *` and
+    `events_statements_history` are refused (1142). An account without the
+    grant gets 1142, and the route reports `insufficient_privileges`.
+  - **Units:** the reads work on the validator's confirmed read-only session.
+    25 sequential statements summed to less server time (picoseconds / 10^12)
+    than the client's wall clock.
+  - **Timing off and consumer off:** with `TIMED = 'NO'` statements are still
+    counted, with timer sums 0 and lock time still recorded; the route returns
+    `not_recorded` and null times. With the `statements_digest` consumer off,
+    nothing is recorded and the route returns `digest_consumer_disabled`.
+  - **Bounds and SQL sent:** the route returns five families ordered by total
+    time, matching the raw picoseconds / 10^9, and reports more families.
+    Across three calls, every new digest in the schema is one of the route's
+    fixed queries or the session setup, and the fixture rows are unchanged.
+  - **A quiet schema** shows only the validator's own session statements
+    (`SET NAMES`, the read-only setting and its read-back).
+  - **Not shown:** `performance_schema = OFF` (a startup setting; unit tests
+    only), MySQL 8.0, and the connector route against a real server.
 
 Not shown: Company Mode and the connector, any TLS (Local Mode has none),
 AWS RDS, proxies, VPN, MySQL 8.0, the packaged app against a database, the

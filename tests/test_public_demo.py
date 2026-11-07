@@ -138,6 +138,7 @@ def test_public_pages_and_assets(public):
     ("POST", "/api/connections/test"),
     ("POST", "/api/connections/discover-databases"),
     ("POST", "/api/evidence"),
+    ("POST", "/api/diagnostics/observed-performance"),
     ("POST", "/api/heartbeat"),
     ("POST", "/api/update-status"),
     ("POST", "/api/update-download"),
@@ -159,6 +160,17 @@ def test_everything_else_is_not_served(public, network, method, path):
     response = public.request(method, path, json=login if method == "POST" else None)
     assert response.status_code == 404
     assert SECRET not in response.text
+    assert network == []
+
+
+def test_observed_performance_is_refused_even_past_the_route_guard(public, network):
+    # The route guard 404s it first; the handler also refuses before any lookup.
+    assert backend_main.public_route_allowed("POST", "/api/diagnostics/observed-performance") is False
+    request = backend_main.ObservedPerformanceRequest(
+        host="127.0.0.1", username="root", password=SECRET, database="app")
+    response = backend_main.observed_performance_endpoint(request)
+    assert response.status_code == 403 and b"public_demo_static_only" in response.body
+    assert SECRET.encode() not in response.body
     assert network == []
 
 

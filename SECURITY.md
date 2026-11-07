@@ -30,6 +30,12 @@ How the components and request flows fit together is described in
   earlier only the heartbeat and update-check routes checked `Host`.)*
 - Company MySQL credentials are supplied per request, used for that operation
   and not persisted. There is no credential store.
+- The optional historical schema workload routes (web app and connector) read
+  only fixed Performance Schema columns, never `QUERY_SAMPLE_TEXT`, and accept
+  no SQL. The public demo does not serve them. The digest-table privilege they
+  need is server-wide, so granting it is the DBA's decision; see
+  [docs/historical-schema-workload.md](docs/historical-schema-workload.md).
+  *(Unreleased.)*
 - The browser can use only connector targets approved at the connector
   console. The page may request a target, but the request is approved only
   with a one-time code that the console prints next to the exact host, port,

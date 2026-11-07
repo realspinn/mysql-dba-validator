@@ -239,6 +239,7 @@ def test_submitted_writes_are_not_executed_even_when_the_login_could_write():
 ROOT = ("root", "ci-only-root-pw-1")  # the container's root (ci.yml MYSQL_ROOT_PASSWORD)
 PERF = ("vt_perf", "ci-only-perf-pw-1")
 QUIET_DB = "validator_ci_quiet"
+UNTIMED_DB = "validator_ci_untimed"
 PERF_COLUMNS = ("DIGEST, DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT, AVG_TIMER_WAIT, MAX_TIMER_WAIT, "
                 "QUANTILE_95, SUM_LOCK_TIME, SUM_ROWS_EXAMINED, SUM_ROWS_SENT, SUM_ROWS_AFFECTED, "
                 "SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN")
@@ -414,3 +415,110 @@ def test_perf_gate_quiet_schema_shows_only_the_validators_own_session(capsys):
     # PyMySQL's SET NAMES on connect, then the read-only setting and its read-back.
     assert all(text.startswith(("SET NAMES", "SET SESSION TRANSACTION READ ONLY", "SELECT @@SESSION"))
                for text in texts), texts
+
+
+# ---------------------------------------------------------------- historical schema workload route
+
+PERF_PATH = "/api/diagnostics/observed-performance"
+
+
+def observed(account=PERF, database=DB):
+    response = client.post(PERF_PATH, json={**_login(account), "database": database})
+    assert response.status_code == 200, response.status_code
+    assert account[1] not in response.text
+    return response.json()
+
+
+def _expected_session_digests():
+    """Digests of everything the route may send: its fixed SQL and the session setup."""
+    from backend import observed_performance as op
+    from backend.db import READ_ONLY_CHECK_SQL, READ_ONLY_SESSION_SQL
+    statements = [op.STATE_SQL, op.CONSUMERS_SQL, op.FAMILIES_SQL % f"'{DB}'", op.OVERFLOW_SQL,
+                  READ_ONLY_SESSION_SQL, READ_ONLY_CHECK_SQL, "SET NAMES utf8mb4"]
+    with _connect_db(PERF, DB) as connection, connection.cursor() as cursor:
+        digests = set()
+        for statement in statements:
+            cursor.execute("SELECT STATEMENT_DIGEST(%s) AS d", (statement,))
+            digests.add(cursor.fetchone()["d"])
+        return digests
+
+
+def test_route_reads_bounded_ordered_families_in_milliseconds(capsys):
+    result = observed()
+    _report(capsys, "route result", {key: value for key, value in result.items() if key != "families"})
+    _report(capsys, "route families", [(f["digest_text"][:50], f["executions"], f["timing"], f["total_time_ms"])
+                                       for f in result["families"]])
+    assert result["status"] == "available" and result["schema"] == DB
+    assert result["scope"] == "historical_schema_workload" and result["digest_consumer"] == "enabled"
+    # Earlier tests left more than five families in this schema.
+    assert len(result["families"]) == 5 and result["more_families"] is True
+    totals = [family["total_time_ms"] for family in result["families"]]
+    assert None not in totals and totals == sorted(totals, reverse=True)
+    # Raw picoseconds read back directly; families that ran again in between are skipped.
+    with _connect_db(PERF, DB) as connection, connection.cursor() as cursor:
+        cursor.execute(f"SELECT DIGEST, COUNT_STAR, SUM_TIMER_WAIT, SUM_ROWS_SENT FROM {DIGEST_TABLE} "
+                       "WHERE SCHEMA_NAME = %s AND DIGEST IS NOT NULL", (DB,))
+        raw = {row["DIGEST"]: row for row in cursor.fetchall()}
+    compared = 0
+    for family in result["families"]:
+        row = raw[family["digest"]]
+        if row["COUNT_STAR"] == family["executions"]:
+            assert family["total_time_ms"] == round(row["SUM_TIMER_WAIT"] / 1_000_000_000, 3)
+            assert family["rows_sent"] == row["SUM_ROWS_SENT"]
+            compared += 1
+    assert compared >= 1
+
+
+def test_route_sends_only_its_fixed_sql_and_changes_nothing():
+    before_state, before_digests = table_state(), digest_counts()
+    for _ in range(3):
+        assert observed()["status"] == "available"
+    grown = {digest for (digest, _), count in digest_counts().items()
+             if count > before_digests.get((digest, _), 0)}
+    assert table_state() == before_state
+    assert grown and grown <= _expected_session_digests(), grown
+
+
+def test_route_without_the_grant_reports_insufficient_privileges():
+    result = observed(account=EVIDENCE)
+    assert result["status"] == "insufficient_privileges" and result["families"] == []
+
+
+def test_route_reports_a_disabled_digest_consumer():
+    with _connect(ROOT) as root, root.cursor() as cursor:
+        cursor.execute("UPDATE performance_schema.setup_consumers SET ENABLED = 'NO' "
+                       "WHERE NAME = 'statements_digest'")
+        try:
+            result = observed()
+        finally:
+            cursor.execute("UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' "
+                           "WHERE NAME = 'statements_digest'")
+    assert result["status"] == "digest_consumer_disabled" and result["families"] == []
+
+
+def test_route_reports_untimed_families_without_fabricated_times(capsys):
+    # Every statement instrument untimed, in a schema with no earlier (timed) families,
+    # so the route's result holds only untimed families, ordered by execution count.
+    with _connect(ROOT) as root, root.cursor() as cursor:
+        cursor.execute("SELECT NAME FROM performance_schema.setup_instruments "
+                       "WHERE NAME LIKE 'statement/%' AND TIMED = 'YES'")
+        timed = [row["NAME"] for row in cursor.fetchall()]
+        cursor.execute("UPDATE performance_schema.setup_instruments SET TIMED = 'NO' "
+                       "WHERE NAME LIKE 'statement/%'")
+        try:
+            with _connect_db(PERF, UNTIMED_DB) as connection, connection.cursor() as untimed:
+                for _ in range(20):
+                    untimed.execute("SELECT 1 AS untimed_marker")
+                    untimed.fetchall()
+            result = observed(database=UNTIMED_DB)
+        finally:
+            cursor.executemany("UPDATE performance_schema.setup_instruments SET TIMED = 'YES' "
+                               "WHERE NAME = %s", timed)
+    _report(capsys, "untimed route families", result["families"])
+    assert result["status"] == "available" and result["families"]
+    marker = result["families"][0]
+    assert "untimed_marker" in marker["digest_text"] and marker["executions"] == 20
+    for family in result["families"]:
+        assert family["timing"] == "not_recorded"
+        assert [family[key] for key in ("total_time_ms", "avg_time_ms", "max_time_ms",
+                                        "p95_time_ms")] == [None] * 4
