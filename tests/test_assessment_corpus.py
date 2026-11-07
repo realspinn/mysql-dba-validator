@@ -109,7 +109,7 @@ def validate(sql: str) -> dict:
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
                 "confidence": "LIMITED",
-                 # score removed – current behaviour is 25
+                "score": 25,
             },
         ),
         (
@@ -207,7 +207,7 @@ def validate(sql: str) -> dict:
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
                 "confidence": "LIMITED",
-                 # score removed – current behaviour is 25
+                "score": 25,
             },
         ),
         (
@@ -217,7 +217,7 @@ def validate(sql: str) -> dict:
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
                 "confidence": "LIMITED",
-                 # score removed – current behaviour is 25
+                "score": 25,
             },
         ),
         (
@@ -227,7 +227,7 @@ def validate(sql: str) -> dict:
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
                 "confidence": "LIMITED",
-                 # score removed – current behaviour is 25
+                "score": 25,
             },
         ),
 
@@ -340,7 +340,7 @@ def validate(sql: str) -> dict:
                 "analysis_status": "analysed",
                 "risk_level": "MEDIUM",
                 "confidence": "LIMITED",
-                 # score removed – current behaviour is 25
+                "score": 25,
                 "scope_basis": "not_established",
             },
         ),
