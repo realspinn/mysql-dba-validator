@@ -52,7 +52,7 @@ const state = {
 	discovery: null,
 	// The last historical workload result (memory only) and the context it was read
 	// for; dropped when the target, login or database changes.
-	performance: { result: null, key: null, loading: false, loadingKey: null }
+	performance: { result: null, key: null, loading: false, seen: null, generation: 0, loadingGeneration: null }
 };
 const pairingCode = $('pairingCode'), pairBtn = $('pairBtn'), unpairBtn = $('unpairBtn');
 const targetSelect = $('targetSelect'), loadTargetsBtn = $('loadTargetsBtn'), reapproveBtn = $('reapproveBtn');
@@ -2028,23 +2028,25 @@ function updatePerformanceContext() {
 		? String(state.remoteTarget.display_name || state.remoteTarget.target_id) : 'Local';
 	$('perfDatabase').textContent = state.selectedDatabase || 'None selected';
 	const current = perfContextKey();
+	if (current !== perf.seen) {
+		// Any change of target, login or database, even back to an earlier one, starts
+		// a new generation: a read started before it is discarded when it arrives.
+		perf.seen = current;
+		perf.generation += 1;
+	}
 	if (perf.key !== null && perf.key !== current) {
 		// The target, login or database changed: the last result no longer describes it.
 		perf.result = null;
 		perf.key = null;
 	}
 	if (perf.loading) {
-		// A read for another context is still in flight: show this context at once and
-		// keep the button disabled; the late result is discarded when it arrives.
-		if (perf.loadingKey !== current) {
+		// A read from an earlier generation is still in flight: show this context at
+		// once and keep the button disabled until that read settles and is discarded.
+		if (perf.loadingGeneration !== perf.generation) {
 			$('perfObservedAt').textContent = 'Not loaded';
 			$('perfObservedAt').removeAttribute('title');
 			renderPerfIdle();
 			perfLoadBtn.disabled = true;
-		} else if (!perf.result) {
-			// Back to the context being read (A, B, then A again): its read is still
-			// valid for it, so show it as reading rather than another context's text.
-			$('perfBody').replaceChildren(perfReadingState());
 		}
 		return;
 	}
@@ -2062,10 +2064,6 @@ function setPerfButton() {
 	perfLoadBtn.disabled = Boolean(perfBlocker());
 	perfLoadBtn.textContent = loaded ? 'Refresh snapshot' : 'Load historical workload';
 	perfLoadBtn.className = loaded ? 'secondary' : 'primary';
-}
-
-function perfReadingState() {
-	return perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.');
 }
 
 function observedAtText(iso) {
@@ -2109,12 +2107,12 @@ async function loadObservedPerformance() {
 	const perf = state.performance;
 	const key = perfContextKey();
 	perf.loading = true;
-	perf.loadingKey = key;
+	perf.loadingGeneration = perf.generation;
 	perfLoadBtn.disabled = true;
 	perfLoadBtn.setAttribute('aria-busy', 'true');
 	$('perfBody').setAttribute('aria-busy', 'true');
 	$('perfLive').textContent = 'Reading Performance Schema.';
-	if (!perf.result) $('perfBody').replaceChildren(perfReadingState());
+	if (!perf.result) $('perfBody').replaceChildren(perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.'));
 	let data = null, failure = null;
 	try {
 		data = await requestObservedPerformance();
@@ -2126,8 +2124,8 @@ async function loadObservedPerformance() {
 	perf.loading = false;
 	perfLoadBtn.removeAttribute('aria-busy');
 	$('perfBody').removeAttribute('aria-busy');
-	if (key !== perfContextKey()) {
-		// The context changed while reading: this result describes something else.
+	if (perf.loadingGeneration !== perf.generation) {
+		// The context changed while reading (even if it changed back): discard.
 		updatePerformanceContext();
 		return;
 	}

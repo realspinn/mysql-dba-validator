@@ -47,26 +47,20 @@ def test_remote_snapshot_goes_only_to_the_connector_with_a_discovered_database()
     assert "body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })" in remote
 
 
-def test_a_response_for_an_earlier_context_is_discarded():
-    # The context is captured before the request and compared after it: a slow
-    # response for another target, login or database is never shown. (Exercised in
-    # headless Chrome with a held response and a database change; see PR #47.)
-    load = _function("loadObservedPerformance")
-    assert load.index("const key = perfContextKey();") < load.index("await requestObservedPerformance()")
-    after = load[load.index("await requestObservedPerformance()"):]
-    guard = after.index("if (key !== perfContextKey()) {")
-    assert guard < after.index("perf.result =") and guard < after.index("renderPerfResult(data)")
-
-
-def test_a_context_change_clears_the_view_while_a_read_is_in_flight():
-    # The shown result is dropped on the change itself, not when the late read
-    # settles; the button stays disabled until it does.
+def test_a_read_is_discarded_after_any_context_change():
+    # Every change of target, login or database (even back to an earlier one) starts
+    # a new generation; a read is applied only if no change happened while it ran.
     update = _function("updatePerformanceContext")
-    assert update.index("perf.result = null;") < update.index("if (perf.loading) {")
+    assert "if (current !== perf.seen) {" in update and "perf.generation += 1;" in update
+    assert update.index("perf.generation += 1;") < update.index("if (perf.loading) {")
     in_flight = update[update.index("if (perf.loading) {"):update.index("setPerfButton();")]
-    assert "if (perf.loadingKey !== current) {" in in_flight
+    assert "if (perf.loadingGeneration !== perf.generation) {" in in_flight
     assert "renderPerfIdle();" in in_flight and "perfLoadBtn.disabled = true;" in in_flight
-    assert "perf.loadingKey = key;" in _function("loadObservedPerformance")
+    load = _function("loadObservedPerformance")
+    assert load.index("perf.loadingGeneration = perf.generation;") < load.index("await requestObservedPerformance()")
+    after = load[load.index("await requestObservedPerformance()"):]
+    guard = after.index("if (perf.loadingGeneration !== perf.generation) {")
+    assert guard < after.index("perf.result =") and guard < after.index("renderPerfResult(data)")
 
 
 def test_snapshot_context_never_includes_the_password():
