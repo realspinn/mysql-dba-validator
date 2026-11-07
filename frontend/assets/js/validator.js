@@ -52,7 +52,7 @@ const state = {
 	discovery: null,
 	// The last historical workload result (memory only) and the context it was read
 	// for; dropped when the target, login or database changes.
-	performance: { result: null, key: null, loading: false }
+	performance: { result: null, key: null, loading: false, loadingKey: null }
 };
 const pairingCode = $('pairingCode'), pairBtn = $('pairBtn'), unpairBtn = $('unpairBtn');
 const targetSelect = $('targetSelect'), loadTargetsBtn = $('loadTargetsBtn'), reapproveBtn = $('reapproveBtn');
@@ -2027,11 +2027,22 @@ function updatePerformanceContext() {
 	$('perfTarget').textContent = state.remoteTarget
 		? String(state.remoteTarget.display_name || state.remoteTarget.target_id) : 'Local';
 	$('perfDatabase').textContent = state.selectedDatabase || 'None selected';
-	if (perf.loading) return;
-	if (perf.key !== null && perf.key !== perfContextKey()) {
+	const current = perfContextKey();
+	if (perf.key !== null && perf.key !== current) {
 		// The target, login or database changed: the last result no longer describes it.
 		perf.result = null;
 		perf.key = null;
+	}
+	if (perf.loading) {
+		// A read for another context is still in flight: show this context at once and
+		// keep the button disabled; the late result is discarded when it arrives.
+		if (perf.loadingKey !== current) {
+			$('perfObservedAt').textContent = 'Not loaded';
+			$('perfObservedAt').removeAttribute('title');
+			renderPerfIdle();
+			perfLoadBtn.disabled = true;
+		}
+		return;
 	}
 	setPerfButton();
 	if (!perf.result) {
@@ -2090,6 +2101,7 @@ async function loadObservedPerformance() {
 	const perf = state.performance;
 	const key = perfContextKey();
 	perf.loading = true;
+	perf.loadingKey = key;
 	perfLoadBtn.disabled = true;
 	perfLoadBtn.setAttribute('aria-busy', 'true');
 	$('perfBody').setAttribute('aria-busy', 'true');

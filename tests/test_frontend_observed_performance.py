@@ -58,6 +58,17 @@ def test_a_response_for_an_earlier_context_is_discarded():
     assert guard < after.index("perf.result =") and guard < after.index("renderPerfResult(data)")
 
 
+def test_a_context_change_clears_the_view_while_a_read_is_in_flight():
+    # The shown result is dropped on the change itself, not when the late read
+    # settles; the button stays disabled until it does.
+    update = _function("updatePerformanceContext")
+    assert update.index("perf.result = null;") < update.index("if (perf.loading) {")
+    in_flight = update[update.index("if (perf.loading) {"):update.index("setPerfButton();")]
+    assert "if (perf.loadingKey !== current) {" in in_flight
+    assert "renderPerfIdle();" in in_flight and "perfLoadBtn.disabled = true;" in in_flight
+    assert "perf.loadingKey = key;" in _function("loadObservedPerformance")
+
+
 def test_snapshot_context_never_includes_the_password():
     assert "password" not in _function("perfContextKey")
 
