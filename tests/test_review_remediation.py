@@ -132,6 +132,8 @@ def test_parser_rewriting_cannot_turn_an_unapproved_call_into_an_approved_one():
     "SELECT * FROM t INTO OUTFILE '/tmp/x'",
     "SELECT /*+ SET_VAR(sort_buffer_size = 1) */ * FROM t",
     "SELECT a FROM t UNION SELECT b FROM u",
+    "SELECT a FROM t INTERSECT SELECT b FROM u",
+    "SELECT a FROM t EXCEPT SELECT b FROM u",
     "SELECT * FROM t; DELETE FROM t",
     "SELECT * FROM t PROCEDURE ANALYSE()",
     "SELECT * FROM WHERE",

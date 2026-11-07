@@ -8,8 +8,9 @@ Successful parsing is not proof of a full assessment. SQLGlot can accept text
 MySQL rejects, and a statement that parses may still have parts the risk rules
 do not interpret. The corpus is in
 [tests/test_select_coverage.py](../tests/test_select_coverage.py). Each row pins
-the statement type, analysis status, tables, locking flag and plan eligibility
-listed here.
+the statement type, analysis status, tables and locking flag listed here. It
+also pins what the plan collector does, with every gate applied: the plan is
+either sent, or refused with a stated reason and nothing is sent.
 
 Three outcomes:
 
@@ -29,22 +30,23 @@ Three outcomes:
 | Simple `SELECT` with or without `WHERE` | Table, predicate shape (for example equality on a column) |
 | Joins (inner, outer, `STRAIGHT_JOIN`), index hints | Every joined table; the predicate is marked as spanning several tables |
 | Subqueries: nested, correlated, `IN`, `EXISTS`, derived tables, `LATERAL` | Tables inside the subqueries. The predicate shape is `SUBQUERY` or `FUNCTION`. A filter on a derived table's column is marked unresolved, not credited to a base table |
-| Common table expressions (non-recursive) | The base tables inside the CTE; the CTE name is not treated as a table |
+| Common table expressions, including `WITH RECURSIVE` without a column list | The base tables inside the CTE; the CTE name is not treated as a table |
 | Aggregates, `GROUP BY`, `HAVING`, window functions, `ORDER BY`, `LIMIT`, `SQL_CALC_FOUND_ROWS` | Tables and `LIMIT` |
-| Schema-qualified names | `schema.table` |
-| `FROM DUAL` | No table, the same as `SELECT 1`. A quoted `` `DUAL` `` or `app.DUAL` names a real table and is treated as one |
-| Locking reads: `FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, `SKIP LOCKED` | Flagged as a locking read (finding, 20 MEDIUM). Plans use the same rules as other `SELECT`s |
+| Schema-qualified names, including `app.DUAL` | `schema.table` |
+| `FROM DUAL` | No table, the same as `SELECT 1`. With no table there is nothing to plan, so no plan is requested |
 
 ## Partially assessed
 
 | Form | What is not established, and why |
 | --- | --- |
+| Locking reads: `FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`, `SKIP LOCKED` | Flagged as a locking read (finding, 20 MEDIUM). No plan: the last check before sending refuses any locking clause |
+| Locking read without `WHERE` (`SELECT * FROM t FOR SHARE`) | As above, with the same score as a single-row locking read. Row scope is not established. The score does not distinguish locking every row from locking one row; that would be a scoring change, out of this audit's scope |
 | `UNION`, `INTERSECT`, `EXCEPT` | Classified as set operations, with the tables of every branch. The branches' `WHERE` clauses are not analysed and no plan is requested: plans are requested only for a single plain `SELECT` |
-| Recursive CTE (`WITH RECURSIVE seq (n) AS ...`) | No plan: the CTE's column list `seq (n)` looks like a call to an unreviewed function, so the plan request is refused. This is conservative |
+| Recursive CTE with a column list (`WITH RECURSIVE r (n) AS ...`) | No plan: the column list `r (n)` looks like a call to an unreviewed function, so the plan request is refused. This is conservative |
 | `JSON_TABLE(...)` | Not a table, which is correct. No plan: `COLUMNS (` is read as an unreviewed call, also conservative |
 | `PARTITION (p1)` selection | Table read. No plan: `PARTITION (` is read as an unreviewed call |
 | A stored function call (`my_func(id)`), `SLEEP()` | Finding "calls a function whose effects were not reviewed" (20 MEDIUM). No plan, because `EXPLAIN` can evaluate the function |
-| Locking read without `WHERE` (`SELECT * FROM t FOR SHARE`) | Flagged as a locking read with the same score as a single-row locking read. Row scope is not established. The score does not distinguish locking every row from locking one row; that would be a scoring change, out of this audit's scope |
+| `DUAL` next to a table (`FROM users, DUAL`), or a quoted `` `DUAL` `` | Tables read: `users`; a quoted `` `DUAL` `` names a real table and is reported as one. No plan: the text sent would name `` `DUAL` ``, a different table from the one written, so any unqualified DUAL is refused |
 
 ## Not analysed
 
@@ -84,7 +86,8 @@ statements collected from the test files:
 - `SELECT ... INTO OUTFILE` gets the generic "could not be read" result. A
   specific message, like the one for `INTO @var`, would be clearer.
 - The plan request is refused for recursive CTE column lists, `JSON_TABLE` and
-  `PARTITION (...)`, because the text scan reads them as function calls. This
+  `PARTITION (...)`, because the text scan reads them as function calls. It is
+  also refused for `FROM users, DUAL`. This
   is safe, since no plan is requested, but those statements get less evidence
   than they could. Allowing them would change the reviewed call list, which
   belongs in its own reviewed change.
