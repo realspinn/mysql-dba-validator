@@ -39,6 +39,7 @@ flowchart LR
 | Evidence state | `backend/evidence_state.py` | Builds each statement's `evidence` object from what the collectors returned. Pure result assembly: no database access. |
 | Result construction | `backend/validation_results.py` | Builds each statement's result and the batch result from the static report and collected evidence; shared by the web app and the connector. No FastAPI, settings or database access. |
 | Historical schema workload | `backend/observed_performance.py` | Optional diagnostic (the page's Observed performance view): fixed reads of `performance_schema.events_statements_summary_by_digest` for one schema, on the same read-only connection rules as evidence. Separate from validation; never feeds a score. See [docs/historical-schema-workload.md](docs/historical-schema-workload.md). |
+| InnoDB lock waits | `backend/lock_diagnostics.py` | Optional, API-only diagnostic: a snapshot of `performance_schema.data_lock_waits` and `data_locks` for one schema (who waits, who blocks, which table), on the same read-only connection rules as evidence. Never reads key values or SQL text, never acts on a session. See [docs/innodb-lock-waits.md](docs/innodb-lock-waits.md). |
 | Local connector | `connector/` (`launcher.py`, `server.py`, `policy.py`, `registry_store.py`) | Separate service on `127.0.0.1:8765` for operator-approved company targets. See [connector/README.md](connector/README.md). |
 | Windows launcher | `release/launcher.py`, `release/mysql-dba-validator.spec` | Starts the packaged web app (and, in the Console executable, the connector). |
 
@@ -128,6 +129,7 @@ and has no endpoint that runs user-supplied SQL (`/api/evidence` returns
 | Metadata | Fixed, parameterised `information_schema` queries for the referenced tables | The same queries, only for the selected discovered database |
 | Other | `SELECT DATABASE()` after a plan | `SELECT DATABASE()` after a plan; fixed, capped `SHOW DATABASES` for discovery |
 | Historical schema workload (only when its route is called) | Four fixed Performance Schema reads for the selected database, after the read-only state is read back again; no SQL in the request ([details](docs/historical-schema-workload.md)) | The same, only for an approved target and a discovered database |
+| InnoDB lock waits (only when its route is called) | Three fixed Performance Schema reads for the selected database, after the read-only state is read back again; no SQL or session ID in the request ([details](docs/innodb-lock-waits.md)) | The same, only for an approved target and a discovered database |
 
 MySQL error 1792 (read-only transaction) on the local connection is reported,
 never retried. The web app's separate connection-test and database-discovery

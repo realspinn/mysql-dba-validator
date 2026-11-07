@@ -29,7 +29,7 @@ from .parser import parse_sql
 from .validation_results import batch_result, build_statement_result, script_error
 from .version import APP_VERSION
 from .update_check import check_for_update
-from . import observed_performance, update_check, update_download
+from . import lock_diagnostics, observed_performance, update_check, update_download
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -474,7 +474,7 @@ def discover_databases_endpoint(req: ConnectionTestRequest):
     return discover_databases(session)
 
 
-class ObservedPerformanceRequest(BaseModel):
+class DiagnosticRequest(BaseModel):
     """A loopback login and the selected database. No SQL or query of any kind."""
     model_config = ConfigDict(extra="forbid")
 
@@ -485,13 +485,12 @@ class ObservedPerformanceRequest(BaseModel):
     database: str
 
 
-@app.post("/api/diagnostics/observed-performance")
-def observed_performance_endpoint(req: ObservedPerformanceRequest):
-    """Historical schema workload for a Local Mode database (optional diagnostic).
+def _local_diagnostic(req: DiagnosticRequest, collect, result):
+    """Run one optional diagnostic for a Local Mode database.
 
-    Separate from /api/validate: these are statement families MySQL already recorded,
-    not evidence about any submitted SQL. Same loopback-only target rule and the same
-    per-request, read-only evidence connection as local validation.
+    Separate from /api/validate: nothing here is evidence about submitted SQL. Same
+    loopback-only target rule and the same per-request, read-only evidence connection
+    as local validation; the collector sends only its own fixed queries.
     """
     if PUBLIC_DEMO:  # also unreachable there (PublicDemoGuard); refused before any lookup
         return public_demo_refusal()
@@ -515,14 +514,26 @@ def observed_performance_endpoint(req: ObservedPerformanceRequest):
         req.database,
     )
     if connection is None:
-        return observed_performance.result(req.database, status or "collection_failed")
+        return result(req.database, status or "collection_failed")
     try:
-        return observed_performance.collect_observed_performance(connection, req.database)
+        return collect(connection, req.database)
     finally:
         try:
             connection.close()
         except Exception:
             pass
+
+
+@app.post("/api/diagnostics/observed-performance")
+def observed_performance_endpoint(req: DiagnosticRequest):
+    """Historical schema workload: statement families MySQL already recorded."""
+    return _local_diagnostic(req, observed_performance.collect_observed_performance, observed_performance.result)
+
+
+@app.post("/api/diagnostics/lock-waits")
+def lock_waits_endpoint(req: DiagnosticRequest):
+    """A snapshot of current InnoDB lock waits on tables in the selected database."""
+    return _local_diagnostic(req, lock_diagnostics.collect_lock_waits, lock_diagnostics.result)
 
 
 # Public demo: validations allowed at once. Analysis is CPU-bound, so more would only

@@ -345,6 +345,23 @@ Shown on each run:
     (`SET NAMES`, the read-only setting and its read-back).
   - **Not shown:** `performance_schema = OFF` (a startup setting; unit tests
     only), MySQL 8.0, and the connector route against a real server.
+- InnoDB lock waits (unreleased). The checks use a controlled lock wait: one
+  `vt_writer` session holds `users.id = 1` with `SELECT ... FOR UPDATE`, and a
+  second one waits on an `UPDATE` of that row. Both are rolled back afterwards,
+  and the fixture rows are unchanged. The accounts are `vt_locks` (column-level
+  grants on `data_lock_waits`, `data_locks` and `threads`), `vt_locks_nothreads`
+  (without `threads`) and `vt_lock_plain` (no Performance Schema grant).
+  - **Column grants:** the reads work, and they show another account's lock
+    wait. `LOCK_DATA` and `PROCESSLIST_INFO` are refused (1143), and
+    `INNODB_TRX` is refused (1227).
+  - **Route result:** one wait on `users` / `PRIMARY` / `RECORD`. The waiting
+    and blocking connection IDs match the two test sessions. Without the
+    `threads` grant, `sessions` is `unverified`; without any grant, the result
+    is `insufficient_privileges`; after the release, `no_lock_waits`.
+  - **SQL sent:** every new digest in the schema is one of the route's fixed
+    queries or the session setup. The reads also work on the validator's
+    read-only session.
+  - **Not shown:** MySQL 8.0, and the connector route against a real server.
 
 Not shown: Company Mode and the connector, any TLS (Local Mode has none),
 AWS RDS, proxies, VPN, MySQL 8.0, the packaged app against a database, the

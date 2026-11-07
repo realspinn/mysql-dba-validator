@@ -522,3 +522,194 @@ def test_route_reports_untimed_families_without_fabricated_times(capsys):
         assert family["timing"] == "not_recorded"
         assert [family[key] for key in ("total_time_ms", "avg_time_ms", "max_time_ms",
                                         "p95_time_ms")] == [None] * 4
+
+
+# ---------------------------------------------------------------- InnoDB lock diagnostics gate
+#
+# A controlled lock wait on the disposable container: vt_writer holds a row lock in an
+# open transaction, a second vt_writer session waits for it, and the reads below are
+# made while it waits. Both transactions are rolled back in a finally block, so the
+# fixture rows never change.
+
+LOCKS = ("vt_locks", "ci-only-locks-pw-1")
+LOCK_PLAIN = ("vt_lock_plain", "ci-only-lock-plain-pw-1")
+from backend.lock_diagnostics import LOCK_WAITS_SQL  # noqa: E402  the collector's own query
+
+
+class _LockWait:
+    """Holder locks users.id = 1; a waiter's UPDATE of the same row waits on it.
+
+    Whatever fails during setup, the holder's transaction is rolled back and both
+    connections are closed before the error leaves, so no lock outlives a test.
+    """
+
+    def __enter__(self):
+        import threading
+        import time
+        self.holder = self.waiter = self.thread = None
+        self.outcome = {}
+        try:
+            self.holder = _connect_db(WRITER, DB)
+            self.waiter = _connect_db(WRITER, DB)
+            self.holder_id, self.waiter_id = self.holder.thread_id(), self.waiter.thread_id()
+            with self.holder.cursor() as cursor:
+                cursor.execute("START TRANSACTION")
+                cursor.execute("SELECT id FROM users WHERE id = 1 FOR UPDATE")
+            with self.waiter.cursor() as cursor:
+                cursor.execute("SET SESSION innodb_lock_wait_timeout = 20")
+                cursor.execute("START TRANSACTION")
+
+            def wait():
+                try:
+                    with self.waiter.cursor() as cursor:
+                        cursor.execute("UPDATE users SET status = status WHERE id = 1")
+                    self.outcome["result"] = "granted"
+                except pymysql.MySQLError as exc:
+                    self.outcome["result"] = exc.args[0]
+
+            self.thread = threading.Thread(target=wait, daemon=True)
+            self.thread.start()
+            deadline = time.time() + 10
+            while time.time() < deadline:  # until the server reports the wait
+                with _connect(ROOT) as root, root.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) AS n FROM performance_schema.data_lock_waits")
+                    if cursor.fetchone()["n"]:
+                        return self
+                time.sleep(0.1)
+            raise AssertionError("no lock wait appeared")
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def release(self):
+        self.holder.rollback()
+
+    def __exit__(self, *exc):
+        # Each step runs even if an earlier one fails; none of them hides the
+        # original exception.
+        for step in (lambda: self.holder.rollback(), lambda: self.thread.join(25),
+                     lambda: self.waiter.rollback(), lambda: self.holder.close(),
+                     lambda: self.waiter.close()):
+            try:
+                step()
+            except Exception:
+                pass
+
+
+def test_lock_gate_column_grants_show_who_waits_on_whom(capsys):
+    before = table_state()
+    with _LockWait() as fixture:
+        with _connect(LOCKS) as connection, connection.cursor() as cursor:
+            cursor.execute("SHOW GRANTS")
+            _report(capsys, "vt_locks grants", [next(iter(row.values())) for row in cursor.fetchall()])
+            cursor.execute(LOCK_WAITS_SQL, (DB,))
+            rows = cursor.fetchall()
+            _report(capsys, "lock waits", rows)
+            _report(capsys, "column types", {k: type(v).__name__ for k, v in rows[0].items()} if rows else None)
+            thread_ids = sorted({rows[0]["REQUESTING_THREAD_ID"], rows[0]["BLOCKING_THREAD_ID"]})
+            cursor.execute("SELECT THREAD_ID, PROCESSLIST_ID, PROCESSLIST_TIME FROM performance_schema.threads "
+                           "WHERE THREAD_ID IN (%s, %s)", thread_ids)
+            threads = {row["THREAD_ID"]: row for row in cursor.fetchall()}
+            _report(capsys, "threads", threads)
+            denied = {column: _errno(cursor, f"SELECT {column} FROM performance_schema.data_locks LIMIT 1")
+                      for column in ("LOCK_DATA", "*", "THREAD_ID", "LOCK_STATUS", "ENGINE_TRANSACTION_ID")}
+            denied["threads.PROCESSLIST_INFO"] = _errno(
+                cursor, "SELECT PROCESSLIST_INFO FROM performance_schema.threads LIMIT 1")
+            denied["innodb_trx"] = _errno(cursor, "SELECT trx_id FROM information_schema.INNODB_TRX LIMIT 1")
+            _report(capsys, "vt_locks denied errnos", denied)
+        with _connect(LOCK_PLAIN) as connection, connection.cursor() as cursor:
+            plain = _errno(cursor, LOCK_WAITS_SQL % f"'{DB}'")
+            _report(capsys, "vt_lock_plain errno", plain)
+        fixture.release()
+    _report(capsys, "waiter outcome", fixture.outcome)
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["OBJECT_SCHEMA"], row["OBJECT_NAME"], row["INDEX_NAME"], row["LOCK_TYPE"]) == (
+        DB, "users", "PRIMARY", "RECORD")
+    assert threads[row["BLOCKING_THREAD_ID"]]["PROCESSLIST_ID"] == fixture.holder_id
+    assert threads[row["REQUESTING_THREAD_ID"]]["PROCESSLIST_ID"] == fixture.waiter_id
+    # Every refusal the documentation states, as MySQL 8.4.13 reported it.
+    assert denied == {"LOCK_DATA": 1143, "*": 1142, "THREAD_ID": 1143, "LOCK_STATUS": 1143,
+                      "ENGINE_TRANSACTION_ID": 1143, "threads.PROCESSLIST_INFO": 1143,
+                      "innodb_trx": 1227}, denied
+    assert plain == 1142
+    assert fixture.outcome == {"result": "granted"}
+    assert table_state() == before
+
+
+def test_lock_gate_reads_on_the_validators_read_only_session_and_empty_after_release(capsys):
+    from backend.db import ConnectionProfile, open_evidence_connection
+    with _LockWait() as fixture:
+        connection, status = open_evidence_connection(
+            ConnectionProfile(host=HOST, port=PORT, username=LOCKS[0], password=LOCKS[1]), DB)
+        assert status is None
+        try:
+            cursor = connection.cursor()
+            cursor.execute(LOCK_WAITS_SQL, (DB,))
+            during = cursor.fetchall()
+            fixture.release()
+            fixture.thread.join(25)
+            cursor.execute(LOCK_WAITS_SQL, (DB,))
+            after = cursor.fetchall()
+            cursor.close()
+        finally:
+            connection.close()
+    _report(capsys, "read-only session: during, after", (len(during), len(after)))
+    assert len(during) == 1 and len(after) == 0
+
+
+# ---------------------------------------------------------------- lock waits route
+
+LOCKS_NOTHREADS = ("vt_locks_nothreads", "ci-only-locks-nothreads-pw-1")
+LOCKS_PATH = "/api/diagnostics/lock-waits"
+
+
+def lock_waits(account=LOCKS):
+    response = client.post(LOCKS_PATH, json={**_login(account), "database": DB})
+    assert response.status_code == 200, response.status_code
+    assert account[1] not in response.text
+    return response.json()
+
+
+def test_lock_route_shows_the_waiting_and_blocking_sessions(capsys):
+    before = table_state()
+    with _LockWait() as fixture:
+        result = lock_waits()
+        without_threads = lock_waits(LOCKS_NOTHREADS)
+        no_grant = lock_waits(LOCK_PLAIN)
+        fixture.release()
+        fixture.thread.join(25)
+        after = lock_waits()
+    _report(capsys, "lock route", result)
+    assert result["status"] == "available" and result["sessions"] == "available"
+    assert len(result["waits"]) == 1
+    wait = result["waits"][0]
+    assert (wait["table"], wait["index"], wait["lock_type"]) == ("users", "PRIMARY", "RECORD")
+    assert wait["waiting"]["session_id"] == fixture.waiter_id
+    assert wait["blocking"]["session_id"] == fixture.holder_id
+    assert isinstance(wait["waiting"]["seconds_in_state"], int)
+    assert without_threads["status"] == "available" and without_threads["sessions"] == "unverified"
+    assert without_threads["waits"][0]["waiting"]["session_id"] is None
+    assert no_grant["status"] == "insufficient_privileges" and no_grant["waits"] == []
+    assert after["status"] == "no_lock_waits"
+    assert fixture.outcome == {"result": "granted"}
+    assert table_state() == before
+
+
+def test_lock_route_sends_only_its_fixed_sql():
+    from backend import lock_diagnostics as ld
+    from backend.db import READ_ONLY_CHECK_SQL, READ_ONLY_SESSION_SQL
+    with _LockWait() as fixture:
+        before = digest_counts()
+        assert lock_waits()["status"] == "available"
+        after = digest_counts()
+        fixture.release()
+    grown = {digest for (digest, text), count in after.items() if count > before.get((digest, text), 0)}
+    statements = [ld.STATE_SQL, ld.LOCK_WAITS_SQL % f"'{DB}'", ld.THREADS_SQL.format("1, 2"),
+                  READ_ONLY_SESSION_SQL, READ_ONLY_CHECK_SQL, "SET NAMES utf8mb4"]
+    with _connect_db(PERF, DB) as connection, connection.cursor() as cursor:
+        expected = set()
+        for statement in statements:
+            cursor.execute("SELECT STATEMENT_DIGEST(%s) AS d", (statement,))
+            expected.add(cursor.fetchone()["d"])
+    assert grown and grown <= expected, grown

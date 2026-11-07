@@ -36,6 +36,12 @@ How the components and request flows fit together is described in
   need is server-wide, so granting it is the DBA's decision; see
   [docs/historical-schema-workload.md](docs/historical-schema-workload.md).
   *(Unreleased.)*
+- The optional InnoDB lock waits routes (web app and connector) read only fixed
+  lock columns, never `LOCK_DATA` (row key values) or SQL text, accept no SQL or
+  session ID, and never kill, commit or roll back anything. The public demo does
+  not serve them. Their privileges show lock waits for every schema, so granting
+  them is the DBA's decision; see [docs/innodb-lock-waits.md](docs/innodb-lock-waits.md).
+  *(Unreleased.)*
 - The browser can use only connector targets approved at the connector
   console. The page may request a target, but the request is approved only
   with a one-time code that the console prints next to the exact host, port,
