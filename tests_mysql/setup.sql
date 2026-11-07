@@ -27,3 +27,16 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON validator_live_test.* TO 'vt_writer'@'%'
 -- Observer: reads statement digests (which statements reached the server).
 CREATE USER 'vt_observer'@'%' IDENTIFIED BY 'ci-only-observer-pw-1';
 GRANT SELECT ON performance_schema.events_statements_summary_by_digest TO 'vt_observer'@'%';
+
+-- Historical schema workload: column-level SELECT on only the digest columns the
+-- collector reads (no QUERY_SAMPLE_TEXT or any other column), plus NAME and
+-- ENABLED of setup_consumers. A schema with no workload of its own as well.
+CREATE SCHEMA validator_ci_quiet;
+CREATE USER 'vt_perf'@'%' IDENTIFIED BY 'ci-only-perf-pw-1';
+GRANT SELECT ON validator_live_test.* TO 'vt_perf'@'%';
+GRANT SELECT ON validator_ci_quiet.* TO 'vt_perf'@'%';
+GRANT SELECT (SCHEMA_NAME, DIGEST, DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT, AVG_TIMER_WAIT,
+              MAX_TIMER_WAIT, QUANTILE_95, SUM_LOCK_TIME, SUM_ROWS_EXAMINED, SUM_ROWS_SENT,
+              SUM_ROWS_AFFECTED, SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN)
+  ON performance_schema.events_statements_summary_by_digest TO 'vt_perf'@'%';
+GRANT SELECT (NAME, ENABLED) ON performance_schema.setup_consumers TO 'vt_perf'@'%';

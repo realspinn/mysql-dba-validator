@@ -16,7 +16,12 @@ rows). These tests use only the accounts that setup created:
 
 - vt_evidence: SELECT on validator_live_test (the validator's login);
 - vt_writer: SELECT, INSERT, UPDATE, DELETE there (negative safety test only);
-- vt_observer: SELECT on the statement digest table.
+- vt_observer: SELECT on the statement digest table;
+- vt_perf: SELECT on validator_live_test and validator_ci_quiet, and column-level
+  SELECT on the digest columns the observed-performance collector reads.
+
+The historical schema workload gate tests also use the container's root, only to
+change and restore setup_instruments and setup_consumers.
 
 Requests go through the real /api routes, PyMySQL and server (FastAPI
 TestClient in-process). Verification level: real MySQL 8.4 server in Docker on
@@ -222,3 +227,186 @@ def test_submitted_writes_are_not_executed_even_when_the_login_could_write():
                    for (digest, text), count in after_digests.items()), "digest table overflowed"
     # Secondary evidence: no write, write plan or ANALYZE reached the server.
     assert not [text for text in grown if WRITE_DIGEST.match(text) or "ANALYZE" in text.upper()], grown
+
+
+# ---------------------------------------------------------------- historical schema workload gate
+#
+# Direct checks (not through the app's routes) of the Performance Schema reads the
+# observed-performance collector depends on. The instrumentation tests change
+# setup_instruments or setup_consumers on this disposable container only, as root,
+# and restore the default in a finally block.
+
+ROOT = ("root", "ci-only-root-pw-1")  # the container's root (ci.yml MYSQL_ROOT_PASSWORD)
+PERF = ("vt_perf", "ci-only-perf-pw-1")
+QUIET_DB = "validator_ci_quiet"
+PERF_COLUMNS = ("DIGEST, DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT, AVG_TIMER_WAIT, MAX_TIMER_WAIT, "
+                "QUANTILE_95, SUM_LOCK_TIME, SUM_ROWS_EXAMINED, SUM_ROWS_SENT, SUM_ROWS_AFFECTED, "
+                "SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN")
+DIGEST_TABLE = "performance_schema.events_statements_summary_by_digest"
+
+
+def _connect_db(account, database):
+    user, password = account
+    return pymysql.connect(host=HOST, port=PORT, user=user, password=password, database=database,
+                           connect_timeout=5, cursorclass=pymysql.cursors.DictCursor)
+
+
+def _errno(cursor, sql):
+    try:
+        cursor.execute(sql)
+    except pymysql.MySQLError as exc:
+        return exc.args[0]
+    return None
+
+
+def _digest_row(statement):
+    """The digest summary row of one statement text in the test schema, read as vt_perf."""
+    with _connect(PERF) as connection, connection.cursor() as cursor:
+        cursor.execute(f"SELECT {PERF_COLUMNS} FROM {DIGEST_TABLE} "
+                       "WHERE SCHEMA_NAME = %s AND DIGEST = STATEMENT_DIGEST(%s)", (DB, statement))
+        return cursor.fetchone()
+
+
+def _run(statement, times):
+    """Harness workload as vt_evidence with the test schema as default (not via the app)."""
+    with _connect_db(EVIDENCE, DB) as connection, connection.cursor() as cursor:
+        for _ in range(times):
+            cursor.execute(statement)
+            cursor.fetchall()
+
+
+def _report(capsys, label, value):
+    with capsys.disabled():
+        print(f"\n[perf-gate] {label}: {value}")
+
+
+def test_perf_gate_column_grant_reads_metrics_but_not_samples(capsys):
+    with _connect(PERF) as connection, connection.cursor() as cursor:
+        cursor.execute("SHOW GRANTS")
+        _report(capsys, "vt_perf grants", [next(iter(row.values())) for row in cursor.fetchall()])
+        cursor.execute(f"SELECT {PERF_COLUMNS} FROM {DIGEST_TABLE} WHERE SCHEMA_NAME = %s "
+                       "AND DIGEST IS NOT NULL ORDER BY SUM_TIMER_WAIT DESC LIMIT 6", (DB,))
+        cursor.fetchall()
+        cursor.execute("SELECT NAME, ENABLED FROM performance_schema.setup_consumers "
+                       "WHERE NAME IN ('global_instrumentation', 'statements_digest')")
+        consumers = {row["NAME"]: row["ENABLED"] for row in cursor.fetchall()}
+        _report(capsys, "consumers", consumers)
+        assert consumers == {"global_instrumentation": "YES", "statements_digest": "YES"}
+        denied = {column: _errno(cursor, f"SELECT {column} FROM {DIGEST_TABLE} LIMIT 1")
+                  for column in ("QUERY_SAMPLE_TEXT", "*", "SUM_CPU_TIME", "MIN_TIMER_WAIT")}
+        denied["events_statements_history"] = _errno(
+            cursor, "SELECT SQL_TEXT FROM performance_schema.events_statements_history LIMIT 1")
+        _report(capsys, "vt_perf denied errnos", denied)
+        assert denied == {"QUERY_SAMPLE_TEXT": 1143, "*": 1143, "SUM_CPU_TIME": 1143,
+                          "MIN_TIMER_WAIT": 1143, "events_statements_history": 1142}
+    with _connect(EVIDENCE) as connection, connection.cursor() as cursor:
+        no_grant = _errno(cursor, f"SELECT COUNT_STAR FROM {DIGEST_TABLE} LIMIT 1")
+        cursor.execute("SELECT @@GLOBAL.performance_schema AS performance_schema")
+        enabled = cursor.fetchone()["performance_schema"]
+        _report(capsys, "vt_evidence digest errno, @@GLOBAL.performance_schema", (no_grant, enabled))
+        assert no_grant == 1142 and enabled == 1
+
+
+def test_perf_gate_reads_on_the_validators_read_only_session(capsys):
+    from backend.db import READ_ONLY_CHECK_SQL, ConnectionProfile, open_evidence_connection
+    connection, status = open_evidence_connection(
+        ConnectionProfile(host=HOST, port=PORT, username=PERF[0], password=PERF[1]), DB)
+    assert status is None and connection is not None
+    try:
+        cursor = connection.cursor()
+        cursor.execute(READ_ONLY_CHECK_SQL)
+        assert cursor.fetchone()["transaction_read_only"] == 1
+        cursor.execute(f"SELECT {PERF_COLUMNS} FROM {DIGEST_TABLE} WHERE SCHEMA_NAME = %s "
+                       "AND DIGEST IS NOT NULL ORDER BY SUM_TIMER_WAIT DESC, COUNT_STAR DESC, DIGEST "
+                       "LIMIT 6", (DB,))
+        rows = cursor.fetchmany(7)
+        cursor.execute(f"SELECT COUNT_STAR FROM {DIGEST_TABLE} WHERE DIGEST IS NULL")
+        overflow = cursor.fetchall()
+        cursor.close()
+    finally:
+        connection.close()
+    _report(capsys, "read-only session rows, overflow", (len(rows), overflow))
+    _report(capsys, "column types", {key: type(value).__name__ for key, value in rows[0].items()})
+    assert 1 <= len(rows) <= 6
+
+
+def test_perf_gate_timer_units_and_counters(capsys):
+    import time
+    statement = "SELECT id FROM users WHERE customer_id = 10"
+    before = _digest_row(statement) or {}
+    started = time.perf_counter()
+    _run(statement, 25)
+    wall_seconds = time.perf_counter() - started
+    after = _digest_row(statement)
+    _report(capsys, "workload row", after)
+    count = after["COUNT_STAR"] - before.get("COUNT_STAR", 0)
+    total_ps = after["SUM_TIMER_WAIT"] - before.get("SUM_TIMER_WAIT", 0)
+    _report(capsys, "wall seconds, server seconds (ps / 1e12)", (wall_seconds, total_ps / 1e12))
+    assert count == 25
+    assert after["SUM_ROWS_SENT"] - before.get("SUM_ROWS_SENT", 0) == 50  # ids 1 and 2
+    assert after["SUM_ROWS_AFFECTED"] == 0
+    # Picoseconds: 25 sequential statements took no longer than the client's wall clock.
+    assert 0 < total_ps / 1e12 <= wall_seconds
+    assert 0 < after["AVG_TIMER_WAIT"] <= after["MAX_TIMER_WAIT"]
+    assert after["QUANTILE_95"] > 0
+    assert after["FIRST_SEEN"] <= after["LAST_SEEN"]
+
+
+def test_perf_gate_untimed_statements_still_count(capsys):
+    statement = "SELECT id FROM users WHERE tenant_id = 2"
+    with _connect(ROOT) as root, root.cursor() as cursor:
+        cursor.execute("SELECT TIMED FROM performance_schema.setup_instruments "
+                       "WHERE NAME = 'statement/sql/select'")
+        assert cursor.fetchone()["TIMED"] == "YES"
+        cursor.execute("UPDATE performance_schema.setup_instruments SET TIMED = 'NO' "
+                       "WHERE NAME = 'statement/sql/select'")
+        try:
+            _run(statement, 10)
+        finally:
+            cursor.execute("UPDATE performance_schema.setup_instruments SET TIMED = 'YES' "
+                           "WHERE NAME = 'statement/sql/select'")
+    row = _digest_row(statement)
+    _report(capsys, "untimed row", row)
+    assert row["COUNT_STAR"] == 10
+    assert row["SUM_TIMER_WAIT"] == 0 and row["MAX_TIMER_WAIT"] == 0
+
+
+def test_perf_gate_disabled_digest_consumer_records_nothing(capsys):
+    statement = "SELECT id FROM users WHERE tenant_id = 1 AND status = 'open'"
+    with _connect(ROOT) as root, root.cursor() as cursor:
+        cursor.execute("UPDATE performance_schema.setup_consumers SET ENABLED = 'NO' "
+                       "WHERE NAME = 'statements_digest'")
+        try:
+            _run(statement, 5)
+            with _connect(PERF) as perf, perf.cursor() as perf_cursor:
+                perf_cursor.execute("SELECT ENABLED FROM performance_schema.setup_consumers "
+                                    "WHERE NAME = 'statements_digest'")
+                seen = perf_cursor.fetchone()["ENABLED"]
+        finally:
+            cursor.execute("UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' "
+                           "WHERE NAME = 'statements_digest'")
+    row = _digest_row(statement)
+    _report(capsys, "consumer seen by vt_perf, row while disabled", (seen, row))
+    assert seen == "NO" and row is None
+
+
+def test_perf_gate_quiet_schema_shows_only_the_validators_own_session(capsys):
+    from backend.db import ConnectionProfile, open_evidence_connection
+    with _connect(ROOT) as root, root.cursor() as cursor:
+        cursor.execute(f"SELECT COUNT(*) AS n FROM {DIGEST_TABLE} WHERE SCHEMA_NAME = %s", (QUIET_DB,))
+        assert cursor.fetchone()["n"] == 0
+    connection, status = open_evidence_connection(
+        ConnectionProfile(host=HOST, port=PORT, username=PERF[0], password=PERF[1]), QUIET_DB)
+    assert status is None
+    try:
+        cursor = connection.cursor()
+        cursor.execute(f"SELECT DIGEST_TEXT, COUNT_STAR FROM {DIGEST_TABLE} WHERE SCHEMA_NAME = %s "
+                       "AND DIGEST IS NOT NULL", (QUIET_DB,))
+        rows = cursor.fetchall()
+        cursor.close()
+    finally:
+        connection.close()
+    _report(capsys, "quiet schema rows", rows)
+    texts = [row["DIGEST_TEXT"] for row in rows]
+    assert all(text.startswith(("SET SESSION TRANSACTION READ ONLY", "SELECT @@SESSION"))
+               for text in texts), texts
