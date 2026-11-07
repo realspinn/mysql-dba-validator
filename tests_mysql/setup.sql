@@ -42,3 +42,19 @@ GRANT SELECT (SCHEMA_NAME, DIGEST, DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT, AVG_
               SUM_ROWS_AFFECTED, SUM_NO_INDEX_USED, FIRST_SEEN, LAST_SEEN)
   ON performance_schema.events_statements_summary_by_digest TO 'vt_perf'@'%';
 GRANT SELECT (NAME, ENABLED) ON performance_schema.setup_consumers TO 'vt_perf'@'%';
+
+-- InnoDB lock diagnostics gate: column-level SELECT on only the lock columns a
+-- collector would read (no LOCK_DATA, which holds key values), plus the thread to
+-- connection mapping and time in state. vt_lock_plain has no Performance Schema grant.
+CREATE USER 'vt_locks'@'%' IDENTIFIED BY 'ci-only-locks-pw-1';
+GRANT SELECT ON validator_live_test.* TO 'vt_locks'@'%';
+GRANT SELECT (ENGINE, REQUESTING_ENGINE_LOCK_ID, REQUESTING_ENGINE_TRANSACTION_ID, REQUESTING_THREAD_ID,
+              BLOCKING_ENGINE_LOCK_ID, BLOCKING_ENGINE_TRANSACTION_ID, BLOCKING_THREAD_ID)
+  ON performance_schema.data_lock_waits TO 'vt_locks'@'%';
+GRANT SELECT (ENGINE, ENGINE_LOCK_ID, OBJECT_SCHEMA, OBJECT_NAME, PARTITION_NAME, INDEX_NAME,
+              LOCK_TYPE, LOCK_MODE, LOCK_STATUS)
+  ON performance_schema.data_locks TO 'vt_locks'@'%';
+GRANT SELECT (THREAD_ID, PROCESSLIST_ID, PROCESSLIST_TIME)
+  ON performance_schema.threads TO 'vt_locks'@'%';
+CREATE USER 'vt_lock_plain'@'%' IDENTIFIED BY 'ci-only-lock-plain-pw-1';
+GRANT SELECT ON validator_live_test.* TO 'vt_lock_plain'@'%';
