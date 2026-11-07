@@ -570,9 +570,11 @@ def _predicate_columns(
 def _physical_tables(expr: exp.Expression) -> list[exp.Table]:
     """Table nodes that name a real table, not an alias or CTE reference.
 
-    Excluded: a reference to a CTE name, and an unqualified name that only repeats an
+    Excluded: a reference to a CTE name, an unqualified name that only repeats an
     alias declared elsewhere in the statement (the target list of
-    ``DELETE o FROM orders o ...``).
+    ``DELETE o FROM orders o ...``), and an unqualified, unquoted DUAL: MySQL's dummy
+    table name, which names no table (MySQL 8.4 manual, SELECT Statement). A quoted
+    `DUAL` or a qualified app.DUAL is an ordinary identifier and stays a table.
     """
     cte_names = {cte.alias_or_name.lower() for cte in expr.find_all(exp.CTE) if cte.alias_or_name}
     tables = [table for table in expr.find_all(exp.Table) if table.name]
@@ -581,6 +583,9 @@ def _physical_tables(expr: exp.Expression) -> list[exp.Table]:
     for table in tables:
         name = table.name.lower()
         if not table.db and name in cte_names:
+            continue
+        if (name == "dual" and not table.db and isinstance(table.this, exp.Identifier)
+                and not table.this.quoted):
             continue
         if not table.db and not table.alias and name in aliases:
             continue
