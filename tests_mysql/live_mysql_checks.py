@@ -537,52 +537,63 @@ from backend.lock_diagnostics import LOCK_WAITS_SQL  # noqa: E402  the collector
 
 
 class _LockWait:
-    """Holder locks users.id = 1; a waiter's UPDATE of the same row waits on it."""
+    """Holder locks users.id = 1; a waiter's UPDATE of the same row waits on it.
+
+    Whatever fails during setup, the holder's transaction is rolled back and both
+    connections are closed before the error leaves, so no lock outlives a test.
+    """
 
     def __enter__(self):
         import threading
         import time
-        self.holder = _connect_db(WRITER, DB)
-        self.waiter = _connect_db(WRITER, DB)
-        self.holder_id, self.waiter_id = self.holder.thread_id(), self.waiter.thread_id()
-        with self.holder.cursor() as cursor:
-            cursor.execute("START TRANSACTION")
-            cursor.execute("SELECT id FROM users WHERE id = 1 FOR UPDATE")
-        with self.waiter.cursor() as cursor:
-            cursor.execute("SET SESSION innodb_lock_wait_timeout = 20")
-            cursor.execute("START TRANSACTION")
+        self.holder = self.waiter = self.thread = None
         self.outcome = {}
+        try:
+            self.holder = _connect_db(WRITER, DB)
+            self.waiter = _connect_db(WRITER, DB)
+            self.holder_id, self.waiter_id = self.holder.thread_id(), self.waiter.thread_id()
+            with self.holder.cursor() as cursor:
+                cursor.execute("START TRANSACTION")
+                cursor.execute("SELECT id FROM users WHERE id = 1 FOR UPDATE")
+            with self.waiter.cursor() as cursor:
+                cursor.execute("SET SESSION innodb_lock_wait_timeout = 20")
+                cursor.execute("START TRANSACTION")
 
-        def wait():
-            try:
-                with self.waiter.cursor() as cursor:
-                    cursor.execute("UPDATE users SET status = status WHERE id = 1")
-                self.outcome["result"] = "granted"
-            except pymysql.MySQLError as exc:
-                self.outcome["result"] = exc.args[0]
+            def wait():
+                try:
+                    with self.waiter.cursor() as cursor:
+                        cursor.execute("UPDATE users SET status = status WHERE id = 1")
+                    self.outcome["result"] = "granted"
+                except pymysql.MySQLError as exc:
+                    self.outcome["result"] = exc.args[0]
 
-        self.thread = threading.Thread(target=wait, daemon=True)
-        self.thread.start()
-        deadline = time.time() + 10
-        while time.time() < deadline:  # until the server reports the wait
-            with _connect(ROOT) as root, root.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) AS n FROM performance_schema.data_lock_waits")
-                if cursor.fetchone()["n"]:
-                    return self
-            time.sleep(0.1)
-        raise AssertionError("no lock wait appeared")
+            self.thread = threading.Thread(target=wait, daemon=True)
+            self.thread.start()
+            deadline = time.time() + 10
+            while time.time() < deadline:  # until the server reports the wait
+                with _connect(ROOT) as root, root.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) AS n FROM performance_schema.data_lock_waits")
+                    if cursor.fetchone()["n"]:
+                        return self
+                time.sleep(0.1)
+            raise AssertionError("no lock wait appeared")
+        except BaseException:
+            self.__exit__()
+            raise
 
     def release(self):
         self.holder.rollback()
 
     def __exit__(self, *exc):
-        try:
-            self.holder.rollback()
-        finally:
-            self.thread.join(25)
-            self.waiter.rollback()
-            self.holder.close()
-            self.waiter.close()
+        # Each step runs even if an earlier one fails; none of them hides the
+        # original exception.
+        for step in (lambda: self.holder.rollback(), lambda: self.thread.join(25),
+                     lambda: self.waiter.rollback(), lambda: self.holder.close(),
+                     lambda: self.waiter.close()):
+            try:
+                step()
+            except Exception:
+                pass
 
 
 def test_lock_gate_column_grants_show_who_waits_on_whom(capsys):
@@ -617,7 +628,10 @@ def test_lock_gate_column_grants_show_who_waits_on_whom(capsys):
         DB, "users", "PRIMARY", "RECORD")
     assert threads[row["BLOCKING_THREAD_ID"]]["PROCESSLIST_ID"] == fixture.holder_id
     assert threads[row["REQUESTING_THREAD_ID"]]["PROCESSLIST_ID"] == fixture.waiter_id
-    assert denied["LOCK_DATA"] == 1143 and denied["threads.PROCESSLIST_INFO"] == 1143
+    # Every refusal the documentation states, as MySQL 8.4.13 reported it.
+    assert denied == {"LOCK_DATA": 1143, "*": 1142, "THREAD_ID": 1143, "LOCK_STATUS": 1143,
+                      "ENGINE_TRANSACTION_ID": 1143, "threads.PROCESSLIST_INFO": 1143,
+                      "innodb_trx": 1227}, denied
     assert plain == 1142
     assert fixture.outcome == {"result": "granted"}
     assert table_state() == before
