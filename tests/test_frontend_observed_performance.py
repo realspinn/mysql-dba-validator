@@ -47,6 +47,17 @@ def test_remote_snapshot_goes_only_to_the_connector_with_a_discovered_database()
     assert "body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })" in remote
 
 
+def test_a_response_for_an_earlier_context_is_discarded():
+    # The context is captured before the request and compared after it: a slow
+    # response for another target, login or database is never shown. (Exercised in
+    # headless Chrome with a held response and a database change; see PR #47.)
+    load = _function("loadObservedPerformance")
+    assert load.index("const key = perfContextKey();") < load.index("await requestObservedPerformance()")
+    after = load[load.index("await requestObservedPerformance()"):]
+    guard = after.index("if (key !== perfContextKey()) {")
+    assert guard < after.index("perf.result =") and guard < after.index("renderPerfResult(data)")
+
+
 def test_snapshot_context_never_includes_the_password():
     assert "password" not in _function("perfContextKey")
 
