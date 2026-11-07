@@ -217,7 +217,11 @@ def test_installed_sqlglot_quotes_dual_in_the_outgoing_text():
 @pytest.mark.parametrize("sql", DUAL_SELECTS)
 def test_dual_is_never_planned(sql):
     evidence, sent = plan_requests(sql)
-    assert sent == [] and evidence.error == PLAN_NOT_ELIGIBLE
+    assert sent == []
+    # An unquoted DUAL names no table (MySQL 8.4 manual, SELECT Statement), so it is
+    # refused like SELECT 1, before the DUAL guard; a quoted `DUAL` reaches that guard.
+    expected = PLAN_NOT_ELIGIBLE if "`DUAL`" in sql else "statement_has_no_identifiable_table"
+    assert evidence.error == expected
 
 
 def test_a_qualified_table_named_dual_and_similar_names_are_still_planned():
