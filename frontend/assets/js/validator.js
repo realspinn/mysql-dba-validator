@@ -2041,6 +2041,10 @@ function updatePerformanceContext() {
 			$('perfObservedAt').removeAttribute('title');
 			renderPerfIdle();
 			perfLoadBtn.disabled = true;
+		} else if (!perf.result) {
+			// Back to the context being read (A, B, then A again): its read is still
+			// valid for it, so show it as reading rather than another context's text.
+			$('perfBody').replaceChildren(perfReadingState());
 		}
 		return;
 	}
@@ -2058,6 +2062,10 @@ function setPerfButton() {
 	perfLoadBtn.disabled = Boolean(perfBlocker());
 	perfLoadBtn.textContent = loaded ? 'Refresh snapshot' : 'Load historical workload';
 	perfLoadBtn.className = loaded ? 'secondary' : 'primary';
+}
+
+function perfReadingState() {
+	return perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.');
 }
 
 function observedAtText(iso) {
@@ -2106,7 +2114,7 @@ async function loadObservedPerformance() {
 	perfLoadBtn.setAttribute('aria-busy', 'true');
 	$('perfBody').setAttribute('aria-busy', 'true');
 	$('perfLive').textContent = 'Reading Performance Schema.';
-	if (!perf.result) $('perfBody').replaceChildren(perfState('Reading Performance Schema', 'Four fixed queries; nothing you submitted is sent.'));
+	if (!perf.result) $('perfBody').replaceChildren(perfReadingState());
 	let data = null, failure = null;
 	try {
 		data = await requestObservedPerformance();
