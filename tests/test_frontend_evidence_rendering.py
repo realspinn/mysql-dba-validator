@@ -117,13 +117,16 @@ def stop_browser(process: subprocess.Popen) -> None:
             os.killpg(process.pid, sig)
         except ProcessLookupError:  # the whole group is already gone
             break
-        except PermissionError:
+        except PermissionError as refused:
             # macOS answers EPERM, not ESRCH, while the group still exists but has no member
             # it can signal (XNU killpg1 skips zombies), e.g. helpers that exited but are not
-            # yet reaped. The browser is ours: while it runs it can be signalled, so EPERM
-            # then is a real failure.
-            if process.poll() is None:
-                raise
+            # yet reaped, or a browser that is exiting on its own after the dump and cannot
+            # be reaped yet. It gets the same few seconds as after SIGTERM; a browser that
+            # still runs after them could have been signalled, so EPERM then is a real failure.
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                raise refused from None
             break
         try:
             process.wait(timeout=5)
@@ -980,6 +983,20 @@ def test_stop_browser_accepts_eperm_once_the_browser_has_exited(monkeypatch):
     browser.returncode = 0
     _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
     assert browser.signals == []
+
+
+def test_stop_browser_accepts_eperm_while_the_browser_is_exiting(monkeypatch):
+    # Seen on the macOS runner: refused while Chrome was exiting after the dump, which
+    # poll() did not report yet; it was reaped within the wait.
+    browser = _Browser(exits_after=None)
+
+    def exits_while_waited(timeout=None):
+        browser.returncode = 0
+        return 0
+
+    browser.wait = exits_while_waited
+    _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
+    assert browser.signals == [] and browser.returncode == 0
 
 
 def test_stop_browser_reports_eperm_while_the_browser_still_runs(monkeypatch):
