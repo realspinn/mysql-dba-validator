@@ -24,7 +24,7 @@ from backend.db_evidence import _safe_explain_sql
 from backend.main import app
 from backend.parser import parse_sql
 from tests.test_frontend_evidence_rendering import local_fixture
-from tests.frontend_page import page_source
+from tests.frontend_page import all_source
 from tests.test_local_evidence_credentials import (  # noqa: F401  (mysql is a fixture)
     FakeMySQL,
     assert_read_only_boundary,
@@ -240,7 +240,7 @@ def test_a_plan_without_a_large_scan_is_not_presented_as_low_execution_risk():
 
 def test_the_page_makes_no_execution_claim_of_its_own():
     # The page shows findings, not the dimensions; it has no execution-risk wording.
-    page = page_source("index.html").lower()
+    page = all_source().lower()
     assert "low execution risk" not in page and "execution risk" not in page
 
 

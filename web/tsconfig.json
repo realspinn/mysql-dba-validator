@@ -10,6 +10,7 @@
 		"noEmit": true,
 		"skipLibCheck": true,
 		"isolatedModules": true,
+		"erasableSyntaxOnly": true,
 		"types": ["vite/client"]
 	},
 	"include": ["src"]

@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 import backend.update_check as update_check
 from backend.main import app
 from backend.version import APP_VERSION
-from tests.frontend_page import page_source
+from tests.frontend_page import all_source, built_page, source
 from tests.test_frontend_evidence_rendering import dump_dom, find_chrome
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
@@ -351,26 +351,21 @@ def test_the_content_security_policy_is_unchanged():
 # ---------------------------------------------------------------- the page (source)
 
 def test_the_page_asks_only_its_own_backend_and_writes_text_not_html():
-    page = page_source("index.html")
-    assert "fetch('/api/update-status', { method: 'POST', cache: 'no-store' })" in page
+    local, notice, rules = source("api/local.ts"), source("app/UpdateNotice.tsx"), source("app/updates.ts")
+    assert "fetch('/api/update-' + action, { method: 'POST', cache: 'no-store' })" in local
+    assert "action: 'status' | 'download' | 'progress' | 'cancel' | 'show'" in local
+    page = all_source()
     assert "api.github.com" not in page
-    start = page.index("function renderUpdateNotice(")
-    render = page[start:page.index("\n}\n", start)]
-    assert "innerHTML" not in render and "insertAdjacentHTML" not in render
-    assert "data.url !== RELEASE_PAGE + version" in render
-    # The whole update block writes text only and calls only this server's update endpoints.
-    block = page[page.index("// Update notice and download."):page.index("// Initial state")]
-    assert "innerHTML" not in block and "insertAdjacentHTML" not in block and "eval(" not in block
-    assert set(re.findall(r"'(/api/[^']*)'", block)) == {
-        "/api/update-status", "/api/update-download", "/api/update-progress", "/api/update-cancel",
-        "/api/update-show"}
-    assert block.count("fetch(") == 2  # postUpdate and the initial check
-    for name in ("readUpdateDismissal", "saveUpdateDismissal", "renderUpdateNotice", "updateDownloadOffer"):
-        start = page.index(f"function {name}(")
-        body = page[start:page.index("\n}\n", start)]
-        for secret in ("password", "username", "credentials", "sessionToken", "pairing", "CONNECTOR_URL",
-                       "state.", "fetch"):
-            assert secret not in body, (name, secret)
+    for text in (notice, rules):
+        for forbidden in ("innerHTML", "dangerouslySetInnerHTML", "insertAdjacentHTML", "eval("):
+            assert forbidden not in text, forbidden
+    assert "data.url !== RELEASE_PAGE + version" in notice
+    assert "fetch(" not in notice and "fetch(" not in rules
+    for text in (notice, rules):
+        for secret in ("password", "username", "credentials", "sessionToken", "pairing", "CONNECTOR_URL"):
+            assert secret not in text, secret
+    # Not in the online demo.
+    assert "{!PUBLIC_DEMO && <UpdateNotice />}" in source("app/App.tsx")
 
 
 # ---------------------------------------------------------------- the page (headless Chrome)
@@ -384,65 +379,109 @@ MACOS = {**UPDATE, "download": {"name": "MySQL-DBA-Validator-v0.7.0-macos-arm64-
                                 "platform": "macOS Apple Silicon", "in_app": False,
                                 "url": DOWNLOAD + "MySQL-DBA-Validator-v0.7.0-macos-arm64-unsigned.zip"}}
 
-# Drives the real page code with synthetic backend answers: fetch is replaced after the
-# page's own (failing, file://) request, and every call is recorded.
-HARNESS = """
+# Each scenario is the real built page in its own same-origin frame, one after another
+# (they share browser storage). In each frame the page's fetch answers from that
+# frame's synthetic backend (window.__answers) and records every call.
+FRAME_STUB = """
+<script>
+window.__answers = {};
+window.__calls = [];
+if (window.parent.__blockStorage) {
+  Storage.prototype.getItem = () => { throw new Error('blocked') };
+  Storage.prototype.setItem = () => { throw new Error('blocked') };
+  Storage.prototype.removeItem = () => { throw new Error('blocked') };
+}
+window.__answers['/api/update-status'] = window.parent.__status;
+window.fetch = (path, options) => {
+  window.__calls.push([String(path), options && options.method, !!(options && options.body !== undefined)]);
+  const answer = window.__answers[String(path)];
+  if (answer === 'reject') return Promise.reject(new TypeError('offline'));
+  if (String(path) === '/api/heartbeat') return Promise.resolve(new Response(null, { status: 204 }));
+  return Promise.resolve(new Response(JSON.stringify(answer === undefined ? null : answer),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }));
+};
+document.addEventListener('click', event => { if (event.target.closest('a[download], a[target]')) event.preventDefault(); }, true);
+</script>
+"""
+
+HARNESS = """<!doctype html><html><body>
 <script>
 const UPDATE = %s, WINDOWS = %s, MACOS = %s;
-const notice = document.getElementById('updateNotice');
-const byId = id => document.getElementById(id);
-const shown = node => !node.hidden && getComputedStyle(node).display !== 'none';
-const OUT = { initial: shown(notice) };
 const settle = (ms = 60) => new Promise(resolve => setTimeout(resolve, ms));
-const answers = {}, calls = [];
-const view = () => ({
-  stage: notice.dataset.stage, title: byId('updateTitle').textContent, text: byId('updateNoticeText').textContent,
-  detail: byId('updateNoticeDetail').textContent, live: byId('updateLive').textContent,
-  action: shown(byId('updateAction')) ? byId('updateAction').textContent : null,
-  link: shown(byId('updateDownloadLink')) ? byId('updateDownloadLink').getAttribute('href') : null,
-  secondary: byId('updateNoticeDismiss').textContent,
-  indeterminate: byId('updateProgress').classList.contains('indeterminate'),
-  valuenow: byId('updateProgress').getAttribute('aria-valuenow'),
-  ring: byId('updateRing').style.strokeDashoffset, bar: byId('updateBar').style.transform,
-  track: getComputedStyle(notice.querySelector('.update-track')).display,
-});
-(async () => {
-  await settle();  // the page's own request fails on file:// and must leave it hidden
-  OUT.afterFailedRequest = shown(notice);
-  window.fetch = (path, options) => {
-    calls.push([path, options && options.method, options && 'body' in options]);
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(answers[path] || null) });
+let frame;
+async function open(status, prepare) {
+  if (frame) frame.remove();
+  window.__status = status;
+  frame = document.createElement('iframe');
+  frame.style.width = '1200px'; frame.style.height = '700px';
+  if (prepare) prepare();
+  frame.src = '/frame.html';
+  document.body.append(frame);
+  await new Promise(resolve => frame.addEventListener('load', resolve, { once: true }));
+  for (let i = 0; i < 200 && !frame.contentDocument.querySelector('.sidebar'); i++) await settle(25);
+  await settle(200);
+  return frame.contentWindow;
+}
+const doc = () => frame.contentDocument;
+const notice = () => doc().querySelector('.update-notice');
+const shown = () => !!notice();
+const button = label => [...notice().querySelectorAll('button, a.btn')].find(b => b.textContent === label);
+const view = () => {
+  const n = notice();
+  if (!n) return null;
+  const meter = n.querySelector('[role=progressbar]');
+  const buttons = [...n.querySelectorAll('button')].map(b => b.textContent);
+  const link = n.querySelector('a.btn[download]');
+  return {
+    stage: n.dataset.stage, title: n.querySelector('h2').textContent,
+    text: n.querySelector('.update-body > span').textContent,
+    detail: (n.querySelector('.update-note') || {}).textContent || '',
+    live: n.querySelector('[role=status]').textContent,
+    action: buttons.find(b => !['Later', 'Cancel', 'Close'].includes(b)) || null,
+    link: link ? link.getAttribute('href') : null,
+    secondary: buttons.find(b => ['Later', 'Cancel', 'Close'].includes(b)) || null,
+    indeterminate: meter.classList.contains('indeterminate'),
+    valuenow: meter.getAttribute('aria-valuenow'),
+    ring: n.querySelector('.ring-value').style.strokeDashoffset,
   };
-  renderUpdateNotice(UPDATE);
+};
+const storage = key => { try { return frame.contentWindow.localStorage.getItem(key) } catch (e) { return 'blocked' } };
+(async () => {
+  const OUT = {};
+  localStorage.clear();
+  let w = await open('reject');
+  OUT.afterFailedRequest = shown();
+  w = await open(UPDATE);
   OUT.plain = view();
-  OUT.visible = shown(notice);
-  OUT.href = byId('updateNoticeLink').getAttribute('href');
-  OUT.rel = byId('updateNoticeLink').getAttribute('rel');
-  OUT.target = byId('updateNoticeLink').getAttribute('target');
-  OUT.position = getComputedStyle(notice).position;
+  OUT.visible = shown();
+  const notes = notice().querySelector('a.docs-link');
+  OUT.href = notes.getAttribute('href'); OUT.rel = notes.getAttribute('rel'); OUT.target = notes.getAttribute('target');
+  OUT.position = w.getComputedStyle(notice()).position;
   OUT.look = {
-    heading: byId('updateTitle').tagName, labelledBy: notice.getAttribute('aria-labelledby'),
-    meter: byId('updateProgress').getAttribute('role'), meterLabel: byId('updateProgress').getAttribute('aria-label'),
-    live: byId('updateLive').getAttribute('role'),
-    glyphsHidden: [...notice.querySelectorAll('svg')].every(svg => svg.getAttribute('aria-hidden') === 'true'),
-    external: notice.querySelectorAll('img, image, use, iframe, [src]').length,
+    heading: notice().querySelector('h2').tagName, labelledBy: notice().getAttribute('aria-labelledby'),
+    titleId: notice().querySelector('h2').id,
+    meter: notice().querySelector('[role=progressbar]').getAttribute('role'),
+    meterLabel: notice().querySelector('[role=progressbar]').getAttribute('aria-label'),
+    live: notice().querySelector('[role=status]').getAttribute('role'),
+    glyphsHidden: [...notice().querySelectorAll('svg')].every(svg => svg.getAttribute('aria-hidden') === 'true'),
+    external: notice().querySelectorAll('img, image, use, iframe, [src]').length,
   };
   OUT.themes = {};
   for (const theme of ['light', 'dark']) {
-    document.documentElement.setAttribute('data-theme', theme);
-    document.getAnimations().forEach(animation => animation.finish());
-    const colour = node => getComputedStyle(node).color;
+    doc().documentElement.setAttribute('data-theme', theme);
+    doc().getAnimations().filter(a => a.effect.getTiming().iterations !== Infinity).forEach(a => a.finish());
+    await settle(30);
+    const colour = node => w.getComputedStyle(node).color;
+    const surface = w.getComputedStyle(doc().documentElement).getPropertyValue('--panel-solid').trim();
+    const later = button('Later');
+    const bg = w.getComputedStyle(later).backgroundColor;
     OUT.themes[theme] = {
-      surface: getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
-      title: colour(byId('updateTitle')), text: colour(byId('updateNoticeText')),
-      note: colour(byId('updateNoticeDetail')), link: colour(byId('updateNoticeLink')),
-      dismiss: colour(byId('updateNoticeDismiss')),
-      dismissBackground: getComputedStyle(byId('updateNoticeDismiss')).backgroundColor,
+      surface, title: colour(notice().querySelector('h2')), text: colour(notice().querySelector('.update-body > span')),
+      note: colour(notice().querySelector('.update-note')), link: colour(notes), dismiss: colour(later),
+      dismissBackground: bg === 'rgba(0, 0, 0, 0)' ? surface : bg,
     };
   }
-  document.documentElement.removeAttribute('data-theme');
-  OUT.beforeViews = !!(notice.compareDocumentPosition(document.getElementById('dashboardView'))
-                       & Node.DOCUMENT_POSITION_FOLLOWING);
+  OUT.beforeViews = !!(notice().compareDocumentPosition(doc().querySelector('.view-frame')) & Node.DOCUMENT_POSITION_FOLLOWING);
   OUT.rejected = {};
   for (const [name, data] of Object.entries({
     nothing: null, unavailable: { state: 'unavailable' }, disabled: { state: 'disabled' },
@@ -450,139 +489,150 @@ const view = () => ({
     mismatchedUrl: { ...UPDATE, url: UPDATE.url.replace('0.7.0', '0.7.1') },
     badVersion: { ...UPDATE, version: '<img src=x onerror=alert(1)>' }, numberVersion: { ...UPDATE, version: 7 },
   })) {
-    renderUpdateNotice(UPDATE);
-    renderUpdateNotice(data);
-    OUT.rejected[name] = shown(notice);
+    await open(data);
+    OUT.rejected[name] = shown();
+    OUT.injected = (OUT.injected || 0) + doc().querySelectorAll('.main img').length;
   }
-  OUT.injected = document.querySelectorAll('#updateNotice img').length;
-  // A download offer that is not exactly the official file is not offered.
   OUT.badDownloads = {};
   for (const [name, change] of Object.entries({
     otherHost: { url: 'https://evil.example/MySQL-DBA-Validator-v0.7.0-windows-x64.zip' },
     otherName: { name: 'setup.exe' }, otherPlatform: { platform: 'Linux' }, noSize: { size: 0 },
   })) {
-    renderUpdateNotice({ ...WINDOWS, download: { ...WINDOWS.download, ...change } });
+    await open({ ...WINDOWS, download: { ...WINDOWS.download, ...change } });
     OUT.badDownloads[name] = [view().action, view().link, view().detail];
   }
-  renderUpdateNotice({ ...MACOS, download: { ...MACOS.download, in_app: true } });
+  await open({ ...MACOS, download: { ...MACOS.download, in_app: true } });
   OUT.macInAppRefused = [view().action, view().link];
 
   // Windows desktop app: download, verify, ready (the backend's answers are synthetic).
-  answers['/api/update-progress'] = { stage: 'idle' };
-  renderUpdateNotice(WINDOWS);
+  w = await open(WINDOWS, () => {});
+  const answers = () => frame.contentWindow.__answers;
+  answers()['/api/update-progress'] = { stage: 'idle' };
   await settle();
   OUT.offer = view();
-  answers['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
-  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 12345678, total: 33361621 };
-  byId('updateAction').click();
+  answers()['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 12345678, total: 33361621 };
+  button('Update').click();
   await settle(600);
   OUT.downloading = view();
-  // Cancel asks the backend; while it still reports downloading, one poll chain remains.
-  answers['/api/update-cancel'] = answers['/api/update-progress'];
-  byId('updateNoticeDismiss').click();
-  const progressCalls = () => calls.filter(([path]) => path === '/api/update-progress').length;
+  answers()['/api/update-cancel'] = answers()['/api/update-progress'];
+  button('Cancel').click();
+  const progressCalls = () => frame.contentWindow.__calls.filter(([path]) => path === '/api/update-progress').length;
   let before = progressCalls();
   await settle(2000);
   OUT.pollsIn2s = progressCalls() - before;
-  // A failed poll (backend busy or briefly unreachable) is tried again.
-  answers['/api/update-progress'] = null;
+  answers()['/api/update-progress'] = 'reject';
   before = progressCalls();
   await settle(1000);
   OUT.pollsWhileFailing = progressCalls() - before;
   OUT.stageWhileFailing = view().stage;
-  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 12345678, total: 33361621 };
-  answers['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 5000000, total: 0 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 5000000, total: 0 };
   await settle(600);
   OUT.unknownTotal = view();
-  answers['/api/update-progress'] = { stage: 'verifying', version: '0.7.0' };
+  answers()['/api/update-progress'] = { stage: 'verifying', version: '0.7.0' };
   await settle(600);
   OUT.verifying = view();
-  answers['/api/update-progress'] = { stage: 'ready', version: '0.7.0', file: 'x.zip' };
+  answers()['/api/update-progress'] = { stage: 'ready', version: '0.7.0', file: 'x.zip' };
   await settle(600);
   OUT.ready = view();
-  OUT.pendingAfterReady = localStorage.getItem('mdv-update-pending');
-  answers['/api/update-show'] = null;
-  byId('updateAction').click();
+  OUT.pendingAfterReady = storage('mdv-update-pending');
+  answers()['/api/update-show'] = null;
+  button('Show in folder').click();
   await settle();
-  followUpdate({ stage: 'failed', version: '0.7.0', error: 'digest',
-                 message: 'The downloaded file did not match the official release, so it was deleted.' });
+  OUT.calls = frame.contentWindow.__calls.filter(([path]) => path !== '/api/heartbeat' && path !== '/api/update-status');
+  OUT.allCalls = frame.contentWindow.__calls;
+  // Failure, retry, cancellation and an answer for another version.
+  await open(WINDOWS);
+  answers()['/api/update-download'] = { stage: 'failed', version: '0.7.0', error: 'digest',
+    message: 'The downloaded file did not match the official release, so it was deleted.' };
+  button('Update').click();
+  await settle();
   OUT.failed = view();
-  followUpdate({ stage: 'cancelled', version: '0.7.0' });
+  answers()['/api/update-download'] = { stage: 'cancelled', version: '0.7.0' };
+  button('Try again').click();
+  await settle();
   OUT.cancelled = view();
-  followUpdate({ stage: 'ready', version: '9.9.9' });
+  answers()['/api/update-download'] = { stage: 'ready', version: '9.9.9' };
+  button('Update').click();
+  await settle();
   OUT.otherVersionIgnored = view().stage;
-  OUT.calls = calls;
 
   // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
   localStorage.removeItem('mdv-update-pending');
-  renderUpdateNotice(MACOS);
+  await open(MACOS);
   OUT.mac = view();
-  byId('updateDownloadLink').onclick();
-  OUT.pendingAfterMacLink = localStorage.getItem('mdv-update-pending');
-
+  notice().querySelector('a.btn[download]').click();
+  OUT.pendingAfterMacLink = storage('mdv-update-pending');
   // The older copy opened again leaves the pending version; the new copy confirms it.
-  renderUpdateNotice({ ...UPDATE, current: '0.6.0' });
-  OUT.oldCopyKeepsPending = localStorage.getItem('mdv-update-pending');
-  renderUpdateNotice({ state: 'up_to_date', current: '0.7.0' });
+  await open({ ...UPDATE, current: '0.6.0' });
+  OUT.oldCopyKeepsPending = storage('mdv-update-pending');
+  await open({ state: 'up_to_date', current: '0.7.0' });
   OUT.updated = view();
-  OUT.updatedShown = shown(notice);
-  OUT.pendingAfterConfirm = localStorage.getItem('mdv-update-pending');
-  byId('updateNoticeDismiss').click();
-  OUT.afterClose = shown(notice);
-
-  renderUpdateNotice(UPDATE);
-  byId('updateNoticeDismiss').click();
-  OUT.afterDismiss = shown(notice);
-  OUT.stored = localStorage.getItem('mdv-update-dismissed');
-  updateDismissedHere = '';  // as after a reload: only storage remembers it
-  renderUpdateNotice(UPDATE);
-  OUT.sameVersionAfterReload = shown(notice);
-  renderUpdateNotice({ ...UPDATE, version: '0.8.0', url: UPDATE.url.replace('0.7.0', '0.8.0') });
-  OUT.newerVersionShown = shown(notice);
+  OUT.updatedShown = shown();
+  OUT.pendingAfterConfirm = storage('mdv-update-pending');
+  button('Close').click();
+  await settle();
+  OUT.afterClose = shown();
+  // Later: remembered for that version only.
+  await open(UPDATE);
+  button('Later').click();
+  await settle();
+  OUT.afterDismiss = shown();
+  OUT.stored = storage('mdv-update-dismissed');
+  await open(UPDATE);
+  OUT.sameVersionAfterReload = shown();
+  await open({ ...UPDATE, version: '0.8.0', url: UPDATE.url.replace('0.7.0', '0.8.0') });
+  OUT.newerVersionShown = shown();
   // Storage unavailable (blocked, private mode): the page still works.
-  Storage.prototype.getItem = () => { throw new Error('blocked') };
-  Storage.prototype.setItem = () => { throw new Error('blocked') };
-  Storage.prototype.removeItem = () => { throw new Error('blocked') };
-  const blocked = { ...UPDATE, version: '0.9.0', url: UPDATE.url.replace('0.7.0', '0.9.0') };
+  window.__blockStorage = true;
   OUT.blocked = {};
   try {
-    renderUpdateNotice(blocked);
-    OUT.blocked.shown = shown(notice);
-    byId('updateNoticeDismiss').click();
-    OUT.blocked.afterDismiss = shown(notice);
-    renderUpdateNotice(blocked);
-    OUT.blocked.samePage = shown(notice);
+    await open({ ...UPDATE, version: '0.9.0', url: UPDATE.url.replace('0.7.0', '0.9.0') });
+    OUT.blocked.shown = shown();
+    button('Later').click();
+    await settle();
+    OUT.blocked.afterDismiss = shown();
+    await settle(300);
+    OUT.blocked.samePage = shown();
+    OUT.blocked.pageErrors = doc().querySelectorAll('.sidebar').length === 1 ? 0 : 1;
   } catch (error) { OUT.blocked.error = String(error) }
   const out = document.createElement('pre');
   out.id = 'update-out';
   out.textContent = JSON.stringify(OUT);
   document.body.append(out);
-})();
+})().catch(error => { const out = document.createElement('pre'); out.id = 'update-error';
+  out.textContent = String(error && error.stack || error); document.body.append(out); });
 </script>
-</body>"""
+</body></html>"""
 
 
 @pytest.fixture(scope="module")
 def banner(tmp_path_factory):
+    from tests.test_frontend_evidence_rendering import serve
+
     chrome = find_chrome()
     if chrome is None:
         pytest.skip("Chrome is not installed")
     work = tmp_path_factory.mktemp("update")
-    harness = work / "harness.html"
-    page = page_source("index.html")
-    script = HARNESS % (json.dumps(UPDATE), json.dumps(WINDOWS), json.dumps(MACOS))
-    harness.write_text(page.replace("</body>", script, 1), encoding="utf-8")
-    document, stderr, code = dump_dom(
-        [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-         "--virtual-time-budget=15000", f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()],
-        work)
+    frame = built_page("index.html").replace("</head>", FRAME_STUB + "</head>", 1)
+    harness = HARNESS % (json.dumps(UPDATE), json.dumps(WINDOWS), json.dumps(MACOS))
+    server = serve(harness, {"/frame.html": frame})
+    try:
+        document, stderr, code = dump_dom(
+            [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             "--virtual-time-budget=120000", f"--user-data-dir={work / 'profile'}", "--dump-dom",
+             f"http://127.0.0.1:{server.server_port}/harness.html"], work)
+    finally:
+        server.shutdown()
+    failure = re.search(r'<pre id="update-error">(.*?)</pre>', document, re.S)
+    assert not failure, html.unescape(failure.group(1))
     match = re.search(r'<pre id="update-out">(.*?)</pre>', document, re.S)
     assert match, f"page did not render (exit {code}): {stderr[-500:]}"
     return json.loads(html.unescape(match.group(1)))
 
 
 def test_the_banner_is_hidden_until_a_newer_release_is_reported(banner):
-    assert banner["initial"] is False and banner["afterFailedRequest"] is False
+    assert banner["afterFailedRequest"] is False
     assert banner["visible"] is True
     assert banner["plain"]["text"] == "MySQL DBA Validator 0.7.0 · you have 0.6.0"
 
@@ -596,20 +646,19 @@ def test_without_a_file_for_this_computer_the_banner_links_to_the_release_page(b
 
 def test_the_banner_is_an_accessible_region_with_a_progress_meter(banner):
     assert banner["look"] == {
-        "heading": "H2", "labelledBy": "updateTitle", "meter": "progressbar",
+        "heading": "H2", "labelledBy": "updateTitle", "titleId": "updateTitle", "meter": "progressbar",
         "meterLabel": "Update download", "live": "status", "glyphsHidden": True, "external": 0,
     }
 
 
 def test_the_banner_reads_well_in_light_and_dark_themes(banner):
-    from tests.test_frontend_evidence_rendering import contrast
+    from tests.frontend_page import contrast
 
     themes = banner["themes"]
     assert themes["light"]["surface"] != themes["dark"]["surface"]
     for theme, look in themes.items():
         for part in ("title", "text", "note", "link"):
             assert contrast(look[part], look["surface"]) >= 4.5, (theme, part)
-        # Later / Cancel: a secondary button, its label against its own background.
         assert contrast(look["dismiss"], look["dismissBackground"]) >= 4.5, theme
     for part in ("title", "text", "link", "dismiss"):
         assert themes["light"][part] != themes["dark"][part], part
@@ -639,7 +688,7 @@ def test_the_windows_app_offers_an_update_with_platform_and_size(banner):
     offer = banner["offer"]
     assert offer["stage"] == "available" and offer["action"] == "Update" and offer["link"] is None
     assert offer["detail"] == "Windows x64 · 33.4 MB"
-    assert offer["secondary"] == "Later" and offer["track"] == "none"
+    assert offer["secondary"] == "Later"
 
 
 def test_download_progress_shows_the_real_bytes(banner):
@@ -648,8 +697,6 @@ def test_download_progress_shows_the_real_bytes(banner):
     assert down["detail"] == "12.3 MB of 33.4 MB · 37%"
     assert down["valuenow"] == "37" and down["indeterminate"] is False
     assert float(down["ring"]) == pytest.approx(100 - 12345678 / 33361621 * 100)
-    assert down["bar"].startswith("scaleX(0.37")
-    assert down["track"] == "block"
     assert down["action"] is None and down["secondary"] == "Cancel"
     assert down["live"] == "Downloading update. MySQL DBA Validator 0.7.0"
 
@@ -672,7 +719,7 @@ def test_verification_is_a_separate_unmeasured_stage(banner):
     assert verify["title"] == "Verifying download" and verify["stage"] == "verifying"
     assert verify["indeterminate"] is True and verify["valuenow"] is None
     assert verify["detail"] == "Checking the size, the SHA-256 digest from GitHub and the archive contents."
-    assert verify["secondary"] == "Cancel" and verify["track"] == "none"
+    assert verify["secondary"] == "Cancel"
 
 
 def test_ready_to_install_says_what_the_user_does_and_never_claims_installed(banner):
@@ -699,7 +746,8 @@ def test_failure_and_cancellation_offer_a_retry(banner):
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):
     paths = {path for path, method, has_body in banner["calls"]}
     assert paths == {"/api/update-progress", "/api/update-download", "/api/update-cancel", "/api/update-show"}
-    assert all(method == "POST" and has_body is False for path, method, has_body in banner["calls"])
+    assert all(method == "POST" and has_body is False for path, method, has_body in banner["allCalls"])
+    assert {path for path, _, _ in banner["allCalls"]} <= paths | {"/api/update-status", "/api/heartbeat"}
 
 
 def test_other_copies_link_to_the_official_file_for_the_browser_to_download(banner):
@@ -725,4 +773,4 @@ def test_dismissal_is_remembered_per_version(banner):
 
 
 def test_the_banner_works_when_browser_storage_is_unavailable(banner):
-    assert banner["blocked"] == {"shown": True, "afterDismiss": False, "samePage": False}
+    assert banner["blocked"] == {"shown": True, "afterDismiss": False, "samePage": False, "pageErrors": 0}

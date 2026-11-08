@@ -1,17 +1,17 @@
-"""Regression tests for the frontend page served at GET /.
+"""Regression tests for the validator page served at GET / (built from web/src).
 
-These are static checks on the served HTML/JS. They guard against:
-- serving a page whose rendering helpers are missing (the legacy page called
-  undefined helpers, so no result could ever render);
-- the served page losing the connector validation route;
-- remote credentials being routed to the public /api/* endpoints;
-- a hidden browser global being treated as a connector pairing mechanism.
+Static checks on the TypeScript source and the built bundle. They guard against:
+- serving a page whose scripts or styles are missing or not the built ones;
+- remote (company) work reaching the public /api/* routes, or a typed host doing so;
+- a connector session coming from anywhere but the explicit pairing action;
+- browser storage holding anything but per-viewer conveniences;
+- a database being used that was not discovered for this target, login and session;
+- messages built from response text instead of fixed text for stable codes.
 """
 
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,340 +19,304 @@ from fastapi.testclient import TestClient
 from backend.db import EVIDENCE_STATUSES
 from backend.main import app
 from backend.version import APP_VERSION
-from tests.frontend_page import with_page_files
+from tests.frontend_page import (
+    FRONTEND_DIR, PAGES_DIR, WEB_DIR, all_source, built_page, function_body, message_map,
+    page_assets, page_bundle, source, source_files,
+)
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-
-REQUIRED_HELPERS = [
-    "el",
-    "metric",
-    "plainList",
-    "layer",
-    "factorList",
-    "evidenceLayer",
-    "metadataLayer",
-    "statementCard",
-    "renderResults",
-    "renderError",
-    "analysisModeLabel",
-    "metadataStatusLabel",
-    "updateStepper",
-]
-
-
-PAGE_FILE_TYPES = {".css": "text/css", ".js": "text/javascript"}
-
-
-def _fetch_page_file(client: TestClient, path: str) -> str:
-    response = client.get(path)
-    assert response.status_code == 200, path
-    assert response.headers["content-type"].startswith(PAGE_FILE_TYPES[Path(path).suffix]), path
-    return response.text
+client = TestClient(app, base_url="http://127.0.0.1:8420")
+CONNECTOR = source("api/connector.ts")
+LOCAL = source("api/local.ts")
+MESSAGES = source("api/messages.ts")
+CONNECTION = source("features/connection/useConnection.ts")
+STATE = source("features/connection/connectionState.ts")
+REVIEW_TEXT = source("features/review/reviewText.ts")
 
 
 @pytest.fixture(scope="module")
-def served_html() -> str:
-    """The page at GET / with the stylesheet and script it loads, as served, inline."""
-    client = TestClient(app, base_url="http://127.0.0.1:8420")
+def served() -> str:
     response = client.get("/")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    return with_page_files(response.text, lambda path: _fetch_page_file(client, path))
+    return response.text
 
 
-def _function_body(source: str, name: str) -> str:
-    """Return the brace-delimited body of `function name(...) { ... }`."""
-    match = re.search(r"function\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{", source)
-    assert match, f"function {name} not found in served page"
-    depth = 0
-    for index in range(match.end() - 1, len(source)):
-        char = source[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return source[match.end():index]
-    raise AssertionError(f"unbalanced braces in function {name}")
+def test_root_serves_the_built_page(served):
+    # The built file as it is, apart from the version on its script and stylesheet links.
+    response = client.get("/")
+    assert response.content.replace(f"?v={APP_VERSION}".encode(), b"") == (PAGES_DIR / "index.html").read_bytes()
+    assert "<title>MySQL DBA Validator</title>" in served
+    assert '<div id="root"></div>' in served
 
 
-def test_root_serves_the_intended_frontend(served_html):
-    response = TestClient(app, base_url="http://127.0.0.1:8420").get("/")
-    # The file as it is, apart from the version on its stylesheet and script links.
-    tag = f"?v={APP_VERSION}".encode()
-    assert response.content.replace(tag, b"") == (FRONTEND_DIR / "index.html").read_bytes()
-    assert "<title>MySQL DBA Validator</title>" in served_html
+def test_page_loads_its_own_module_and_stylesheet(served):
+    head = served.split("</head>")[0]
+    assets = page_assets(served)
+    assert [a for a in assets if a.endswith(".js")] and [a for a in assets if a.endswith(".css")]
+    # The theme is set before first paint (inline), then the module and stylesheet load.
+    assert head.index("localStorage.getItem('mdv-theme')") < head.index('<script type="module"')
+    # One module script from the build; nothing from another origin.
+    assert served.count("<script") == 2 and served.count('type="module"') == 1
+    assert not re.search(r'(?:src|href)="(?:https?:)?//', served)
+    for path in assets:
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].startswith("text/javascript" if path.endswith(".js") else "text/css")
 
 
-def test_page_loads_its_own_stylesheet_and_script_in_place():
-    page = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
-    head, body = page.split("</head>")
-    # The appearance is set before first paint (inline), then the stylesheet loads.
-    assert head.index("localStorage.getItem('mdv-theme')") < head.index(
-        '<link rel="stylesheet" href="/static/assets/css/validator.css" />')
-    # The script runs where the inline script ran: after the markup, at the end of
-    # the body, as an ordinary script (no defer, async or module).
-    assert body.count("<script") == 1
-    assert body.rstrip().endswith('<script src="/static/assets/js/validator.js"></script>\n</body>\n\n</html>')
+def test_the_built_page_comes_from_the_source_entry():
+    entry = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    assert '<script type="module" src="/src/app/main.tsx"></script>' in entry
+    # The inline theme script is the same in the source entry and the built page.
+    script = entry[entry.index("<script>"):entry.index("</script>")]
+    assert script in built_page("index.html")
+    # No application code or styles in the HTML entries: one short inline theme script.
+    for name in ("index.html", "home.html"):
+        html = (WEB_DIR / name).read_text(encoding="utf-8")
+        assert "<style" not in html and html.count("<script>") == 1, name
+        inline = html[html.index("<script>"):html.index("</script>")]
+        assert len(inline.splitlines()) < 12, name
 
 
 def test_page_files_keep_their_types_when_the_system_says_text_plain():
     # On Windows, Python's mimetypes reads the registry, where some programs register
     # .js as text/plain; with nosniff a browser would then not run the page's script.
-    code = """
+    js, css = sorted(page_assets(built_page("index.html")), key=lambda p: p.endswith(".css"))
+    code = f"""
 import mimetypes
 mimetypes.add_type("text/plain", ".js")
 mimetypes.add_type("text/plain", ".css")
 from fastapi.testclient import TestClient
 from backend.main import app
 client = TestClient(app, base_url="http://127.0.0.1:8420")
-print(client.get("/static/assets/js/validator.js").headers["content-type"])
-print(client.get("/static/assets/css/validator.css").headers["content-type"])
+print(client.get("{js}").headers["content-type"])
+print(client.get("{css}").headers["content-type"])
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                             cwd=FRONTEND_DIR.parent, timeout=120)
     assert result.returncode == 0, result.stderr[-2000:]
-    js, css = result.stdout.splitlines()[-2:]
-    assert js.startswith("text/javascript") and css.startswith("text/css"), result.stdout
+    js_type, css_type = result.stdout.splitlines()[-2:]
+    assert js_type.startswith("text/javascript") and css_type.startswith("text/css"), result.stdout
 
 
-def test_favicon_is_a_local_self_contained_svg(served_html):
-    assert '<link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />' in served_html
-    response = TestClient(app, base_url="http://127.0.0.1:8420").get("/static/assets/favicon.svg")
+def test_favicon_is_a_local_self_contained_svg(served):
+    assert '<link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />' in served
+    response = client.get("/static/assets/favicon.svg")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     svg = response.text.replace('xmlns="http://www.w3.org/2000/svg"', "")  # namespace, not a resource
-    # No script, external reference or embedded resource: safe under the page CSP.
     for forbidden in ("<script", "href=", "http://", "https://", "url(", "@import", "onload", "<foreignObject"):
         assert forbidden not in svg, forbidden
 
 
-def test_served_page_contains_connector_validation_route(served_html):
-    assert "CONNECTOR_URL = 'http://127.0.0.1:8765'" in served_html
-    assert "'/company/targets/'" in served_html
-    assert "'/validate'" in served_html
-    remote = _function_body(served_html, "validateRemote")
-    assert "CONNECTOR_URL + '/company/targets/'" in remote
-    assert "'/validate'" in remote
+def test_styles_and_fonts_are_never_data_urls_that_the_csp_refuses():
+    # The CSP allows same-origin fonts only; Cloudscape's full stylesheet embeds fonts.
+    bundle = page_bundle("index.html")
+    assert "data:font" not in bundle and "data:application/font" not in bundle
+    assert "global-styles/index-base.css" in source("app/main.tsx")
+    assert "global-styles/index.css" not in all_source()
 
 
-@pytest.mark.parametrize("helper", REQUIRED_HELPERS)
-def test_served_page_defines_required_rendering_helpers(served_html, helper):
-    assert re.search(r"function\s+" + re.escape(helper) + r"\s*\(", served_html), (
-        f"served page does not define {helper}()"
-    )
+# ---------------------------------------------------------------- remote work: connector only
 
 
-def test_served_page_has_no_legacy_remote_credential_post(served_html):
-    # The legacy page posted every target's credentials straight to /api/validate.
-    assert "const body = { sql, host: state.credentials.host" not in served_html
+def test_connector_client_is_the_only_route_to_company_targets():
+    assert "export const CONNECTOR_URL = 'http://127.0.0.1:8765';" in CONNECTOR
+    assert "'/api/" not in CONNECTOR and "\"/api/" not in CONNECTOR
+    for path in ("targetPath(targetId, 'validate')", "targetPath(targetId, 'databases')", "targetPath(targetId, route)"):
+        assert path in CONNECTOR, path
+    # Every connector call goes through one function that refuses any other address.
+    request = function_body(CONNECTOR, "connectorRequest")
+    assert "if (!url.startsWith(CONNECTOR_URL + '/')) throw" in request
+    assert CONNECTOR.count("requestJson(") == 1 and CONNECTOR.count("fetch(") == 0
+    # Nothing else in the page talks to the connector.
+    for name, text in source_files().items():
+        if name != "api/connector.ts":
+            assert "8765" not in text, name
 
 
-def test_remote_validation_never_calls_public_api(served_html):
-    remote = _function_body(served_html, "validateRemote")
-    assert "/api/" not in remote
-
-    dispatch = _function_body(served_html, "validateSql")
-    assert "isRemoteTarget(state.credentials.host)" in dispatch
-    assert "validateRemote(sql)" in dispatch
-    assert "validateLocal(sql)" in dispatch
-    assert "/api/" not in dispatch
-
-    # /api/validate is only reachable from the local path.
-    assert served_html.count("'/api/validate'") == 1
-    assert "'/api/validate'" in _function_body(served_html, "validateLocal")
+def test_public_api_is_only_called_from_the_local_client():
+    for name, text in source_files().items():
+        if name != "api/local.ts":
+            assert "'/api/" not in text, name
+    assert "CONNECTOR_URL" not in LOCAL and "from './connector'" not in LOCAL
+    assert LOCAL.count("'/api/validate'") == 1
+    # In the bundle the browser runs, /api/validate appears once (the local client).
+    assert page_bundle("index.html").count("/api/validate") == 1
 
 
-@pytest.mark.parametrize(
-    "function_name, public_endpoint",
-    [
-        ("testConnection", "'/api/connections/test'"),
-        ("discoverDatabases", "'/api/connections/discover-databases'"),
-    ],
-)
-def test_remote_targets_are_blocked_before_public_connection_endpoints(
-    served_html, function_name, public_endpoint
-):
-    body = _function_body(served_html, function_name)
-    guard = body.find("if (isRemoteTarget(state.credentials.host))")
-    call = body.find(public_endpoint)
-    assert guard != -1, f"{function_name} has no remote-target guard"
-    assert call != -1
-    assert guard < call, f"{function_name} calls {public_endpoint} before the remote guard"
-    guard_block = body[guard:call]
-    assert "return;" in guard_block
+def test_local_mode_reaches_only_mysql_on_this_computer():
+    env = source("shared/environment.ts")
+    assert "export const LOCAL_HOST = '127.0.0.1';" in env and "export const LOCAL_PORT = 3306;" in env
+    server = LOCAL[LOCAL.index("const server"):].split("\n")[0]
+    assert "host: LOCAL_HOST, port: LOCAL_PORT" in server
+    # There is no host or port field: a typed host can never become a destination.
+    panel = source("features/connection/ConnectionPanel.tsx")
+    assert "<span>Host" not in panel and "<span>Port" not in panel
 
 
-def test_remote_target_check_does_not_depend_on_port(served_html):
-    body = _function_body(served_html, "isRemoteTarget")
-    assert "port" not in body
+def test_review_takes_the_connector_path_for_a_company_target_only():
+    review = source("features/review/useReview.ts")
+    start = function_body(review, "start")
+    branch = start[start.index("!PUBLIC_DEMO && s.target"):]
+    assert branch.index("connector.validateRemote(") < branch.index(": await validateLocal(")
+    # The remote branch sends the target_id, never a host or port.
+    remote = function_body(CONNECTOR, "validateRemote")
+    assert "targetPath(targetId, 'validate')" in remote
+    assert "host" not in remote and "port" not in remote
 
 
-def test_no_hidden_pairing_global_in_served_page(served_html):
-    # Milestone B: pairing now exists, but only as an explicit user action. The
-    # session must never come from a hidden global, browser storage, or the URL,
-    # and ensureConnectorSession must never pair implicitly.
-    assert "__CONNECTOR_PAIRING_TOKEN__" not in served_html
-    # localStorage is allowed only for the appearance preference; see
-    # test_browser_storage_holds_only_the_theme_preference.
-    for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
-                      "URLSearchParams", "location.hash", "location.search", "window.__"):
-        assert forbidden not in served_html, forbidden
-    session = _function_body(served_html, "ensureConnectorSession")
-    assert "throw new Error" in session
-    assert "fetch" not in session and "requestJson" not in session
-    assert "connectorRequest" not in session and "CONNECTOR_URL" not in session
-    # The only pairing call is the explicit pairConnector() action, fed by the input field.
-    assert served_html.count("CONNECTOR_URL + '/pair'") == 2  # the call, and the 401 exemption
-    pair = _function_body(served_html, "pairConnector")
-    assert "pairingCode.value" in pair
-    assert "CONNECTOR_URL + '/pair'" in pair
+def test_company_operations_are_refused_before_anything_is_sent():
+    guard = function_body(CONNECTION, "withTarget")
+    checks = ["if (!s.target) throw", "if (!s.username || !s.password) throw", "!discoveryMatches(s)", "requireSession()"]
+    positions = [guard.index(check) for check in checks]
+    assert positions == sorted(positions) and positions[-1] < guard.index("await run(")
 
 
-def test_browser_storage_holds_only_the_theme_preference(served_html):
-    """The appearance toggle may remember Light/Dark/System, and the update notice the
-    version it was dismissed for and the version being installed. Nothing else on the
-    page may touch browser storage: no session token, credentials or connector state."""
-    uses = re.findall(r"localStorage\.(\w+)\(([^)]*)\)", served_html)
-    assert uses, "theme preference is expected to use localStorage"
-    assert served_html.count("localStorage") == len(uses)  # no other kind of access
-    for method, args in uses:
-        assert method in ("getItem", "setItem", "removeItem"), method
-        assert args.split(",")[0].strip() in ("'mdv-theme'", "'mdv-update-dismissed'",
-                                              "'mdv-update-pending'"), args
-    # Only saveTheme, saveUpdateDismissal and saveUpdatePending write, and only a checked value.
-    writes = [args for method, args in uses if method == "setItem"]
-    assert writes == ["'mdv-theme', choice", "'mdv-update-dismissed', version",
-                      "'mdv-update-pending', version"]
-    assert "if (!UPDATE_VERSION.test(version)) return;" in _function_body(served_html, "saveUpdatePending")
-    save = _function_body(served_html, "saveTheme")
-    assert "if (!THEMES.includes(choice)) return;" in save
-    assert "const THEMES = ['light', 'dark', 'system'];" in served_html
-    dismissal = _function_body(served_html, "saveUpdateDismissal")
-    assert "if (!UPDATE_VERSION.test(version)) return;" in dismissal
-    assert ("const UPDATE_VERSION = /^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$/;"
-            in served_html)
-    # The theme and dismissal code never sees credentials, the session or the network.
-    for name in ("saveTheme", "readTheme", "applyTheme", "saveUpdateDismissal", "readUpdateDismissal",
-                 "saveUpdatePending", "readUpdatePending", "clearUpdatePending"):
-        body = _function_body(served_html, name)
-        for secret in ("password", "username", "credentials", "SessionToken", "sessionToken",
-                       "pairing", "fetch", "CONNECTOR_URL", "state."):
-            assert secret not in body, (name, secret)
+def test_connector_session_comes_only_from_explicit_pairing():
+    source_text = all_source()
+    assert "__CONNECTOR_PAIRING_TOKEN__" not in source_text
+    for forbidden in ("sessionStorage", "document.cookie", "indexedDB", "URLSearchParams",
+                      "location.hash", "location.search", "window.__"):
+        assert forbidden not in source_text, forbidden
+    session = function_body(CONNECTION, "requireSession")
+    assert "throw new RequestError" in session and "connector." not in session and "fetch" not in session
+    # The only pairing call is the explicit action, fed by the pairing-code field.
+    assert source_text.count("connector.pair(") == 1
+    assert "connectorRequest('/pair', 'POST', null, { pairing_token: code })" in CONNECTOR
+    panel = source("features/connection/ConnectorPanel.tsx")
+    submit = function_body(panel, "submitPairing")
+    assert "setPairingCode('')" in submit and "actions.pair(code)" in submit
+    # The token lives in the connection state only.
+    assert source_text.count("sessionToken: token") >= 1
+    assert "localStorage" not in CONNECTION and "readStored" not in CONNECTION and "writeStored" not in CONNECTION
 
 
-def test_served_page_keeps_database_list_limited_warning(served_html):
-    assert 'id="discoveryWarning"' in served_html
-    assert "Database list is limited. Not all visible databases are shown." in served_html
-    discover = _function_body(served_html, "discoverDatabases")
-    assert "data.complete === false" in discover
-    assert "$('discoveryWarning').hidden = false" in discover
+def test_browser_storage_holds_only_per_viewer_conveniences():
+    """Only the theme word, the ambient-light choice, the editor split and the update
+    versions. No session token, login, SQL, target or database."""
+    allowed = {"'mdv-theme'", "'mdv-home-theme'", "'mdv-update-dismissed'", "'mdv-update-pending'",
+               "'mdv-ambient'", "'mdv-review-split'"}
+    for name, text in source_files().items():
+        if "localStorage" in text:
+            assert name in ("shared/storage.ts", "home/home.ts"), name
+    for call in re.findall(r"(?:readStored|writeStored|removeStored)\(([^,)]+)", all_source()):
+        key = call.strip()
+        if key in ("key",) or ":" in key:  # the helpers' own parameters
+            continue
+        assert key in allowed or key in ("KEY", "SPLIT_KEY", "AMBIENT_KEY", "DISMISSED", "PENDING"), key
+    constants = dict(re.findall(r"const (KEY|SPLIT_KEY|AMBIENT_KEY|DISMISSED|PENDING) = ('[\w-]+');", all_source()))
+    assert set(constants.values()) <= allowed, constants
+    # Stored update versions are checked first.
+    updates = source("app/updates.ts")
+    assert "if (UPDATE_VERSION.test(version)) writeStored(key, version)" in updates
+    assert ("export const UPDATE_VERSION = /^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$/;"
+            in updates)
+    theme = source("shared/theme.ts")
+    assert "value === 'light' || value === 'dark' || value === 'system'" in theme
+    for text in (updates, theme, source("shared/storage.ts")):
+        for secret in ("password", "username", "sessionToken", "pairing", "fetch", "CONNECTOR_URL"):
+            assert secret not in text, secret
 
 
-def test_served_page_keeps_readable_report_labels(served_html):
-    # The label covers a connected database whose evidence failed too, so it never
-    # says the database itself was unavailable.
-    assert "'Static + database evidence unavailable'" in served_html
-    assert "'Static + database unavailable'" not in served_html
-    assert "'Database evidence'" in served_html
-    assert "'Metadata-based scoring was not applied.'" in served_html
-    assert "High estimated rows applied: " in served_html
-    assert 'class="stepper"' in served_html
-    assert "Ready for review" in served_html
+def test_database_list_limited_warning():
+    panel = source("features/connection/ConnectionPanel.tsx")
+    assert "Database list is limited. Not all visible databases are shown." in panel
+    assert "s.verified && !s.listComplete" in panel
+    assert "complete: data.status === 'success' && data.complete !== false" in LOCAL
 
 
-# ---------------------------------------------------------------- B2 approved-target flow
-# Static inspection of the served page only; no browser executes this JavaScript.
+def test_readable_report_labels():
+    assert "'Static + database evidence unavailable'" in REVIEW_TEXT
+    assert "'Static + database unavailable'" not in REVIEW_TEXT
+    assert "'Database evidence'" in REVIEW_TEXT
+    assert "'Metadata-based scoring was not applied.'" in REVIEW_TEXT
+    assert "High estimated rows applied: " in source("features/review/StatementList.tsx")
 
 
-def test_target_selector_offers_local_and_connector_targets(served_html):
-    assert '<select id="targetSelect">' in served_html
-    assert '<option value="">Local (this machine)</option>' in served_html
-    render = _function_body(served_html, "renderTargetOptions")
-    assert "new Option('Local (this machine)', '')" in render
-    assert "target.target_id" in render
+# ---------------------------------------------------------------- approved targets and discovery
 
 
-def test_approved_targets_are_loaded_from_connector_and_filtered(served_html):
-    load = _function_body(served_html, "loadApprovedTargets")
-    assert "CONNECTOR_URL + '/company/targets'" in load
-    assert "method: 'GET'" in load
-    assert "target.approval_state === 'approved'" in load
-    assert "isRemoteTarget(String(target.host || ''))" in load
-    assert "/api/" not in load
-    # A previously selected target that is no longer listed is dropped.
-    assert "selectTarget('')" in load
-    # Pairing loads targets; the session is the only thing that authorises the listing.
-    assert "await loadApprovedTargets();" in _function_body(served_html, "pairConnector")
+def test_target_selector_offers_local_and_approved_targets():
+    panel = source("features/connection/ConnectionPanel.tsx")
+    assert "label: 'Local (this machine)', value: ''" in panel
+    assert "value: t.target_id" in panel
+    targets = function_body(CONNECTOR, "approvedTargets")
+    assert "connectorRequest('/company/targets', 'GET', token)" in targets
+    assert ".approval_state === 'approved'" in targets and "isRemoteHost(String(" in targets
+    load = function_body(CONNECTION, "loadTargets")
+    assert "selectTarget('')" in load  # a selection no longer listed is dropped
+    assert "await loadTargets();" in function_body(CONNECTION, "pair")
 
 
-def test_selected_target_makes_host_and_port_display_only(served_html):
-    select = _function_body(served_html, "selectTarget")
-    assert "state.approvedTargets.find(t => t.target_id === targetId)" in select
-    assert "host.readOnly = port.readOnly = Boolean(target)" in select
-    assert "clearDiscoveredDatabases();" in select
+def test_remote_discovery_is_connector_only_and_bound():
+    discover = function_body(CONNECTOR, "discoverRemote")
+    assert "targetPath(targetId, 'databases')" in discover
+    assert "{ username: login.username.trim(), password: login.password }" in discover
+    connect = function_body(CONNECTION, "connect")
+    remote = connect[connect.index("if (binding.target) {"):connect.index("} else {")]
+    assert "connector.discoverRemote(" in remote and "discoverLocalDatabases" not in remote
+    # Discarded if the target, login or session changed while it ran.
+    assert "if (!same() || data.target_id !== binding.target.target_id)" in remote
+    same = connect[connect.index("const same = () => {"):connect.index("const previous")]
+    for check in ("target_id === binding.target?.target_id", "now.username === binding.username",
+                  "now.password === binding.password", "now.sessionToken === binding.token"):
+        assert check in same, check
 
 
-def test_remote_validation_sends_target_id_not_host_or_port(served_html):
-    remote = _function_body(served_html, "validateRemote")
-    assert "const remoteTarget = selectedRemoteTarget();" in remote
-    assert "encodeURIComponent(remoteTarget.target_id)" in remote
-    assert "state.credentials.host" not in remote and "state.credentials.port" not in remote
-    assert "host:" not in remote and "port:" not in remote
-    assert "findApprovedRemoteTarget" not in served_html
-    # Refusal happens before any request when no approved target is selected.
-    refusal = _function_body(served_html, "selectedRemoteTarget")
-    assert "if (!state.remoteTarget)" in refusal and "throw new Error" in refusal
-    assert "fetch" not in refusal and "connectorRequest" not in refusal
-    dispatch = _function_body(served_html, "validateSql")
-    assert "state.remoteTarget || isRemoteTarget(state.credentials.host)" in dispatch
+def test_selected_database_is_bound_to_target_login_and_session():
+    matches = function_body(STATE, "discoveryMatches")
+    for check in ("d.targetId === s.target.target_id", "d.username === s.username",
+                  "d.sessionToken === s.sessionToken", "d.databases.includes(s.database)"):
+        assert check in matches, check
+    assert "if (s.target) return discoveryMatches(s) ? s.database : null;" in function_body(STATE, "usableDatabase")
+    # A database can only be one from the discovered list.
+    assert "name && s.databases?.includes(name) ? name : null" in function_body(CONNECTION, "selectDatabase")
 
 
-def test_remote_discovery_is_connector_only(served_html):
-    discover = _function_body(served_html, "discoverRemote")
-    assert "CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/databases'" in discover
-    assert "JSON.stringify({ username: login.username, password: login.password })" in discover
-    assert "/api/" not in discover and "requestJson" not in discover
-    body = _function_body(served_html, "discoverDatabases")
-    # The public discovery endpoint is only the non-remote branch of the ternary.
-    ternary = body.index("const data = remoteTarget")
-    assert body.index("? await discoverRemote(remoteTarget)") < body.index("'/api/connections/discover-databases'")
-    assert ternary < body.index("? await discoverRemote(remoteTarget)")
+def test_discovery_is_cleared_on_target_login_and_session_changes():
+    cleared = STATE[STATE.index("export const clearedDiscovery"):].split("};")[0]
+    for field in ("verified: false", "databases: null", "database: null", "discovery: null"):
+        assert field in cleared, field
+    assert "...clearedDiscovery" in function_body(CONNECTION, "setLogin")
+    assert "...clearedDiscovery" in function_body(CONNECTION, "selectTarget")
+    paired = function_body(CONNECTION, "setPaired")
+    assert "targets: []" in paired and "...clearedDiscovery" in paired
+    assert "setPaired(null, NOT_PAIRED, '')" in function_body(CONNECTION, "unpair")
+    assert "if (error.status === 401 && !pairing) setPaired(null," in function_body(CONNECTION, "connectorFailed")
 
 
-def test_selected_database_is_bound_to_target_login_and_session(served_html):
-    matches = _function_body(served_html, "discoveryMatches")
-    for check in ("discovery.targetId === target.target_id",
-                  "discovery.username === state.credentials.username",
-                  "discovery.sessionToken === state.connectorSessionToken",
-                  "discovery.databases.includes(state.selectedDatabase)"):
-        assert check in matches
-    remote = _function_body(served_html, "validateRemote")
-    guard = remote.index("if (!discoveryMatches(remoteTarget))")
-    assert guard < remote.index("body.database = state.selectedDatabase")
-    # Discovery results are discarded if target, login or session changed mid-request.
-    body = _function_body(served_html, "discoverDatabases")
-    assert "state.connectorSessionToken !== binding.sessionToken" in body
-    assert "data.target_id !== binding.targetId" in body
+def test_leaving_connector_mode_clears_the_company_login():
+    """Found with real Chrome in the previous page: after Remote -> Local the company
+    login stayed and the next Local validation posted it to the public /api/validate."""
+    select = function_body(CONNECTION, "selectTarget")
+    assert "s.target && !target ? { username: '', password: '' } : {}" in select
+    paired = function_body(CONNECTION, "setPaired")
+    assert "if (s.target) Object.assign(change, { target: null, username: '', password: ''" in paired
 
 
-def test_discovery_state_is_cleared_on_target_login_and_session_changes(served_html):
-    clear = _function_body(served_html, "clearDiscoveredDatabases")
-    assert "state.discovery = null;" in clear and "state.selectedDatabase = '';" in clear
-    # Username/password/host changes go through syncCredentials.
-    assert "clearDiscoveredDatabases();" in _function_body(served_html, "syncCredentials")
-    assert "[host, port, username, password].forEach(input => input.addEventListener('input', syncCredentials));" in served_html
-    # Unpair, session expiry (401) and re-pairing all go through setPaired.
-    paired = _function_body(served_html, "setPaired")
-    assert "state.approvedTargets = [];" in paired
-    assert "selectTarget('')" in paired and "clearDiscoveredDatabases()" in paired
-    assert "setPaired(null," in _function_body(served_html, "unpairConnector")
-    assert "setPaired(null," in _function_body(served_html, "connectorRequest")
+def test_local_login_is_cleared_when_a_newly_approved_target_is_selected():
+    confirm = function_body(CONNECTION, "confirmTarget")
+    clear = "if (!ref.current.target) update({ username: '', password: '' });"
+    assert clear in confirm and confirm.index(clear) < confirm.index("selectTarget(approvedId);")
 
 
-# ---------------------------------------------------------------- web-app pass regressions
-# Found with real Chrome: local limit errors arrive as HTTP 200 {"error": code}
-# without a message, and the page showed "Validation returned an unexpected response."
+def test_connect_button_is_never_left_disabled():
+    panel = source("features/connection/ConnectionPanel.tsx")
+    assert "disabled={!s.username || !s.password || busy}" in panel
+    connect = function_body(CONNECTION, "connect")
+    # Every way out of a connection attempt clears the busy state.
+    assert connect.count("busy: null") >= 2
+
+
+def test_page_states_the_credential_flow_without_overclaiming():
+    text = " ".join(all_source().split())
+    assert "the login is sent with each request and never saved." in text
+    for claim in ("read-only session", "read only session", "read-only transaction", "read only transaction"):
+        assert claim not in text.lower(), claim
+
+
+# ---------------------------------------------------------------- fixed messages
 
 
 @pytest.mark.parametrize("sql, code", [
@@ -364,248 +328,42 @@ def test_discovery_state_is_cleared_on_target_login_and_session_changes(served_h
     ("SELECT 1; /*!50000 DELETE FROM t */", "executable_comment_not_supported"),
 ], ids=["statement_limit", "oversized_sql", "no_statements", "delimiter", "stored_program",
         "executable_comment"])
-def test_local_limit_errors_returned_by_api_have_friendly_page_messages(served_html, sql, code):
-    response = TestClient(app, base_url="http://127.0.0.1:8420").post("/api/validate", json={"sql": sql})
+def test_local_limit_errors_returned_by_api_have_friendly_page_messages(sql, code):
+    response = client.post("/api/validate", json={"sql": sql})
     assert response.status_code == 200 and response.json().get("error") == code
-    mapping = served_html[served_html.index("const RESPONSE_ERROR_MESSAGES = {"):]
-    mapping = mapping[:mapping.index("};")]
-    assert f"{code}: '" in mapping
-    error_message = _function_body(served_html, "errorMessage")
-    assert "data.error" in error_message and "RESPONSE_ERROR_MESSAGES[code]" in error_message
-    assert "typeof data.message === 'string'" in error_message  # explicit messages still win
+    messages = {**message_map(MESSAGES, "LIMITS"), **message_map(MESSAGES, "RESPONSE_ERROR_MESSAGES")}
+    assert code in messages
+    # The local client turns a 200 {"error": code} into that message, not "unexpected response".
+    assert "responseMessage(data, RESPONSE_ERROR_MESSAGES, 'Validation returned an unexpected response.')" in LOCAL
+    resolve = function_body(source("api/http.ts"), "responseMessage")
+    assert "typeof data.message === 'string'" in resolve  # explicit messages still win
+    assert "data.error_code" in resolve and "data.error" in resolve
 
 
-def test_connector_statement_limit_has_friendly_message(served_html):
-    connector_map = served_html[served_html.index("const CONNECTOR_ERROR_MESSAGES = {"):]
-    assert "statement_limit_exceeded: '" in connector_map[:connector_map.index("};")]
+def test_batch_contract_errors_have_the_same_message_locally_and_remotely():
+    # Both maps take these from the one LIMITS block.
+    assert MESSAGES.count("...LIMITS,") == 2
+    limits = message_map(MESSAGES, "LIMITS")
+    for code in ("statement_limit_exceeded", "no_statements", "delimiter_not_supported",
+                 "stored_program_not_supported", "executable_comment_not_supported"):
+        assert "LOW" not in limits[code] and "risk" not in limits[code].lower()
+    assert "Nothing was assessed." in limits["no_statements"]
+    assert "not analysed" in limits["stored_program_not_supported"]
+    assert "nothing was assessed" in limits["executable_comment_not_supported"]
 
 
-def test_database_validation_failed_has_friendly_message(served_html):
-    connector_map = served_html[served_html.index("const CONNECTOR_ERROR_MESSAGES = {"):]
-    block = connector_map[:connector_map.index("};")]
-    line = next(line.strip() for line in block.splitlines()
-                 if line.strip().startswith("database_validation_failed: "))
-    # A fixed string literal: nothing from the response is interpolated.
-    assert re.fullmatch(r"\w+: '(?:[^'\\]|\\')+',?", line), line
-
-
-def test_batch_contract_errors_have_the_same_message_locally_and_remotely(served_html):
-    def message(map_name, code):
-        mapping = served_html[served_html.index(f"const {map_name} = {{"):]
-        line = next(line for line in mapping[:mapping.index("};")].splitlines()
-                    if line.strip().startswith(code + ": '"))
-        return line.strip()[len(code) + 3:].rstrip("',")
-
-    for code in ("no_statements", "delimiter_not_supported", "stored_program_not_supported",
-                 "executable_comment_not_supported"):
-        local = message("RESPONSE_ERROR_MESSAGES", code)
-        assert local == message("CONNECTOR_ERROR_MESSAGES", code)
-        # Nothing was assessed: no risk level is implied.
-        assert "LOW" not in local and "risk" not in local.lower()
-    assert "Nothing was assessed." in message("RESPONSE_ERROR_MESSAGES", "no_statements")
-    assert "not analysed" in message("RESPONSE_ERROR_MESSAGES", "stored_program_not_supported")
-    assert "nothing was assessed" in message("RESPONSE_ERROR_MESSAGES", "executable_comment_not_supported")
-
-
-def test_leaving_connector_mode_clears_company_login(served_html):
-    """Found with real Chrome: after Remote -> Local the company login stayed in the
-    form and the next Local validation posted it to the public /api/validate."""
-    select = _function_body(served_html, "selectTarget")
-    opening = "} else if (wasRemote) {"
-    branch = select[select.index(opening) + len(opening):]
-    branch = branch[:branch.index("}")]
-    assert "username.value = '';" in branch and "password.value = '';" in branch
-    # The clearing happens before credentials are re-read into state.
-    assert select.index("password.value = '';") < select.index("syncCredentials();")
-    # Unpair and session loss reach the same branch via selectTarget('').
-    assert "if (state.remoteTarget) selectTarget('');" in _function_body(served_html, "setPaired")
-
-
-@pytest.mark.parametrize("function_name", ["testConnection", "discoverDatabases"])
-def test_discover_button_is_never_left_disabled(served_html, function_name):
-    """Found with real Chrome: a finally block disabled Discover when credentials
-    were invalid at that instant (e.g. cleared by session expiry mid-discovery),
-    and nothing re-enabled it once valid credentials were entered again."""
-    body = _function_body(served_html, function_name)
-    finally_block = body[body.rindex("finally {"):]
-    assert "discoverBtn.disabled = false;" in finally_block
-    assert "discoverBtn.disabled = !validConnection()" not in served_html
-    # Invalid input is still rejected when the button is clicked.
-    assert "if (!validConnection()) {" in _function_body(served_html, "discoverDatabases")
-
-
-def test_page_states_the_credential_flow_without_overclaiming(served_html):
-    text = " ".join(served_html.split())
-    assert ("Your database login is used for connection, database evidence and "
-            "metadata during validation. Credentials are not saved.") in text
-    # The UI makes no claim about the database session's read-only state.
-    for claim in ("read-only session", "read only session", "read-only transaction", "read only transaction"):
-        assert claim not in text.lower(), claim
-
-
-def test_every_unavailable_evidence_status_has_a_fixed_actionable_message(served_html):
-    block = served_html[served_html.index("const EVIDENCE_STATUS_MESSAGES = {"):]
-    block = block[:block.index("};")]
-    messages = dict(re.findall(r"\n\t+(\w+): '([^']+)'", block))
-    expected = set(EVIDENCE_STATUSES) - {"available"}
-    assert set(messages) == expected
-    # Fixed text only: nothing interpolated from the response.
-    assert "+" not in block and "${" not in block
-    # Messages are looked up by the stable codes in the evidence state, never by raw errors.
-    assert "Object.prototype.hasOwnProperty.call(messages, code)" in _function_body(served_html, "fixedMessage")
-    layer = _function_body(served_html, "evidenceLayer")
-    assert "fixedMessage(EVIDENCE_STATUS_MESSAGES, state.connection.reason)" in layer
-    assert "evidence.error" not in layer and "evidence.status" not in layer
-    assert "fixedMessage(EVIDENCE_STATUS_MESSAGES, plan.reason)" in _function_body(served_html, "planLine")
-
-
-def test_every_metadata_failure_reason_has_its_own_fixed_message(served_html):
-    """Metadata failures are named (timeout, permission, ...), never a generic 'Partial'."""
-    from backend.evidence_state import NO_DATABASE_SELECTED
-
-    block = served_html[served_html.index("const METADATA_REASON_MESSAGES = {"):]
-    block = block[:block.index("};")]
-    messages = dict(re.findall(r"\n\t+(\w+): '([^']+)'", block))
-    assert set(messages) == {"timeout", "permission_denied", "budget_exceeded", "invalid_reference",
-                             "unavailable", NO_DATABASE_SELECTED}
-    assert len(set(messages.values())) == len(messages)
-    assert "+" not in block and "${" not in block
-    assert "Partial'" not in _function_body(served_html, "metadataStatusLabel")
-
-
-def test_sql_editor_has_an_accessible_name(served_html):
-    match = re.search(r'<textarea id="sqlInput"[^>]*aria-labelledby="([^"]+)"', served_html)
-    assert match, "sqlInput has no aria-labelledby"
-    assert f'id="{match.group(1)}"' in served_html
-
-
-def test_default_local_page_request_is_accepted_by_api():
-    """The page's default (untouched form) local request must validate statically."""
-    client = TestClient(app, base_url="http://127.0.0.1:8420")
-    response = client.post(
-        "/api/validate",
-        json={
-            "sql": "SELECT * FROM users;",
-            "host": "127.0.0.1",
-            "port": 3306,
-            "username": "",
-            "password": "",
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data.get("statements"), list)
-    assert data["statement_count"] == 1
-
-
-# ---------------------------------------------------------------- connection errors and session expiry
-
-
-def _connector_messages(served_html):
-    block = served_html[served_html.index("const CONNECTOR_ERROR_MESSAGES = {"):]
-    return block[:block.index("};")]
-
-
-def test_every_company_connection_code_has_a_fixed_message(served_html):
+def test_every_company_connection_code_has_a_fixed_message():
     from connector.server import COMPANY_CONNECTION_ERROR_CODES, COMPANY_CONNECTION_FAILED
 
-    block = _connector_messages(served_html)
-    keys = set(re.findall(r"\n\t+(\w+): ", block))
-    assert COMPANY_CONNECTION_ERROR_CODES | {COMPANY_CONNECTION_FAILED} <= keys
-    for code in COMPANY_CONNECTION_ERROR_CODES | {COMPANY_CONNECTION_FAILED}:
-        line = next(line.strip() for line in block.splitlines() if line.strip().startswith(code + ": "))
-        # A fixed string literal: nothing from the response is interpolated.
-        assert re.fullmatch(r"\w+: '(?:[^'\\]|\\')+',?", line), line
-    # The page never shows a raw code for these: unknown codes fall back to the message.
-    assert "CONNECTOR_ERROR_MESSAGES[error.errorCode]" in _function_body(served_html, "connectorRequest")
+    messages = message_map(MESSAGES, "CONNECTOR_ERROR_MESSAGES")
+    assert COMPANY_CONNECTION_ERROR_CODES | {COMPANY_CONNECTION_FAILED} <= set(messages)
+    assert "database_validation_failed" in messages and "statement_limit_exceeded" in message_map(MESSAGES, "LIMITS")
+    # Unknown codes fall back to the connector's own message, never a raw code.
+    assert "Object.hasOwn(CONNECTOR_ERROR_MESSAGES, error.code)" in function_body(CONNECTOR, "connectorRequest")
 
 
-def test_session_expiry_notice_uses_the_connector_expiry_and_never_renews(served_html):
-    pair = _function_body(served_html, "pairConnector")
-    assert "scheduleSessionExpiryNotice(data.expires_in_seconds);" in pair
-    assert pair.index("setPaired(data.session_token") < pair.index("scheduleSessionExpiryNotice(")
-    notice = _function_body(served_html, "scheduleSessionExpiryNotice")
-    assert "Number(expiresInSeconds)" in notice and "setTimeout(" in notice
-    assert "setPaired(null, CONNECTOR_ERROR_MESSAGES.session_expired, 'error')" in notice
-    # No request, re-pairing or renewal from the timer.
-    for forbidden in ("connectorRequest", "fetch", "/pair", "pairConnector", "setInterval"):
-        assert forbidden not in notice, forbidden
-    # Timers belong to one session: cleared whenever the session changes.
-    paired = _function_body(served_html, "setPaired")
-    assert "state.sessionTimers.forEach(clearTimeout);" in paired
-    assert "PAIR_AGAIN_GUIDANCE" in _connector_messages(served_html).split("session_expired: ")[1].splitlines()[0]
-
-
-def test_only_the_target_id_is_remembered_across_re_pairing(served_html):
-    assignments = re.findall(r"state\.rememberedTargetId = ([^;}\n]+?)\s*[;}\n]", served_html)
-    assert assignments and set(assignments) <= {"null", "state.remoteTarget.target_id"}
-    paired = _function_body(served_html, "setPaired")
-    # Remembered before the existing clearing branch, which still runs unchanged.
-    assert paired.index("state.rememberedTargetId = state.remoteTarget.target_id") < paired.index(
-        "if (state.remoteTarget) selectTarget('');")
-
-
-def test_remembered_target_is_restored_only_from_the_fresh_approved_list(served_html):
-    load = _function_body(served_html, "loadApprovedTargets")
-    restore = load[load.index("else if (state.rememberedTargetId) {"):]
-    assert "state.rememberedTargetId = null;" in restore  # used once
-    guard = "if (state.approvedTargets.some(t => t.target_id === remembered)) selectTarget(remembered);"
-    assert guard in restore
-    assert load.index("state.approvedTargets = (data") < load.index(guard)
-    # selectTarget clears discovered databases: the new session must discover again.
-    assert "clearDiscoveredDatabases();" in _function_body(served_html, "selectTarget")
-
-
-def test_target_request_goes_only_to_the_connector_without_a_login(served_html):
-    request = _function_body(served_html, "requestTarget")
-    assert "connectorRequest(CONNECTOR_URL + '/company/target-requests'" in request
-    for forbidden in ("username", "password", "state.credentials", "/api/", "requestJson", "localStorage"):
-        assert forbidden not in request, forbidden
-    # Only the fields the connector accepts; the CA file is read into the body, not kept.
-    assert "display_name:" in request and "host:" in request and "port:" in request and "trust:" in request
-    assert "body.ca_pem = await file.text();" in request
-    assert "state.targetRequest = { requestId: data.request_id, sessionToken: sessionToken };" in request
-
-
-def test_approval_code_is_sent_in_the_body_of_the_same_session_only(served_html):
-    confirm = _function_body(served_html, "confirmTarget")
-    assert "connectorRequest(CONNECTOR_URL + '/company/target-requests/confirm'" in confirm
-    assert "JSON.stringify({ request_id: pending.requestId, approval_code: code })" in confirm
-    assert "pending.sessionToken !== state.connectorSessionToken" in confirm
-    assert "approvalCode.value = '';" in confirm  # cleared from the field at once
-    assert "?" not in confirm.split("'/company/target-requests/confirm'")[0].rsplit("CONNECTOR_URL", 1)[-1]
-    # The page never approves by itself: approval is only the explicit button.
-    assert served_html.count("confirmTarget(") == 1  # defined, never called by the page itself
-    assert "confirmTargetBtn.addEventListener('click', confirmTarget);" in served_html
-
-
-def test_local_login_is_cleared_when_a_newly_approved_target_is_selected(served_html):
-    """A login typed in Local mode must not be carried into the remote target that
-    is selected automatically after approval (it would be sent on Discover)."""
-    confirm = _function_body(served_html, "confirmTarget")
-    guard = "if (!state.remoteTarget) {"
-    branch = confirm[confirm.index(guard) + len(guard):]
-    branch = branch[:branch.index("}")]
-    assert "username.value = '';" in branch and "password.value = '';" in branch
-    # Cleared before the selection, which re-reads the form (syncCredentials).
-    assert confirm.index(guard) < confirm.index("selectTarget(approvedId);")
-    assert "syncCredentials();" in _function_body(served_html, "selectTarget")
-
-
-def test_session_change_drops_the_open_request_and_reapproval_is_explicit(served_html):
-    paired = _function_body(served_html, "setPaired")
-    assert "showTargetRequest(false);" in paired and "addTarget.hidden = !state.connectorSessionToken;" in paired
-    show = _function_body(served_html, "showTargetRequest")
-    assert "state.targetRequest = null;" in show and "approvalCode.value = '';" in show
-    request = _function_body(served_html, "connectorRequest")
-    assert "REAPPROVAL_CODES.includes(error.errorCode)) reapproveBtn.hidden = false;" in request
-    assert "requestTarget(state.remoteTarget.target_id)" in served_html  # only from the button
-    assert "reapproveBtn.hidden = true;" in _function_body(served_html, "selectTarget")
-
-
-def test_every_onboarding_code_has_a_fixed_message(served_html):
-    block = _connector_messages(served_html)
-    keys = set(re.findall(r"\n\t+(\w+): ", block))
+def test_every_onboarding_code_has_a_fixed_message():
+    keys = set(message_map(MESSAGES, "CONNECTOR_ERROR_MESSAGES"))
     codes = {
         "approval_console_unavailable", "invalid_target_request", "invalid_company_target_name",
         "invalid_company_target_host", "invalid_company_target_port", "local_target_not_allowed_in_company_mode",
@@ -621,10 +379,126 @@ def test_every_onboarding_code_has_a_fixed_message(served_html):
     assert codes <= keys, codes - keys
 
 
-def test_unpair_and_local_mode_forget_the_remembered_target(served_html):
-    unpair = _function_body(served_html, "unpairConnector")
-    assert unpair.index("setPaired(null,") < unpair.index("state.rememberedTargetId = null;")
-    assert ("targetSelect.addEventListener('change', () => { forgetRememberedTarget(); "
-            "selectTarget(targetSelect.value); });") in served_html
-    assert "if (!state.remoteTarget) forgetRememberedTarget();" in served_html
-    assert "state.rememberedTargetId = null" in _function_body(served_html, "forgetRememberedTarget")
+def test_message_maps_are_fixed_text():
+    for name in ("LIMITS", "RESPONSE_ERROR_MESSAGES", "CONNECTOR_ERROR_MESSAGES"):
+        block = MESSAGES[MESSAGES.index(name):]
+        block = block[:block.index("};")]
+        assert "${" not in block and "`" not in block, name
+    # The only computed parts are the fixed guidance and the page's own origin.
+    computed = re.findall(r"'\s*\+\s*([\w.]+)", MESSAGES)
+    assert set(computed) <= {"PAIR_AGAIN_GUIDANCE", "window.location.origin"}, computed
+
+
+def test_every_unavailable_evidence_status_has_a_fixed_actionable_message():
+    messages = message_map(REVIEW_TEXT, "EVIDENCE_STATUS_MESSAGES")
+    assert set(messages) == set(EVIDENCE_STATUSES) - {"available"}
+    block = REVIEW_TEXT[REVIEW_TEXT.index("const EVIDENCE_STATUS_MESSAGES"):]
+    assert "+" not in block[:block.index("};")]
+    # Looked up by the stable codes in the evidence state, never from raw errors.
+    assert "Object.hasOwn(messages, code)" in REVIEW_TEXT
+    view = function_body(REVIEW_TEXT, "evidenceView")
+    assert "evidenceStatusMessage(state.connection.reason)" in view
+    assert "evidence.status" not in view and "evidence.message" not in view
+    assert "evidenceStatusMessage(plan.reason)" in function_body(REVIEW_TEXT, "planLine")
+
+
+def test_every_metadata_failure_reason_has_its_own_fixed_message():
+    from backend.evidence_state import NO_DATABASE_SELECTED
+
+    messages = message_map(REVIEW_TEXT, "METADATA_REASON_MESSAGES")
+    assert set(messages) == {"timeout", "permission_denied", "budget_exceeded", "invalid_reference",
+                             "unavailable", NO_DATABASE_SELECTED}
+    assert len(set(messages.values())) == len(messages)
+    assert "Partial'" not in function_body(REVIEW_TEXT, "metadataStatusLabel")
+
+
+def test_sql_editor_has_an_accessible_name():
+    editor = source("features/review/SqlEditor.tsx")
+    assert 'id="sqlInput"' in editor and 'aria-labelledby="sqlLabel"' in editor and 'id="sqlLabel"' in editor
+
+
+def test_default_local_page_requests_are_accepted_by_api():
+    """What the page sends: the SQL alone (static), or with the fixed local server."""
+    for body in ({"sql": "SELECT * FROM users;"},
+                 {"sql": "SELECT * FROM users;", "host": "127.0.0.1", "port": 3306, "username": "", "password": ""}):
+        response = client.post("/api/validate", json=body)
+        assert response.status_code == 200
+        assert response.json()["statement_count"] == 1
+
+
+# ---------------------------------------------------------------- session expiry and target onboarding
+
+
+def test_session_expiry_notice_uses_the_connector_expiry_and_never_renews():
+    pair = function_body(CONNECTION, "pair")
+    assert pair.index("setPaired(session.token") < pair.index("const seconds = session.expiresInSeconds;")
+    timers = pair[pair.index("const seconds"):pair.index("await loadTargets();")]
+    assert "setPaired(null, CONNECTOR_ERROR_MESSAGES.session_expired!, 'error')" in timers
+    for forbidden in ("connector.", "fetch", "setInterval", "pair("):
+        assert forbidden not in timers, forbidden
+    paired = function_body(CONNECTION, "setPaired")
+    assert "timers.current.forEach(clearTimeout);" in paired
+    assert "'Connector session has expired. ' + PAIR_AGAIN_GUIDANCE" in MESSAGES
+
+
+def test_only_the_target_id_is_remembered_across_re_pairing():
+    assignments = re.findall(r"rememberedTargetId: ([^,}\n]+)", CONNECTION)
+    assert assignments
+    allowed = {"null", "s.target ? s.target.target_id : s.rememberedTargetId", "s.target ? s.rememberedTargetId : null"}
+    assert {a.strip() for a in assignments} <= allowed, assignments
+
+
+def test_remembered_target_is_restored_only_from_the_fresh_approved_list():
+    load = function_body(CONNECTION, "loadTargets")
+    restore = load[load.index("else if (!s.target && s.rememberedTargetId)"):]
+    assert "update({ rememberedTargetId: null });" in restore  # used once
+    assert "if (targets.some(t => t.target_id === remembered)) selectTarget(remembered);" in restore
+    assert "...clearedDiscovery" in function_body(CONNECTION, "selectTarget")
+
+
+def test_unpair_and_local_mode_forget_the_remembered_target():
+    unpair = function_body(CONNECTION, "unpair")
+    assert unpair.index("setPaired(null,") < unpair.index("update({ rememberedTargetId: null });")
+    assert "selectTarget: (id: string) => { update({ rememberedTargetId: null }); selectTarget(id); }" in CONNECTION
+    assert "rememberedTargetId: s.target ? s.rememberedTargetId : null" in function_body(CONNECTION, "setLogin")
+
+
+def test_target_request_goes_only_to_the_connector_without_a_login():
+    request = function_body(CONNECTION, "requestTarget")
+    for forbidden in ("username", "password", "/api/", "readStored", "writeStored"):
+        assert forbidden not in request, forbidden
+    assert "display_name:" in request and "host:" in request and "port:" in request and "trust:" in request
+    assert "body.ca_pem = await details.caFile.text();" in request
+    assert "details.caFile.size > MAX_CA_BUNDLE_BYTES" in request
+    assert "connectorRequest('/company/target-requests', 'POST', token, body)" in CONNECTOR
+
+
+def test_approval_code_is_sent_in_the_body_of_the_same_session_only():
+    confirm = function_body(CONNECTION, "confirmTarget")
+    assert "pending.sessionToken !== ref.current.sessionToken" in confirm
+    assert ("connectorRequest('/company/target-requests/confirm', 'POST', token,\n\t\t{ request_id: requestId, "
+            "approval_code: code })") in CONNECTOR
+    panel = source("features/connection/ConnectorPanel.tsx")
+    submit = function_body(panel, "submitApproval")
+    assert "setApprovalCode('')" in submit  # cleared from the field at once
+    # Approval is only the explicit action.
+    assert all_source().count("actions.confirmTarget(") == 1
+
+
+def test_session_change_drops_the_open_request_and_reapproval_is_explicit():
+    paired = function_body(CONNECTION, "setPaired")
+    assert "targetRequest: null, reapprovable: false" in paired
+    failed = function_body(CONNECTION, "connectorFailed")
+    assert "REAPPROVAL_CODES.includes(error.code)) update({ reapprovable: true })" in failed
+    assert all_source().count("requestTarget('reapprove')") == 1  # only from the button
+    assert "reapprovable: false" in function_body(CONNECTION, "selectTarget")
+
+
+def test_the_online_demo_never_reaches_connection_or_diagnostics_code():
+    app_source = source("app/App.tsx")
+    assert "PUBLIC_DEMO ? ['dashboard', 'review'] :" in app_source
+    assert "{!PUBLIC_DEMO && <UpdateNotice />}" in app_source and "useHeartbeat(!PUBLIC_DEMO)" in app_source
+    review = source("features/review/ReviewView.tsx")
+    assert "{PUBLIC_DEMO\n\t\t\t\t\t\t? <p className=\"panel demo-note\">" in review
+    assert "const body: Json = PUBLIC_DEMO || !login ? { sql } : { sql, ...server(login) };" in LOCAL
+    assert "if (!PUBLIC_DEMO && login && database) body.database = database;" in LOCAL

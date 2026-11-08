@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 import connector.server as connector_server
 from backend.db_evidence import DatabaseEvidence
 from backend.main import app as public_app
-from tests.frontend_page import page_source
+from tests.frontend_page import all_source, function_body, source
 from backend.metadata import MetadataEvidence
 from connector.policy import CompanyTarget, TARGET_MODE_COMPANY
 from connector.registry_store import TargetRegistryStore
@@ -314,22 +314,18 @@ def test_browser_credential_provisioning_endpoint_is_gone():
 
 
 def test_served_page_sends_login_per_request_to_connector_only():
-    html = page_source("index.html")
-    assert "/credentials" not in html
-    assert "provisionConnectorCredentials" not in html
-    start = html.index("async function validateRemote(")
-    remote = html[start:html.index("async function validateLocal(")]
-    assert "const login = remoteLogin();" in remote
-    assert "username: login.username, password: login.password" in remote
-    assert "CONNECTOR_URL + '/company/targets/'" in remote and "'/validate'" in remote
+    page = all_source()
+    assert "/credentials" not in page
+    assert "provisionConnectorCredentials" not in page
+    remote = function_body(source("api/connector.ts"), "validateRemote")
+    assert "username: login.username.trim(), password: login.password" in remote
+    assert "targetPath(targetId, 'validate')" in remote
     assert "/api/" not in remote
     for forbidden in ("sessionStorage", "document.cookie", "URLSearchParams"):
-        assert forbidden not in html
-    # localStorage holds only the appearance preference and update version numbers
-    # (see test_frontend_served_page).
-    uses = re.findall(r"localStorage\.(getItem|setItem|removeItem)\('(mdv-theme|mdv-update-dismissed|mdv-update-pending)'",
-                      html)
-    assert html.count("localStorage") == len(uses)
+        assert forbidden not in page
+    # Browser storage is used only through shared/storage.ts (and the homepage's theme);
+    # see test_frontend_served_page for the keys.
+    assert re.findall(r"localStorage\.\w+", source("features/connection/useConnection.ts")) == []
 
 
 # ---------------------------------------------------------------- F / G: no leakage

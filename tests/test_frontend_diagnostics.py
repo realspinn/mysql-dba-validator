@@ -1,8 +1,8 @@
-"""The page's Observed performance and Lock diagnostics views (frontend/assets/js/validator.js).
+"""The page's Observed performance and Lock diagnostics views (web/src/features/diagnostics).
 
-Verification level: source checks of the shipped page code. Rendering, states,
-keyboard use, stale reads and layout were checked in headless Chrome against the
-local app with mocked database routes; that harness is not part of this suite.
+Verification level: source checks of the page code, and the built bundle for the
+online demo. Rendering, states and layout were checked in headless Chrome against the
+local app; that harness is not part of this suite.
 """
 
 from __future__ import annotations
@@ -13,26 +13,17 @@ import pytest
 
 from backend import lock_diagnostics as ld
 from backend import observed_performance as op
-from tests.frontend_page import FRONTEND_DIR, page_source
+from tests.frontend_page import all_source, function_body, source
 
-JS = (FRONTEND_DIR / "assets" / "js" / "validator.js").read_text(encoding="utf-8")
-CSS = (FRONTEND_DIR / "assets" / "css" / "validator.css").read_text(encoding="utf-8")
-HTML = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
-
-
-def _function(name: str) -> str:
-    start = JS.index(f"function {name}(")
-    following = re.search(r"\n(async function|function|const|let|// -) ", JS[start + 1:])
-    return JS[start:start + 1 + following.start()] if following else JS[start:]
-
-
-def _block(start: str, end: str) -> str:
-    return JS[JS.index(start):JS.index(end, JS.index(start))]
+TEXT = source("features/diagnostics/snapshotText.ts")
+HOOK = source("features/diagnostics/useSnapshot.ts")
+VIEW = source("features/diagnostics/SnapshotView.tsx")
+LOCKS = source("features/diagnostics/LockResult.tsx")
 
 
 def _states(name: str) -> set[str]:
-    block = _block(f"const {name} = ", "\n};") if name != "LOCK_STATES" else _block("const COMMON_STATES", "\n});")
-    return set(re.findall(r"^\t(\w+): ", block, re.M))
+    block = TEXT[TEXT.index(f"const {name}: Record<string, StateText> = {{"):]
+    return set(re.findall(r"^\t(\w+): ", block[:block.index("\n};")], re.M))
 
 
 @pytest.mark.parametrize("states, statuses", [("PERF_STATES", op.STATUSES), ("LOCK_STATES", ld.STATUSES)])
@@ -41,78 +32,73 @@ def test_every_collector_status_has_its_own_state(states, statuses):
 
 
 def test_snapshots_are_read_only_when_the_dba_asks():
-    # Bound to each view's button only: no call on load, on view change or on a timer.
-    assert len(re.findall(r"loadSnapshot\(", JS)) == 2  # its definition and the click binding
-    assert "viewNode(view, 'LoadBtn').addEventListener('click', () => loadSnapshot(view))" in JS
-    assert not re.search(r"set(Interval|Timeout)\([^)]*([Ss]napshot|[Pp]erf|[Ll]ock)", JS)
+    # Bound to each view's button only: no read on load, on view change or on a timer.
+    assert all_source().count("snapshot.load()") == 1
+    assert "onClick={() => void snapshot.load()}" in VIEW
+    assert "useEffect(" not in HOOK.split("const load = ")[0].replace(
+        "useEffect(() => { if (result && result.key !== key) setResult(null); }, [key, result]);", "")
+    assert not re.search(r"set(Interval|Timeout)", HOOK + VIEW)
 
 
 def test_routes_are_the_two_diagnostics_only():
-    views = _block("const SNAPSHOT_VIEWS", "\n};")
-    assert re.findall(r"route: '([\w-]+)'", views) == ["observed-performance", "lock-waits"]
+    assert re.findall(r"route: '([\w-]+)', list", TEXT) == ["observed-performance", "lock-waits"]
 
 
 def test_remote_snapshot_goes_only_to_the_connector_with_a_discovered_database():
-    request = _function("requestSnapshot")
-    remote = request[:request.index("const data = await requestJson")]
-    assert "connectorRequest(CONNECTOR_URL + '/company/targets/' + encodeURIComponent(target.target_id) + '/' + view.route" in remote
-    assert "discoveryMatches(target)" in remote
-    assert "/api/" not in remote
+    load = function_body(HOOK, "load")
+    assert "actions.withTarget((token, target, login) => connector.remoteSnapshot(token, target.target_id, kind.route, login, database), true)" in load
+    # withTarget refuses a database not discovered for this target, login and session.
+    with_target = function_body(source("features/connection/useConnection.ts"), "withTarget")
+    assert "if ((s.database || needDatabase) && !discoveryMatches(s))" in with_target
+    remote = function_body(source("api/connector.ts"), "remoteSnapshot")
+    assert "'/api/" not in remote
     # The body carries the login and the database only, never SQL or a session ID.
-    assert "body: JSON.stringify({ username: login.username, password: login.password, database: state.selectedDatabase })" in remote
+    assert "{ username: login.username.trim(), password: login.password, database }" in remote
 
 
 def test_a_read_is_discarded_after_any_context_change():
     # Every change of target, login or database (even back to an earlier one) starts
     # a new generation; a read is applied only if no change happened while it ran.
-    update = _function("updateSnapshotContext")
-    assert "if (current !== view.seen) {" in update and "view.generation += 1;" in update
-    assert update.index("view.generation += 1;") < update.index("if (view.loading) {")
-    in_flight = update[update.index("if (view.loading) {"):update.index("setSnapshotButton(view);")]
-    assert "if (view.loadingGeneration !== view.generation) {" in in_flight
-    assert "renderSnapshotIdle(view);" in in_flight and "viewNode(view, 'LoadBtn').disabled = true;" in in_flight
-    load = _function("loadSnapshot")
-    assert load.index("view.loadingGeneration = view.generation;") < load.index("await requestSnapshot(view)")
-    after = load[load.index("await requestSnapshot(view)"):]
-    guard = after.index("if (view.loadingGeneration !== view.generation) {")
-    assert guard < after.index("view.result =") and guard < after.index("renderSnapshotResult(view, data)")
+    assert "if (seen.current !== key) {" in HOOK and "generation.current += 1;" in HOOK
+    load = function_body(HOOK, "load")
+    assert load.index("const started = generation.current;") < load.index("await ")
+    guard = load.index("if (started !== generation.current) return;")
+    assert guard < load.index("setResult({ key: startedKey, value });")
+    # A shown result belongs to the context it was read for.
+    assert "const shown = result && result.key === key ? result.value : null;" in HOOK
 
 
 def test_snapshot_context_never_includes_the_password():
-    assert "password" not in _function("perfContextKey")
+    key = source("features/connection/connectionState.ts").split("export const contextKey")[1]
+    assert "password" not in key.split(";")[0]
 
 
 def test_untimed_values_are_never_shown_as_zero():
-    assert "if (ms == null) return 'Not recorded';" in _function("formatDuration")
-    assert "Under 1 µs" in _function("formatDuration")
-    assert "Under 0.001 ms" in _function("exactDuration")
-    seconds = _function("formatSeconds")
+    assert "if (ms == null) return 'Not recorded';" in function_body(TEXT, "formatDuration")
+    assert "Under 1 µs" in function_body(TEXT, "formatDuration")
+    assert "Under 0.001 ms" in function_body(TEXT, "exactDuration")
+    seconds = function_body(TEXT, "formatSeconds")
     assert "return 'Unknown';" in seconds and "Under 1 s" in seconds
 
 
 def test_lock_view_never_offers_an_action_on_a_session():
-    lock = _block("// ---------------------------------------------------------------- lock diagnostics", "const COMMON_STATES")
-    for word in ("KILL", "kill", "Kill", "terminate", "Terminate", "COMMIT", "ROLLBACK"):
-        assert word not in lock, word
-    assert "Nothing is killed, committed or rolled back." in HTML
+    for word in ("KILL", "kill", "Kill", "terminate", "Terminate", "COMMIT", "ROLLBACK", "<button"):
+        assert word not in LOCKS, word
+    assert "Nothing is killed, committed or rolled back." in TEXT
 
 
 def test_public_demo_has_no_diagnostics_view_or_control():
-    # Hidden by the page's stylesheet before any script runs, then removed.
-    for view, section in (("performance", "performanceView"), ("locks", "locksView")):
-        assert f'class="nav-item private-only" data-view="{view}"' in HTML
-        assert f'class="view private-only" id="{section}"' in HTML
-    assert "html[data-public-demo] .private-only {\n\tdisplay: none !important\n}" in CSS
-    assert "if (PUBLIC_DEMO) document.querySelectorAll('.private-only').forEach(node => node.remove());" in JS
-    assert "const VIEWS = PUBLIC_DEMO ? ['dashboard', 'review'] : ['dashboard', 'review', 'performance', 'locks'];" in JS
-    assert "if (PUBLIC_DEMO || view.loading || snapshotBlocker(view)) return;" in JS
+    app = source("app/App.tsx")
+    assert "const VIEWS: View[] = PUBLIC_DEMO ? ['dashboard', 'review'] : ['dashboard', 'review', 'performance', 'locks'];" in app
+    assert "NAV.filter(item => views.includes(item.id))" in source("app/Sidebar.tsx")
+    # The demo server refuses the routes whatever the page does (test_public_demo).
 
 
 def test_views_state_what_they_are_and_are_not():
-    page = page_source("index.html")
-    assert "Nothing is executed and no SQL review changes." in page
-    assert "Ranked by total recorded time across all executions of each family." in page
-    assert "Not a view of all server activity." in page
-    assert "They are not a measurement of the SQL in your review." in page
-    assert "A blocking session may already have finished: refresh before acting on it." in page
-    assert "Metadata locks and other contention are not included." in page
+    text = all_source()
+    assert "Nothing is executed and no SQL review changes." in text
+    assert "Ranked by total recorded time across all executions of each family." in text
+    assert "Not a view of all server activity." in text
+    assert "They are not a measurement of the SQL in your review." in text
+    assert "A blocking session may already have finished: refresh before acting on it." in " ".join(text.split())
+    assert "Metadata locks and other contention are not included." in text

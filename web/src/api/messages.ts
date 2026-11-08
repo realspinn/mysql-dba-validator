@@ -1,0 +1,95 @@
+// Fixed messages for the stable error codes the server and the local connector report.
+// They say what to do next; they never contain hosts, usernames, SQL or raw database
+// errors.
+
+const LIMITS = {
+	statement_limit_exceeded: 'Too many statements. At most 16 statements can be validated at once.',
+	no_statements: 'No SQL statements found: the input is empty or contains only comments. Nothing was assessed.',
+	delimiter_not_supported: 'DELIMITER is a mysql client command, not SQL, and is not supported. Stored program definitions are not analysed; validate the statements in the body separately, ending each with a semicolon.',
+	stored_program_not_supported: 'A stored program definition (CREATE PROCEDURE, FUNCTION, TRIGGER or EVENT) cannot be split into statements reliably when its body has several statements or other statements are submitted with it. Stored programs are not analysed; validate the statements in the body separately.',
+	executable_comment_not_supported: 'The SQL contains an executable comment (/*! ... */). MySQL runs the SQL inside such a comment, but the validator cannot analyse it, so nothing was assessed. Move any SQL out of the comment, or remove the comment, and validate again.',
+} as const;
+
+// The public API reports some validation limits as {"error": code} without a message.
+export const RESPONSE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+	...LIMITS,
+	request_too_large: 'The SQL is too large. Validation is limited to 64 KiB.',
+	sql_too_complex: 'The SQL is too deeply nested, or has too long an expression, to analyse. Nothing was assessed. Split it into smaller statements and validate again.',
+	server_busy: 'The online demo is busy. Wait a few seconds and validate again.',
+};
+
+export const PAIR_AGAIN_GUIDANCE = 'Press Enter in the connector window for a new pairing code, then pair again.';
+export const REMOTE_NOT_AVAILABLE = 'Remote targets are handled only through the local connector. ';
+
+export const CONNECTOR_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+	invalid_pairing_token: 'Pairing code was not accepted. Request a new code from the local connector.',
+	pairing_expired: 'Pairing code has expired. Press Enter in the connector window for a new code.',
+	pairing_already_used: 'Pairing code was already used. Request a new code from the local connector.',
+	pairing_rate_limited: 'Too many failed pairing attempts. Wait a minute and try again.',
+	invalid_pairing_request: 'Pairing code format is invalid.',
+	invalid_origin: 'The local connector does not allow this page. Start it with --allow-origin ' + window.location.origin + '.',
+	invalid_session: 'Connector session is no longer valid. ' + PAIR_AGAIN_GUIDANCE,
+	session_expired: 'Connector session has expired. ' + PAIR_AGAIN_GUIDANCE,
+	insufficient_session_scope: 'This connector session is not allowed to perform that operation.',
+	company_target_not_approved: 'This target is not approved in the local connector.',
+	unknown_company_target: 'This target is not registered in the local connector.',
+	request_too_large: 'The request is too large. SQL for remote validation is limited to 64 KiB.',
+	...LIMITS,
+	company_database_scope_unavailable: 'Discover databases again with this MySQL login before selecting one.',
+	company_database_scope_stale: 'The target changed while discovering databases. Discover again.',
+	database_not_authorized: 'That database is not in the list discovered for this target and login. Discover again.',
+	database_discovery_failed: 'The connector could not list databases for this target and login.',
+	target_needs_reapproval: 'This target must be re-approved in the local connector before use.',
+	target_not_approved: 'This target is not approved in the local connector.',
+	dns_identity_mismatch: 'The target host no longer resolves to its approved addresses. Ask the connector operator to review the target and re-approve it if appropriate.',
+	dns_resolution_failed: 'The target host name could not be resolved. Check the VPN, DNS and network path to the server.',
+	dns_result_invalid: 'The target host name did not resolve to a usable address. Ask the connector operator to review the target.',
+	unsafe_destination: 'The target host resolved to an address the connector does not allow. Ask the connector operator to review the target.',
+	// Company connection failures. No evidence is collected for any of them.
+	database_connection_failed: 'The connector could not complete a connection to this target. No evidence was collected.',
+	database_validation_failed: 'The connector could not complete the validation for this target. No result was produced.',
+	tls_verification_failed: 'The server certificate could not be verified for this host name with the trusted certificates chosen for this target. Ask your administrator to check that trust choice and the server certificate.',
+	tls_handshake_failed: 'A secure (TLS) connection to the server could not be established. Ask your administrator to check the server\'s TLS setup.',
+	tls_not_offered: 'The server did not offer TLS, which company targets require. Ask your administrator.',
+	auth_failed: 'MySQL rejected the login. Check your username and password. Repeated failures can lock the account.',
+	password_expired: 'Your MySQL password has expired. Change it through your organisation\'s normal password-change process, then try again.',
+	account_locked: 'This MySQL account is locked. Contact your database administrator.',
+	host_not_allowed: 'MySQL does not allow this account to connect from this machine. Contact your database administrator.',
+	host_blocked: 'MySQL is blocking connections from this machine after repeated connection errors. Contact your database administrator.',
+	auth_method_unsupported: 'This account uses a MySQL authentication method the validator does not support. Contact your database administrator.',
+	connection_limit_reached: 'MySQL refused the connection because a connection or account limit was reached. Try again later or contact your database administrator.',
+	network_timeout: 'The connection to the target timed out. Check the VPN and network path to the server, then try again.',
+	connection_refused: 'The connection was refused on the approved port. Check that MySQL is listening there, or ask the connector operator.',
+	unreachable: 'The connection to the target failed or was lost. Check the VPN and network path to the server, then try again.',
+	// Adding or re-approving a target from the page.
+	approval_console_unavailable: 'The connector is not running in a terminal, so it cannot show the approval request. Start MySQL-DBA-Validator Console.exe on Windows, MySQL-DBA-Validator Console from Terminal on macOS, or python -m connector in a terminal, and try again.',
+	invalid_target_request: 'The connection details were not accepted. Check the name, host name, port and certificate choice.',
+	invalid_company_target_name: 'Use a connection name of up to 64 characters, without control characters.',
+	invalid_company_target_host: 'Enter a DNS host name in ASCII, such as db.example.com. IP addresses and names in non-ASCII form (use the xn-- form) are not accepted.',
+	invalid_company_target_port: 'Enter a port between 1 and 65535.',
+	local_target_not_allowed_in_company_mode: 'MySQL on this computer does not need the connector: choose Local (this machine).',
+	company_target_exists: 'A connector target with this host name and port already exists. Select it from the Target list.',
+	company_dns_validation_failed: 'The host name could not be resolved. Check the VPN, DNS and network path to the server.',
+	company_target_address_not_allowed: 'The host name resolves to an address the connector does not allow.',
+	tls_ca_not_configured: 'The connector has no CA bundle configured. Choose a CA bundle file (or, on Windows, the Windows certificate store).',
+	trust_policy_unsupported: 'The system certificate store is supported only on Windows. Choose a CA bundle file.',
+	trust_store_unavailable: 'The Windows certificate store could not be loaded. Choose a CA bundle file.',
+	trust_storage_unavailable: 'This connector cannot store CA bundles. Ask the connector operator.',
+	invalid_trust_policy: 'Choose how the server certificate is trusted.',
+	invalid_ca_bundle: 'The CA bundle is not valid PEM certificate data. A binary (DER) certificate must be exported again in PEM (Base-64) form; renaming it is not enough.',
+	ca_bundle_too_large: 'The CA bundle is larger than 256 KiB.',
+	ca_bundle_contains_private_key: 'The file contains a private key. Choose a file with CA certificates only, and keep private keys out of the validator.',
+	ca_bundle_has_no_ca_certificate: 'The file contains no CA certificate. Use the CA bundle that issued the server certificate.',
+	target_request_limit_reached: 'Too many approval requests are open. Wait a few minutes and try again.',
+	company_target_not_reapprovable: 'This target cannot be re-approved from the page. Ask the connector operator.',
+	trust_policy_unavailable: 'The trusted certificates recorded for this target are not available. Ask the connector operator.',
+	approval_rate_limited: 'Too many wrong approval codes. Wait a minute and try again.',
+	target_request_not_found: 'That approval request no longer exists. Request approval again.',
+	approval_code_invalid: 'The approval code is not correct. Copy it exactly from the connector window.',
+	target_request_cancelled: 'The request was cancelled after three wrong codes. Request approval again.',
+	dns_changed_since_request: 'The host name now resolves to different addresses than the connector window showed. Nothing was approved. Request approval again and check the addresses.',
+	trust_bundle_unavailable: 'The CA bundle could not be stored. Nothing was approved.',
+	company_target_changed: 'The target changed while it was being approved. Request approval again.',
+	invalid_target_confirmation: 'Enter the approval code shown in the connector window.',
+	target_registry_unavailable: 'The connector could not save its target list. Nothing was approved.',
+};

@@ -72,5 +72,3 @@ AGENTS.md
 # GitHub Release assets, never committed.
 *.sha256
 
-# Built by web/ (npm run build); never committed
-frontend/app/

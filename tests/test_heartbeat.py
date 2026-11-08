@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from tests.frontend_page import page_source
+from tests.frontend_page import source
 
 client = TestClient(app, base_url="http://127.0.0.1:8420")
 
@@ -80,8 +80,10 @@ def test_heartbeat_accepts_no_other_method_and_ignores_any_body(beats):
 
 
 def test_page_sends_a_bodyless_heartbeat_every_minute_and_when_shown_again():
-    html = page_source("index.html")
-    assert "fetch('/api/heartbeat', { method: 'POST', cache: 'no-store' })" in html
-    assert "const HEARTBEAT_MS = 60000;" in html
-    assert "setInterval(sendHeartbeat, HEARTBEAT_MS)" in html
-    assert "document.visibilityState === 'visible'" in html
+    local, hook = source("api/local.ts"), source("app/useHeartbeat.ts")
+    assert "fetch('/api/heartbeat', { method: 'POST', cache: 'no-store' })" in local
+    assert "const HEARTBEAT_MS = 60000;" in hook
+    assert "setInterval(sendHeartbeat, HEARTBEAT_MS)" in hook
+    assert "document.visibilityState === 'visible'" in hook
+    # Not in the online demo.
+    assert "useHeartbeat(!PUBLIC_DEMO)" in source("app/App.tsx")
