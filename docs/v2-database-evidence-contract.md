@@ -477,7 +477,7 @@ remote `evidence_factors`, `M1`/`M2` no longer appear for writes;
 `STATIC_DATABASE_METADATA`. Deprecated but kept: `analysis_mode`,
 `metadata_status` (both places), `high_estimated_rows_applied`.
 
-### 10.5 Frontend (`frontend/index.html`, script in `frontend/assets/js/validator.js`)
+### 10.5 Frontend (`web/src/features/review/`: wording in `reviewText.ts`)
 
 | Element | Behaviour |
 | --- | --- |
@@ -750,7 +750,7 @@ repository, so none was run.
 | One-row plan interpretation; −3 removed | `backend/evidence_scoring.py`, `backend/evidence_state.py` |
 | Scope credit, final confidence, `v2_assessment`, batch confidence | `backend/main.py` |
 | Company Mode read-only, `/explain` write refusal | `connector/server.py` |
-| Scope line, headlines, plan, warning, batch confidence | `frontend/assets/js/validator.js` |
+| Scope line, headlines, plan, warning, batch confidence | `web/src/features/review/reviewText.ts` (built into `frontend/app/`) |
 | Tests | `tests/test_row_scope.py`, `tests/test_read_only_boundary.py`, `tests/read_only_session.py` (new); updates listed in 14 |
 | Docs | `ARCHITECTURE.md`, `SECURITY.md`, `VERIFICATION.md`, `connector/README.md`, `README.md` (unreleased-changes note) |
 

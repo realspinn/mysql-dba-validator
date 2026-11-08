@@ -1,7 +1,7 @@
 # Homepage fish
 
 Source of `frontend/assets/fish-swim.webp`, the small fish that swims down the right margin
-of the product homepage (`frontend/home.html`). It was drawn for this project; there is no
+of the product homepage (`web/home.html`). It was drawn for this project; there is no
 outside artwork, photograph or model in it.
 
 - `fish_drawing.py`: the drawing. `svg(t)` returns one frame of the swim cycle as SVG.

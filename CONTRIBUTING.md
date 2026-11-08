@@ -54,10 +54,11 @@ uvicorn backend.main:app --reload --host 127.0.0.1 --port 8420
 python -m connector --allow-origin http://localhost:8420
 ```
 
-Open `http://localhost:8420`. The frontend is a single static page,
-`frontend/index.html`, served by the backend, with its styles in
-`frontend/assets/css/validator.css` and its script in
-`frontend/assets/js/validator.js`. It has no build step: edit them and reload. The connector's options (`--tls-ca`, `--registry`, operator commands)
+Open `http://localhost:8420`. The frontend source is in `web/` (React and
+TypeScript for the validator, plain TypeScript for the homepage). Vite builds it into
+`frontend/app/`, which is committed and served by the backend, so running the app and
+the tests needs no Node. To change the frontend, see [web/README.md](web/README.md):
+edit, `npx vite build`, and commit `frontend/app/` with the source. The connector's options (`--tls-ca`, `--registry`, operator commands)
 are in [connector/README.md](connector/README.md).
 
 You do not need a MySQL server to develop or run the tests. For local evidence
@@ -117,7 +118,7 @@ beginner task. Comment on the issue before you start.
   current behaviour looks wrong, open an issue instead of writing a test that
   locks it in.
 - Regression tests for a bug you found, even without a fix.
-- Accessibility and usability fixes in `frontend/index.html`, such as labels,
+- Accessibility and usability fixes in the frontend (`web/src/`), such as labels,
   keyboard focus, contrast and wording, as long as they do not change what is
   sent, where it is sent or what is stored.
 - Readable messages for error codes the page shows raw.
