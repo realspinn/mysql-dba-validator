@@ -535,8 +535,8 @@ def test_audit_reads_only_secret_valued_env_keys(tmp_path):
 
 def test_audit_flags_forbidden_files_secrets_and_missing_entry_points(tmp_path):
     app_dir = tmp_path / "MySQL-DBA-Validator"
-    (app_dir / "_internal" / "frontend").mkdir(parents=True)
-    (app_dir / "_internal" / "frontend" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (app_dir / "_internal" / "frontend" / "app").mkdir(parents=True)
+    (app_dir / "_internal" / "frontend" / "app" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
     (app_dir / ".env").write_text("X=1", encoding="utf-8")
     (app_dir / "connector-targets.json").write_text("{}", encoding="utf-8")
     (app_dir / "company-ca.pem").write_text("cert", encoding="utf-8")
@@ -559,16 +559,20 @@ def test_audit_flags_forbidden_files_secrets_and_missing_entry_points(tmp_path):
 
 
 def _page_files(internal: Path) -> None:
-    """The page's stylesheet and script, which the audit requires beside index.html."""
-    for rel in ("assets/css/validator.css", "assets/js/validator.js"):
-        (internal / "frontend" / rel).parent.mkdir(parents=True, exist_ok=True)
-        (internal / "frontend" / rel).write_text("", encoding="utf-8")
+    """The page's built script, stylesheet and favicon, which the audit requires beside
+    index.html (release/frontend_files.py)."""
+    from release.frontend_files import packaged_frontend_files
+
+    for _, rel in packaged_frontend_files(ROOT):
+        if rel != "app/index.html":
+            (internal / "frontend" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (internal / "frontend" / rel).write_text("", encoding="utf-8")
 
 
 def test_audit_passes_clean_folder_and_ignores_variable_names(tmp_path):
     app_dir = tmp_path / "app"
-    (app_dir / "_internal" / "frontend").mkdir(parents=True)
-    (app_dir / "_internal" / "frontend" / "index.html").write_text(
+    (app_dir / "_internal" / "frontend" / "app").mkdir(parents=True)
+    (app_dir / "_internal" / "frontend" / "app" / "index.html").write_text(
         '<input id="password" type="password"> token secret key', encoding="utf-8")
     _page_files(app_dir / "_internal")
     for name in audit_artifact.EXE_NAMES:
@@ -580,7 +584,7 @@ def test_audit_passes_clean_folder_and_ignores_variable_names(tmp_path):
     finally:
         audit_artifact.embedded_entries = original
     assert findings == []
-    assert stats["files"] == 5
+    assert stats["files"] == 6  # two executables, the page, its script and stylesheet, the favicon
 
 
 def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tmp_path, monkeypatch):
@@ -591,8 +595,8 @@ def test_audit_allows_only_upstream_cargo_registry_paths_in_compiled_binaries(tm
     monkeypatch.setattr(audit_artifact, "embedded_entries", lambda _data: iter(()))
     app_dir = tmp_path / "app"
     internal = app_dir / "_internal"
-    (internal / "frontend").mkdir(parents=True)
-    (internal / "frontend" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (internal / "frontend" / "app").mkdir(parents=True)
+    (internal / "frontend" / "app" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
     _page_files(internal)
     for name in audit_artifact.EXE_NAMES:
         (app_dir / name).write_bytes(b"")

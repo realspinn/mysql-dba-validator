@@ -1,0 +1,5 @@
+# The frontend build must be byte-identical on every OS (CI rebuilds and compares it):
+# its sources and output are LF everywhere, whatever core.autocrlf says.
+web/** text eol=lf
+web/package-lock.json text eol=lf -diff
+frontend/app/** text eol=lf

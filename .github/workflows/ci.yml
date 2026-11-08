@@ -3,7 +3,8 @@ name: CI
 # Routine checks for pull requests to main and pushes to main: the same test
 # suite, pip check and skip check that the release workflows run, on the same
 # runners, plus Local Mode evidence against a disposable MySQL 8.4 server on
-# Linux. No build, packaging, signing or release; read-only token, no secrets.
+# Linux, and a check that the committed frontend build matches web/. No packaging,
+# signing or release; read-only token, no secrets.
 # Release tags are handled by release-windows.yml and release-macos.yml.
 
 on:
@@ -44,6 +45,37 @@ jobs:
 
       - name: No unexpected skipped tests
         run: python release/check_pytest_skips.py "${{ runner.temp }}/pytest.xml" --platform ${{ runner.os == 'macOS' && 'macos' || 'windows' }}
+
+  # The pages are built from web/ by Vite and committed in frontend/app/, so the server,
+  # the tests, the packaged apps and the hosted demo need no Node. This job checks that
+  # the committed build is exactly what the source and the lockfile produce.
+  frontend:
+    name: Frontend build is current (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "24.22.2"
+
+      - name: Install the locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc -b
+
+      - name: Build
+        run: npx vite build
+
+      - name: The committed build matches
+        run: git diff --exit-code --stat -- ../frontend/app && test -z "$(git status --porcelain -- ../frontend/app)"
 
   # Not a required check. Service containers need an Ubuntu runner. The MySQL
   # server is a throwaway container for this job only: synthetic data, test-only
