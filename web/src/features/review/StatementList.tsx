@@ -19,14 +19,19 @@ export function StatementList({ statements, focus }: { statements: Statement[]; 
 		return next;
 	});
 
+	// Scrolled to and focused after React has rendered it open (not on an animation
+	// frame, which a browser may hold back while the page is not painting).
+	const [shown, setShown] = useState<{ n: number } | null>(null);
 	const show = (n: number) => {
 		setOpen(now => new Set(now).add(n));
-		window.requestAnimationFrame(() => {
-			const row = document.getElementById('statement-' + n);
-			row?.scrollIntoView({ block: 'start' });
-			row?.querySelector<HTMLButtonElement>('.statement-row')?.focus({ preventScroll: true });
-		});
+		setShown({ n });
 	};
+	useEffect(() => {
+		if (!shown) return;
+		const row = document.getElementById('statement-' + shown.n);
+		row?.scrollIntoView({ block: 'start' });
+		row?.querySelector<HTMLButtonElement>('.statement-row')?.focus({ preventScroll: true });
+	}, [shown]);
 	// A statement asked for from the dashboard.
 	useEffect(() => { if (focus) show(focus.n); }, [focus]);
 	// Links to "#statement-N" on this page (the top finding) open that statement.
