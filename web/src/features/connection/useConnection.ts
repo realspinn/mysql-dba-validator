@@ -61,11 +61,17 @@ export function useConnection() {
 	}, [update]);
 
 	// Maps a connector failure: a 401 ends the session; a changed address set offers the
-	// explicit re-approval request (never automatic).
-	const connectorFailed = useCallback((error: unknown, pairing = false): string => {
-		if (error instanceof RequestError) {
+	// explicit re-approval request (never automatic). `sent` is the session and target a
+	// request was made with: a late answer from an earlier session never ends the current
+	// one, and re-approval is offered only for the target that was asked.
+	const connectorFailed = useCallback((error: unknown, pairing = false,
+		sent?: { token: string | null; targetId: string | null }): string => {
+		const now = ref.current;
+		const current = !sent || sent.token === now.sessionToken;
+		const sameTarget = !sent || sent.targetId === (now.target?.target_id ?? null);
+		if (error instanceof RequestError && current) {
 			if (error.status === 401 && !pairing) setPaired(null, 'Connector session ended. ' + PAIR_AGAIN_GUIDANCE, 'error');
-			if (ref.current.target && error.code && REAPPROVAL_CODES.includes(error.code)) update({ reapprovable: true });
+			if (sameTarget && ref.current.target && error.code && REAPPROVAL_CODES.includes(error.code)) update({ reapprovable: true });
 		}
 		return errorText(error, 'The request did not complete.');
 	}, [setPaired, update]);
@@ -153,10 +159,12 @@ export function useConnection() {
 			return;
 		}
 		const binding = { target: s.target, username: s.username, password: s.password, token: s.sessionToken };
+		// The connector session matters only for a company target; pairing during a Local
+		// check does not cancel it.
 		const same = () => {
 			const now = ref.current;
 			return now.target?.target_id === binding.target?.target_id && now.username === binding.username
-				&& now.password === binding.password && now.sessionToken === binding.token;
+				&& now.password === binding.password && (!binding.target || now.sessionToken === binding.token);
 		};
 		const previous = s.database;
 		update({ ...clearedDiscovery, busy: binding.target ? 'discovering' : 'testing',
@@ -175,7 +183,12 @@ export function useConnection() {
 				list = await discoverLocalDatabases(binding);
 			}
 		} catch (error) {
-			if (!same() && !binding.target) return;
+			// A late failure for an earlier target, login or session leaves the current state
+			// alone (only a 401 for the session still in use ends it).
+			if (!same()) {
+				if (binding.target) connectorFailed(error, false, { token: binding.token, targetId: binding.target.target_id });
+				return;
+			}
 			// A failed remote discovery also clears the connector's state for this session.
 			update({ ...clearedDiscovery, busy: null,
 				connectionStatus: status(binding.target ? connectorFailed(error) : errorText(error, 'Unable to connect to the database.'), 'error') });
@@ -266,7 +279,7 @@ export function useConnection() {
 		try {
 			return await run(token, s.target, { username: s.username, password: s.password }, s.database);
 		} catch (error) {
-			throw new RequestError(connectorFailed(error));
+			throw new RequestError(connectorFailed(error, false, { token, targetId: s.target.target_id }));
 		}
 	}, [connectorFailed]);
 

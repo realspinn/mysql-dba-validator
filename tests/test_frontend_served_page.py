@@ -298,6 +298,25 @@ def test_leaving_connector_mode_clears_the_company_login():
     assert "if (s.target) Object.assign(change, { target: null, username: '', password: ''" in paired
 
 
+def test_a_late_connector_answer_only_affects_the_session_and_target_it_was_for():
+    """A 401 from an earlier session never ends the current one; re-approval is offered
+    only for the target that was asked; a late discovery failure leaves the current
+    state alone; pairing does not cancel a Local check; a company review's result is
+    stale once its login changes (the login is always sent to the connector)."""
+    failed = function_body(CONNECTION, "connectorFailed")
+    assert "const current = !sent || sent.token === now.sessionToken;" in failed
+    assert "if (error instanceof RequestError && current) {" in failed
+    assert "if (sameTarget && ref.current.target" in failed
+    connect = function_body(CONNECTION, "connect")
+    assert "(!binding.target || now.sessionToken === binding.token)" in connect
+    assert ("if (!same()) {\n\t\t\t\tif (binding.target) connectorFailed(error, false, "
+            "{ token: binding.token, targetId: binding.target.target_id });\n\t\t\t\treturn;") in connect
+    assert ("connectorFailed(error, false, { token, targetId: s.target.target_id })"
+            in function_body(CONNECTION, "withTarget"))
+    review = source("features/review/useReview.ts")
+    assert "s.target || s.verified ? s.username : ''" in review
+
+
 def test_local_login_is_cleared_when_a_newly_approved_target_is_selected():
     confirm = function_body(CONNECTION, "confirmTarget")
     clear = "if (!ref.current.target) update({ username: '', password: '' });"
