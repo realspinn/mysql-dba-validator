@@ -288,9 +288,12 @@ def test_discovery_is_cleared_on_target_login_and_session_changes():
 
 def test_leaving_connector_mode_clears_the_company_login():
     """Found with real Chrome in the previous page: after Remote -> Local the company
-    login stayed and the next Local validation posted it to the public /api/validate."""
+    login stayed and the next Local validation posted it to the public /api/validate.
+    Any change of target clears it (also Local -> company and company -> company), and
+    a check still running for the old target no longer holds the Connect button."""
     select = function_body(CONNECTION, "selectTarget")
-    assert "s.target && !target ? { username: '', password: '' } : {}" in select
+    assert "s.target?.target_id !== target?.target_id ? { username: '', password: '' } : {}" in select
+    assert "busy: null" in select
     paired = function_body(CONNECTION, "setPaired")
     assert "if (s.target) Object.assign(change, { target: null, username: '', password: ''" in paired
 

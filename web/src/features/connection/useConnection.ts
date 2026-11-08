@@ -29,14 +29,15 @@ export function useConnection() {
 	}, []);
 	useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-	// Selecting a target only changes which approved target_id is used. Leaving a
-	// company target clears the login, so it can never be reused by the Local path.
+	// Selecting a target only changes which approved target_id is used. Any change of
+	// target clears the login, so a login typed for one target (or for Local) is never
+	// sent to another, and a check still running for the old target no longer counts.
 	const selectTarget = useCallback((targetId: string) => {
 		const s = ref.current;
 		const target = s.targets.find(t => t.target_id === targetId) ?? null;
-		const login = s.target && !target ? { username: '', password: '' } : {};
+		const login = s.target?.target_id !== target?.target_id ? { username: '', password: '' } : {};
 		update({
-			target, ...login, ...clearedDiscovery, reapprovable: false,
+			target, ...login, ...clearedDiscovery, busy: null, reapprovable: false,
 			connectionStatus: status(target ? 'Enter your MySQL username and password, then discover databases.' : LOCAL_START),
 		});
 	}, [update]);

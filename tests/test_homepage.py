@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 import backend.main as backend_main
 from backend.main import app
+from release.frontend_files import packaged_frontend_files
 from tests.frontend_page import built_page, page_assets, page_bundle, source
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -111,9 +112,12 @@ def test_preview_without_home_html_falls_back_to_the_validator(preview, monkeypa
 
 
 def test_packaged_apps_do_not_bundle_the_homepage():
+    shipped = [path for _, path in packaged_frontend_files(ROOT)]
+    assert shipped[0] == "app/index.html" and "assets/favicon.svg" in shipped, shipped
+    assert not any("home" in path for path in shipped), shipped
     for spec in ("mysql-dba-validator.spec", "mysql-dba-validator-macos.spec"):
         text = (ROOT / "release" / spec).read_text(encoding="utf-8")
-        assert "home.html" not in text and '"index.html"' in text, spec
+        assert "home.html" not in text and "in packaged_frontend_files(ROOT)]" in text, spec
 
 
 def test_preview_keeps_the_host_check_and_security_headers(preview):

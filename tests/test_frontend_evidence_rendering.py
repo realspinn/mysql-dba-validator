@@ -292,7 +292,7 @@ async function run() {
         b.querySelector('.stmt-what .mono').textContent,
         b.querySelector('.pill').textContent + ' ' + b.querySelector('.stmt-score').textContent,
         b.querySelector('.stmt-conf').textContent, b.querySelector('.stmt-key').textContent]),
-      aiMentions: ($('.assessment').textContent.match(/\\bAI\\b/g) || []).length,
+      aiMentions: (document.body.textContent.match(/\\bAI\\b/g) || []).length,
       statements: $$('li.statement').map(card => {
         const final = card.querySelector('.detail-block.final');
         const box = card.querySelector('details.optimization');

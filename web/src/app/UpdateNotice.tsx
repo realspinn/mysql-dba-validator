@@ -57,6 +57,12 @@ export function UpdateNotice() {
 			if (now === 'downloading' || now === 'verifying') poll();
 			return;
 		}
+		// Idle carries no version: the app restarted (or cancelled) during a download.
+		if (snapshot.stage === 'idle') {
+			const now = stageRef.current?.stage;
+			if (now === 'downloading' || now === 'verifying') showOffer(o, 'The download stopped. Nothing was changed. Try again.');
+			return;
+		}
 		if (snapshot.version !== o.version) return;
 		const received = Number.isSafeInteger(snapshot.received) ? snapshot.received as number : 0;
 		const total = Number.isSafeInteger(snapshot.total) && (snapshot.total as number) > 0 ? snapshot.total as number : 0;

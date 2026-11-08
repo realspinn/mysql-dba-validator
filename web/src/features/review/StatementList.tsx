@@ -9,6 +9,7 @@ import {
 } from './reviewText';
 
 export interface FocusRequest { n: number; seq: number }
+let lastFocusSeq = 0;
 
 export function StatementList({ statements, focus }: { statements: Statement[]; focus: FocusRequest | null }) {
 	// Several can be open at once, to compare statements; a single statement starts open.
@@ -33,7 +34,13 @@ export function StatementList({ statements, focus }: { statements: Statement[]; 
 		row?.querySelector<HTMLButtonElement>('.statement-row')?.focus({ preventScroll: true });
 	}, [shown]);
 	// A statement asked for from the dashboard.
-	useEffect(() => { if (focus) show(focus.n); }, [focus]);
+	// Applied once: the list is rebuilt when the review view is reopened or a new review
+	// runs, and an old request must not open a statement again.
+	useEffect(() => {
+		if (!focus || focus.seq === lastFocusSeq) return;
+		lastFocusSeq = focus.seq;
+		show(focus.n);
+	}, [focus]);
 	// Links to "#statement-N" on this page (the top finding) open that statement.
 	useEffect(() => {
 		const follow = (event: MouseEvent) => {

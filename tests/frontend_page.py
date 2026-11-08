@@ -66,6 +66,9 @@ def function_body(text: str, name: str) -> str:
         assert declared, f"{name} not found"
         arrow = text.find("=> {", declared.end())
         assert arrow != -1, f"{name} has no body"
+        # Not the body of a later declaration (`name` itself has an expression body).
+        later = re.search(r"\b(?:const|function)\s", text[declared.end():arrow])
+        assert not later, f"{name} has no block body"
         start = arrow + len("=> {")
     depth = 0
     for index in range(start - 1, len(text)):
