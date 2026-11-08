@@ -37,6 +37,13 @@ reports it, and the artifact name is built from it. The connector keeps its
 own protocol version (`CONNECTOR_VERSION`). Use `vX.Y.Z` tags that match
 `APP_VERSION`.
 
+The served page also takes its asset links from it: each page's stylesheet and
+script are linked as `...?v=<APP_VERSION>`, and the page is sent with
+`Cache-Control: no-cache`. After an update the browser therefore loads the new
+release's files instead of reusing the previous release's ones (which happened
+from v0.9.0 to v0.10.0). Bump `APP_VERSION` for every release so the links
+change.
+
 ## Build locally
 
 Requirements: Windows x64, 64-bit Python 3.14, and network access to PyPI.

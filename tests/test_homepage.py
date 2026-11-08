@@ -92,7 +92,9 @@ def test_demo_is_the_validator_in_both_modes(monkeypatch, enabled):
         monkeypatch.delenv("MDV_HOMEPAGE_PREVIEW", raising=False)
     response = client.get("/demo")
     assert response.status_code == 200
-    assert response.content == (ROOT / "frontend" / "index.html").read_bytes()
+    # The file as it is, apart from the version on its stylesheet and script links.
+    tag = f"?v={backend_main.APP_VERSION}".encode()
+    assert response.content.replace(tag, b"") == (ROOT / "frontend" / "index.html").read_bytes()
 
 
 def test_preview_without_home_html_falls_back_to_the_validator(preview, monkeypatch, tmp_path):

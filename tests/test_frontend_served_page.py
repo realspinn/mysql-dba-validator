@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from backend.db import EVIDENCE_STATUSES
 from backend.main import app
+from backend.version import APP_VERSION
 from tests.frontend_page import with_page_files
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -77,7 +78,9 @@ def _function_body(source: str, name: str) -> str:
 
 def test_root_serves_the_intended_frontend(served_html):
     response = TestClient(app, base_url="http://127.0.0.1:8420").get("/")
-    assert response.content == (FRONTEND_DIR / "index.html").read_bytes()
+    # The file as it is, apart from the version on its stylesheet and script links.
+    tag = f"?v={APP_VERSION}".encode()
+    assert response.content.replace(tag, b"") == (FRONTEND_DIR / "index.html").read_bytes()
     assert "<title>MySQL DBA Validator</title>" in served_html
 
 

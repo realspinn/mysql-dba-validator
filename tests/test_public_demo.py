@@ -36,6 +36,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main as backend_main
+from backend.version import APP_VERSION
 
 HOST = "demo.example.com"
 SECRET = "Public-Demo-Secret-4417"
@@ -125,11 +126,16 @@ def test_public_pages_and_assets(public):
             ) in notice.replace("<strong>", "").replace("</strong>", "")
     assert public.get("/static/assets/fish-swim.webp").status_code == 200
     # Each page's own stylesheet and script are under the allowed assets folder.
-    files = re.findall(r'(?:href|src)="(/static/assets/(?:css|js)/[\w-]+\.(?:css|js))"', home.text + demo.text)
+    links = re.findall(r'(?:href|src)="(/static/assets/(?:css|js)/[\w-]+\.(?:css|js))\?v=([\w.]+)"',
+                       home.text + demo.text)
+    files = [path for path, _ in links]
     assert sorted(set(files)) == ["/static/assets/css/home.css", "/static/assets/css/validator.css",
                                   "/static/assets/js/home.js", "/static/assets/js/validator.js"]
-    for path in files:
-        response = public.get(path)
+    assert {version for _, version in links} == {APP_VERSION}
+    # Revalidated on every load, so a redeploy is picked up without a hard refresh.
+    assert home.headers["cache-control"] == demo.headers["cache-control"] == "no-cache"
+    for path, version in links:
+        response = public.get(f"{path}?v={version}")
         kind = "text/css" if path.endswith(".css") else "text/javascript"
         assert response.status_code == 200 and response.headers["content-type"].startswith(kind), path
 

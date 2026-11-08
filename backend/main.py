@@ -32,7 +32,7 @@ from .update_check import check_for_update
 from . import lock_diagnostics, observed_performance, update_check, update_download
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -867,20 +867,35 @@ def homepage_preview_enabled() -> bool:
     return os.environ.get(HOMEPAGE_PREVIEW_ENV) == "1" and (FRONTEND_DIR / "home.html").is_file()
 
 
+# Each release's page asks for its own stylesheet and script (".../validator.js?v=0.10.1"),
+# and the page itself is revalidated on every load. Without both, a browser reused the
+# previous release's files after an update (the asset URLs did not change and nothing
+# said not to cache them), so the new page ran the old script.
+ASSET_LINK = re.compile(r'((?:href|src)="/static/assets/[\w/.-]+\.(?:css|js))"')
+PAGE_HEADERS = {"Cache-Control": "no-cache"}
+
+
+def frontend_page(name: str) -> str:
+    """A page from frontend/, with its stylesheet and script links tagged with APP_VERSION.
+
+    Nothing else changes, line endings included."""
+    with open(FRONTEND_DIR / name, encoding="utf-8", newline="") as file:
+        page = file.read()
+    return ASSET_LINK.sub(rf'\1?v={APP_VERSION}"', page)
+
+
 @app.get("/")
 def index():
     if PUBLIC_DEMO or homepage_preview_enabled():
-        return FileResponse(str(FRONTEND_DIR / "home.html"))
-    return FileResponse(
-        str(FRONTEND_DIR / "index.html")
-    )
+        return HTMLResponse(frontend_page("home.html"), headers=PAGE_HEADERS)
+    return HTMLResponse(frontend_page("index.html"), headers=PAGE_HEADERS)
 
 
 def public_demo_page() -> str:
     """The validator marked as the online demo. The page then shows the SQL privacy
     notice, hides the connection, connector and database controls, and sends only the
     SQL text; the server enforces the same limits whatever the page does."""
-    page = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    page = frontend_page("index.html")
     marked = page.replace('<html lang="en">', '<html lang="en" data-public-demo>', 1)
     if marked == page:
         raise RuntimeError("frontend/index.html has no <html lang=\"en\"> tag to mark")
@@ -894,5 +909,5 @@ PUBLIC_DEMO_PAGE = public_demo_page() if PUBLIC_DEMO else None
 def demo():
     """The validator, at the address the homepage links to."""
     if PUBLIC_DEMO:
-        return HTMLResponse(PUBLIC_DEMO_PAGE)
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+        return HTMLResponse(PUBLIC_DEMO_PAGE, headers=PAGE_HEADERS)
+    return HTMLResponse(frontend_page("index.html"), headers=PAGE_HEADERS)

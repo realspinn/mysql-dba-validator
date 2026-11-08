@@ -11,8 +11,9 @@ import re
 from pathlib import Path
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-_PAGE_FILE = re.compile(r'<link rel="stylesheet" href="(/static/assets/css/[\w-]+\.css)" />'
-                        r'|<script src="(/static/assets/js/[\w-]+\.js)"></script>')
+# The served page tags each link with the running version (?v=0.10.1); the file does not.
+_PAGE_FILE = re.compile(r'<link rel="stylesheet" href="(/static/assets/css/[\w-]+\.css)(?:\?v=[\w.]+)?" />'
+                        r'|<script src="(/static/assets/js/[\w-]+\.js)(?:\?v=[\w.]+)?"></script>')
 
 
 def read_static(path: str) -> str:
