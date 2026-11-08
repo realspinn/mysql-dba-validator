@@ -45,7 +45,7 @@ def test_the_linked_files_are_this_release_s_files():
 
 @pytest.mark.parametrize("name", ["index.html", "home.html"])
 def test_only_the_stylesheet_and_script_links_change(name):
-    original = (FRONTEND_DIR / name).read_text(encoding="utf-8")
+    original = (FRONTEND_DIR / name).read_bytes().decode("utf-8")  # line endings as on disk
     served = frontend_page(name)
     assert served.replace(f"?v={APP_VERSION}", "") == original
     assert served.count(f"?v={APP_VERSION}") == 2

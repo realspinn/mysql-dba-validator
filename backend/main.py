@@ -876,8 +876,11 @@ PAGE_HEADERS = {"Cache-Control": "no-cache"}
 
 
 def frontend_page(name: str) -> str:
-    """A page from frontend/, with its stylesheet and script links tagged with APP_VERSION."""
-    page = (FRONTEND_DIR / name).read_text(encoding="utf-8")
+    """A page from frontend/, with its stylesheet and script links tagged with APP_VERSION.
+
+    Nothing else changes, line endings included."""
+    with open(FRONTEND_DIR / name, encoding="utf-8", newline="") as file:
+        page = file.read()
     return ASSET_LINK.sub(rf'\1?v={APP_VERSION}"', page)
 
 
