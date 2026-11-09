@@ -302,3 +302,57 @@ def test_the_built_homepage_is_the_source_entry():
     built = built_page("home.html")
     for marker in (HOMEPAGE_MARKER, "Online demo or downloaded application", '<div class="fish" aria-hidden="true">'):
         assert marker in built, marker
+
+
+# Real Chrome: the open Download menu paints above the product screenshot. The hero's
+# entrance animation keeps its columns as stacking contexts, which once confined the
+# menu's z-index to its column and let the screenshot, later in the page, paint over it.
+MENU_PROBE = """<script>
+window.addEventListener('load', () => setTimeout(() => {
+  const menu = document.querySelector('details.download');
+  menu.querySelector('summary').click();
+  setTimeout(() => {
+    const panel = menu.querySelector('.menu-panel'), box = panel.getBoundingClientRect();
+    const shot = document.querySelector('.frame').getBoundingClientRect();
+    const covered = [];
+    for (let i = 1; i < 10; i++) for (let j = 1; j < 10; j++) {
+      const x = box.left + box.width * i / 10, y = box.top + box.height * j / 10;
+      if (y >= innerHeight) continue;
+      const top = document.elementFromPoint(x, y);
+      if (!panel.contains(top)) covered.push(top ? top.tagName + '.' + top.className : null);
+    }
+    const out = document.createElement('pre');
+    out.id = 'menu-out';
+    out.textContent = JSON.stringify({open: menu.open, covered, width: innerWidth,
+      box: [box.left, box.top, box.right, box.bottom], overShot: box.bottom > shot.top && box.top < shot.bottom});
+    document.body.append(out);
+  }, 1000);
+}, 2000));
+</script>"""
+
+
+@pytest.mark.parametrize("size", ["1440,900", "1024,768", "390,844"])
+def test_the_open_download_menu_paints_above_the_screenshot(tmp_path, size):
+    import html
+    import json
+
+    from tests.test_frontend_evidence_rendering import dump_dom, find_chrome, serve
+
+    chrome = find_chrome()
+    if chrome is None:
+        pytest.skip("Chrome is not installed")
+    server = serve(built_page("home.html").replace("</body>", MENU_PROBE + "</body>", 1))
+    try:
+        document, stderr, code = dump_dom(
+            [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             f"--window-size={size}", "--virtual-time-budget=10000", f"--user-data-dir={tmp_path / 'profile'}",
+             "--dump-dom", f"http://127.0.0.1:{server.server_port}/harness.html"], tmp_path)
+    finally:
+        server.shutdown()
+    match = re.search(r'<pre id="menu-out">(.*?)</pre>', document, re.S)
+    assert match, f"page did not render (exit {code}): {stderr[-500:]}"
+    result = json.loads(html.unescape(match.group(1)))
+    assert result["open"] and result["overShot"], result  # the reported situation
+    assert result["covered"] == [], result
+    left, _, right, _ = result["box"]
+    assert 0 <= left and right <= result["width"], result  # on screen, not past its edge

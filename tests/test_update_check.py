@@ -556,6 +556,19 @@ const storage = key => { try { return frame.contentWindow.localStorage.getItem(k
   button('Update').click();
   await settle();
   OUT.otherVersionIgnored = view().stage;
+  // The app restarted during a download: progress answers idle, with no version.
+  await open(WINDOWS);
+  answers()['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 1000, total: 33361621 };
+  button('Update').click();
+  await settle(600);
+  OUT.beforeRestart = view().stage;
+  answers()['/api/update-progress'] = { stage: 'idle' };
+  await settle(600);
+  OUT.afterRestart = view();
+  before = progressCalls();
+  await settle(1000);
+  OUT.pollsAfterRestart = progressCalls() - before;
 
   // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
   localStorage.removeItem('mdv-update-pending');
@@ -741,6 +754,16 @@ def test_failure_and_cancellation_offer_a_retry(banner):
     assert cancelled["stage"] == "available" and cancelled["action"] == "Update"
     assert cancelled["detail"] == "Download cancelled. Nothing was changed."
     assert banner["otherVersionIgnored"] == "available"
+
+
+def test_a_restart_during_a_download_offers_the_update_again(banner):
+    # A restarted backend answers progress with idle and no version; the banner must
+    # not stay on Downloading or keep polling.
+    assert banner["beforeRestart"] == "downloading"
+    restarted = banner["afterRestart"]
+    assert restarted["stage"] == "available" and restarted["action"] == "Update"
+    assert restarted["detail"] == "The download stopped. Nothing was changed. Try again."
+    assert banner["pollsAfterRestart"] == 0
 
 
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):

@@ -87,7 +87,9 @@ nav .nav-demo { color: var(--accent-text); }
 	background: var(--panel-solid);
 	box-shadow: 0 20px 50px -18px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .12);
 }
-.download .menu-panel { left: 0; right: auto; width: min(380px, 100vw - 40px); }
+/* Aligned to the button's right edge, like the theme menu, so it stays on screen when the
+   button sits in the hero's right column. */
+.download .menu-panel { width: min(380px, 100vw - 40px); }
 @media (prefers-reduced-motion: no-preference) {
 	.menu[open] .menu-panel { animation: menu-in var(--moderate) var(--ease-out) both; }
 }
@@ -106,7 +108,10 @@ nav .nav-demo { color: var(--accent-text); }
 
 /* ------------------------------------------------------------ hero */
 main { position: relative; z-index: 1; }
-.hero { padding: 88px 0 44px; }
+/* A layer above the product view, so the open Download menu paints over the screenshot.
+   The entrance animation keeps the hero's columns as stacking contexts (fill-mode both),
+   which confine the menu's own z-index to its column. */
+.hero { position: relative; z-index: 2; padding: 88px 0 44px; }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 32px 56px; align-items: end; }
 .eyebrow { margin: 0 0 14px; color: var(--accent-text); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 h1 { margin: 0; font: 700 clamp(40px, 5.6vw, 66px)/1.02 var(--font-display); letter-spacing: -.035em; text-wrap: balance; }
@@ -221,6 +226,7 @@ footer { position: relative; z-index: 1; padding: 36px 0 40px; border-top: 1px s
 	.points li { display: block; }
 	.points .detail { margin-bottom: 16px; }
 	.actions .button, .download, .download > summary { width: 100%; }
+	.download .menu-panel { left: 0; width: auto; }
 	thead tr { display: none; }
 	tbody tr { display: grid; grid-template-columns: 1fr 1fr; }
 	tbody th { grid-column: 1 / -1; padding-bottom: 0; border-bottom: 0; }
