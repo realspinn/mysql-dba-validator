@@ -13,9 +13,11 @@ export type Run = { status: 'idle' } | { status: 'running' } | { status: 'failed
 export interface Reviewed { result: ReviewResponse; sql: string; context: string; at: Date }
 
 // What a result was produced with, to say when it no longer matches the page. A company
-// review always sends the login; a Local one only once it is verified.
+// review always sends the login, so any edit of it (a password too, counted, never kept)
+// makes its result stale; a Local one sends it only once it is verified.
 export const reviewContext = (s: ConnectionState) =>
-	PUBLIC_DEMO ? 'demo' : [s.target?.target_id ?? 'local', s.target || s.verified ? s.username : '', usableDatabase(s) ?? ''].join('|');
+	PUBLIC_DEMO ? 'demo' : [s.target?.target_id ?? 'local', s.target || s.verified ? s.username : '',
+		s.target ? s.loginRevision : '', usableDatabase(s) ?? ''].join('|');
 
 export function useReview(connection: ConnectionActions) {
 	const [sql, setSql] = useState('');

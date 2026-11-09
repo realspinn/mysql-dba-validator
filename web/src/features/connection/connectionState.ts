@@ -15,7 +15,8 @@ export interface ConnectionState {
 	target: Target | null;          // null: Local
 	username: string;
 	password: string;
-	verified: boolean;              // the current login was accepted (Local test, or remote discovery)
+	loginRevision: number;          // counts login edits, so a result can tell it is stale (no secret)
+	verified: boolean;             // the current login was accepted (Local test, or remote discovery)
 	busy: 'testing' | 'discovering' | null;
 	databases: string[] | null;     // null: not discovered
 	listComplete: boolean;
@@ -39,7 +40,7 @@ export const NOT_PAIRED = 'Not paired. Remote targets need a pairing code from t
 export const LOCAL_START = 'Optional. Adds execution-plan and table metadata evidence. The login is never saved.';
 
 export const initialConnection = (): ConnectionState => ({
-	target: null, username: '', password: '', verified: false, busy: null, databases: null, listComplete: true,
+	target: null, username: '', password: '', loginRevision: 0, verified: false, busy: null, databases: null, listComplete: true,
 	database: null, discovery: null, connectionStatus: status(LOCAL_START),
 	sessionToken: null, sessionStatus: status(NOT_PAIRED), targets: [], rememberedTargetId: null, pairing: false,
 	targetRequest: null, requestStatus: status(''), requestBusy: false, reapprovable: false,

@@ -315,6 +315,13 @@ def test_a_late_connector_answer_only_affects_the_session_and_target_it_was_for(
             in function_body(CONNECTION, "withTarget"))
     review = source("features/review/useReview.ts")
     assert "s.target || s.verified ? s.username : ''" in review
+    # A password-only edit also makes a company result stale: every login edit is
+    # counted, and the count (never the password) is part of a company review's context.
+    assert "loginRevision: s.loginRevision + 1" in function_body(CONNECTION, "setLogin")
+    assert "loginRevision: 0" in source("features/connection/connectionState.ts")
+    context = review[review.index("export const reviewContext"):review.index("export function useReview")]
+    assert "s.target ? s.loginRevision : ''" in context
+    assert "password" not in context
 
 
 def test_local_login_is_cleared_when_a_newly_approved_target_is_selected():

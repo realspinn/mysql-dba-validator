@@ -144,7 +144,7 @@ export function useConnection() {
 		const s = ref.current;
 		if ((change.username ?? s.username) === s.username && (change.password ?? s.password) === s.password) return;
 		update({
-			...change, ...clearedDiscovery, busy: null,
+			...change, ...clearedDiscovery, busy: null, loginRevision: s.loginRevision + 1,
 			rememberedTargetId: s.target ? s.rememberedTargetId : null,
 			connectionStatus: status(s.verified || s.databases ? 'Connection details changed; connect again.' : s.connectionStatus.text),
 		});
