@@ -26,6 +26,7 @@ export function UpdateNotice() {
 	const [starting, setStarting] = useState(false);
 	const dismissedHere = useRef('');
 	const timer = useRef(0);
+	const starts = useRef(0);
 	const offerRef = useRef<Offer | null>(null);
 	const stageRef = useRef<Stage | null>(null);
 	offerRef.current = offer;
@@ -89,6 +90,7 @@ export function UpdateNotice() {
 	}, [showOffer]);
 
 	const startDownload = async () => {
+		starts.current += 1;
 		setStarting(true);
 		const snapshot = await postUpdate('download');
 		setStarting(false);
@@ -114,8 +116,10 @@ export function UpdateNotice() {
 			offerRef.current = o;
 			setOffer(o);
 			showOffer(o);
-			// A download started earlier (or in another tab) carries on where it is.
-			if (o.download?.inApp) void postUpdate('progress').then(follow);
+			// A download started earlier (or in another tab) carries on where it is. An answer
+			// that arrives after Update was pressed here is older than that download: ignored.
+			const at = starts.current;
+			if (o.download?.inApp) void postUpdate('progress').then(s => { if (starts.current === at) follow(s); });
 		});
 		return () => { active = false; window.clearTimeout(timer.current); };
 	}, [follow, showOffer]);

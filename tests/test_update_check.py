@@ -392,10 +392,17 @@ if (window.parent.__blockStorage) {
   Storage.prototype.removeItem = () => { throw new Error('blocked') };
 }
 window.__answers['/api/update-status'] = window.parent.__status;
+// 'hold': the first progress answer waits until the harness calls __release(answer).
+if (window.parent.__holdProgress) window.__answers['/api/update-progress'] = 'hold';
 window.fetch = (path, options) => {
   window.__calls.push([String(path), options && options.method, !!(options && options.body !== undefined)]);
   const answer = window.__answers[String(path)];
   if (answer === 'reject') return Promise.reject(new TypeError('offline'));
+  if (answer === 'hold') {
+    window.__answers[String(path)] = undefined;
+    return new Promise(resolve => { window.__release = value => resolve(new Response(JSON.stringify(value),
+      { status: 200, headers: { 'Content-Type': 'application/json' } })); });
+  }
   if (String(path) === '/api/heartbeat') return Promise.resolve(new Response(null, { status: 204 }));
   return Promise.resolve(new Response(JSON.stringify(answer === undefined ? null : answer),
     { status: 200, headers: { 'Content-Type': 'application/json' } }));
@@ -569,6 +576,20 @@ const storage = key => { try { return frame.contentWindow.localStorage.getItem(k
   before = progressCalls();
   await settle(1000);
   OUT.pollsAfterRestart = progressCalls() - before;
+  // The banner's first progress answer (idle) arrives only after Update was pressed.
+  window.__holdProgress = true;
+  await open(WINDOWS);
+  window.__holdProgress = false;
+  answers()['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 2000, total: 33361621 };
+  button('Update').click();
+  await settle(100);
+  frame.contentWindow.__release({ stage: 'idle' });
+  await settle(600);
+  OUT.afterStaleIdle = view().stage;
+  before = progressCalls();
+  await settle(1000);
+  OUT.pollsAfterStaleIdle = progressCalls() - before;
 
   // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
   localStorage.removeItem('mdv-update-pending');
@@ -764,6 +785,13 @@ def test_a_restart_during_a_download_offers_the_update_again(banner):
     assert restarted["stage"] == "available" and restarted["action"] == "Update"
     assert restarted["detail"] == "The download stopped. Nothing was changed. Try again."
     assert banner["pollsAfterRestart"] == 0
+
+
+def test_an_idle_answer_sent_before_update_was_pressed_is_ignored(banner):
+    # The banner's first progress request answers idle only after a download started
+    # here: it is older than that download and must not end it or stop the polling.
+    assert banner["afterStaleIdle"] == "downloading"
+    assert banner["pollsAfterStaleIdle"] >= 2
 
 
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):
