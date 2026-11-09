@@ -98,11 +98,12 @@ export function UpdateNotice() {
 	}, [showOffer]);
 
 	const startDownload = async () => {
-		starts.current += 1;
+		const at = ++starts.current;
 		setStarting(true);
 		const snapshot = await postUpdate('download');
 		setStarting(false);
-		if (snapshot && snapshot.error === 'update_download_running') follow(await postUpdate('progress'));
+		if (starts.current !== at) return;
+		if (snapshot && snapshot.error === 'update_download_running') ask('progress', starts, follow);
 		else if (snapshot && typeof snapshot.stage === 'string') follow(snapshot);
 		else if (offerRef.current) showOffer(offerRef.current, 'The download could not be started. Try again.');
 	};

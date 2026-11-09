@@ -610,6 +610,23 @@ const storage = key => { try { return frame.contentWindow.localStorage.getItem(k
   before = progressCalls();
   await settle(1000);
   OUT.pollsAfterLateCancel = progressCalls() - before;
+  // "Already running": the progress answer for it arrives after Update was pressed again.
+  await open(WINDOWS);
+  answers()['/api/update-download'] = { error: 'update_download_running' };
+  answers()['/api/update-progress'] = 'hold';
+  button('Update').click();
+  await settle(200);
+  OUT.whileRunningAnswerHeld = view().stage;
+  answers()['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 5000, total: 33361621 };
+  button('Update').click();
+  await settle(100);
+  frame.contentWindow.__release({ stage: 'cancelled', version: '0.7.0' });
+  await settle(600);
+  OUT.afterLateRunningAnswer = view().stage;
+  before = progressCalls();
+  await settle(1000);
+  OUT.pollsAfterLateRunningAnswer = progressCalls() - before;
 
   // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
   localStorage.removeItem('mdv-update-pending');
@@ -820,6 +837,14 @@ def test_a_late_cancel_answer_does_not_end_a_newer_download(banner):
     assert banner["cancelledByPoll"] == "available"
     assert banner["afterLateCancel"] == "downloading"
     assert banner["pollsAfterLateCancel"] >= 2
+
+
+def test_a_late_answer_for_an_already_running_download_does_not_end_a_newer_one(banner):
+    # Update answered "already running"; before the progress answer for it arrived,
+    # Update was pressed again. That older answer must not end the newer download.
+    assert banner["whileRunningAnswerHeld"] == "available"
+    assert banner["afterLateRunningAnswer"] == "downloading"
+    assert banner["pollsAfterLateRunningAnswer"] >= 2
 
 
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):
