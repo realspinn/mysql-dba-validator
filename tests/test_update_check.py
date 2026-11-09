@@ -590,6 +590,26 @@ const storage = key => { try { return frame.contentWindow.localStorage.getItem(k
   before = progressCalls();
   await settle(1000);
   OUT.pollsAfterStaleIdle = progressCalls() - before;
+  // Cancel's answer arrives late: a poll already showed the offer and Update was pressed again.
+  await open(WINDOWS);
+  answers()['/api/update-download'] = { stage: 'downloading', version: '0.7.0', received: 0, total: 33361621 };
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 3000, total: 33361621 };
+  button('Update').click();
+  await settle(600);
+  answers()['/api/update-cancel'] = 'hold';
+  answers()['/api/update-progress'] = { stage: 'cancelled', version: '0.7.0' };
+  button('Cancel').click();
+  await settle(600);
+  OUT.cancelledByPoll = view().stage;
+  answers()['/api/update-progress'] = { stage: 'downloading', version: '0.7.0', received: 4000, total: 33361621 };
+  button('Update').click();
+  await settle(100);
+  frame.contentWindow.__release({ stage: 'cancelled', version: '0.7.0' });
+  await settle(600);
+  OUT.afterLateCancel = view().stage;
+  before = progressCalls();
+  await settle(1000);
+  OUT.pollsAfterLateCancel = progressCalls() - before;
 
   // macOS (and any copy that is not the Windows desktop app): the browser downloads it.
   localStorage.removeItem('mdv-update-pending');
@@ -792,6 +812,14 @@ def test_an_idle_answer_sent_before_update_was_pressed_is_ignored(banner):
     # here: it is older than that download and must not end it or stop the polling.
     assert banner["afterStaleIdle"] == "downloading"
     assert banner["pollsAfterStaleIdle"] >= 2
+
+
+def test_a_late_cancel_answer_does_not_end_a_newer_download(banner):
+    # A poll showed the cancellation and Update was pressed again before Cancel's own
+    # answer arrived: that answer is older than the new download and is ignored.
+    assert banner["cancelledByPoll"] == "available"
+    assert banner["afterLateCancel"] == "downloading"
+    assert banner["pollsAfterLateCancel"] >= 2
 
 
 def test_the_page_calls_only_its_own_update_endpoints_with_bodyless_posts(banner):

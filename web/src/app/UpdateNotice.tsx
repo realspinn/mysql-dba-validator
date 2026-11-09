@@ -11,6 +11,14 @@ import {
 
 const POLL_MS = 400;
 
+// Asks the backend and follows the answer only if no download was started on this page
+// since it was asked: an older answer (an idle resume, a late poll or Cancel) must not
+// end a newer download.
+function ask(action: 'progress' | 'cancel', starts: { current: number }, follow: (snapshot: Json | null) => void) {
+	const at = starts.current;
+	void postUpdate(action).then(snapshot => { if (starts.current === at) follow(snapshot); });
+}
+
 interface Stage {
 	stage: 'available' | 'downloading' | 'verifying' | 'ready' | 'failed' | 'updated';
 	title: string;
@@ -52,7 +60,7 @@ export function UpdateNotice() {
 		window.clearTimeout(timer.current);
 		const o = offerRef.current;
 		if (!o) return;
-		const poll = () => { timer.current = window.setTimeout(() => void postUpdate('progress').then(follow), POLL_MS); };
+		const poll = () => { timer.current = window.setTimeout(() => ask('progress', starts, follow), POLL_MS); };
 		if (!snapshot) {
 			const now = stageRef.current?.stage;
 			if (now === 'downloading' || now === 'verifying') poll();
@@ -116,10 +124,8 @@ export function UpdateNotice() {
 			offerRef.current = o;
 			setOffer(o);
 			showOffer(o);
-			// A download started earlier (or in another tab) carries on where it is. An answer
-			// that arrives after Update was pressed here is older than that download: ignored.
-			const at = starts.current;
-			if (o.download?.inApp) void postUpdate('progress').then(s => { if (starts.current === at) follow(s); });
+			// A download started earlier (or in another tab) carries on where it is.
+			if (o.download?.inApp) ask('progress', starts, follow);
 		});
 		return () => { active = false; window.clearTimeout(timer.current); };
 	}, [follow, showOffer]);
@@ -127,7 +133,7 @@ export function UpdateNotice() {
 	if (hidden || !stage || !offer) return null;
 	const percent = stage.progress === null ? 0 : Math.min(100, Math.max(0, stage.progress * 100));
 	const busy = stage.stage === 'downloading' || stage.stage === 'verifying';
-	const cancel = () => void postUpdate('cancel').then(follow);
+	const cancel = () => ask('cancel', starts, follow);
 	const glyph = stage.stage === 'ready' || stage.stage === 'updated' ? 'check' : stage.stage === 'failed' ? 'alert' : 'arrowDown';
 
 	return (
