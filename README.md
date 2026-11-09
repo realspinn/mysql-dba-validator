@@ -6,7 +6,7 @@ MySQL DBA Validator helps DBAs review MySQL SQL from tickets before it is run. P
 
 It supports DBA judgement; it does **not** guarantee that SQL is safe.
 
-**Current release: [v0.10.1](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.10.1)** · Pre-1.0 · Portable Windows x64 and unsigned macOS Apple Silicon builds.
+**Current release: [v0.11.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0)** · Pre-1.0 · Portable Windows x64 and unsigned macOS Apple Silicon builds.
 
 ![Validation results for a batch of four statements: overall risk CRITICAL, score 100 of 100, static analysis, batch confidence LIMITED; the top finding (statement 2, a DELETE with no WHERE clause), execution-plan, filter, limitation and unknown rows; and a table listing each statement with its risk, confidence and key finding](docs/images/validator-batch-review.png)
 
@@ -36,14 +36,14 @@ It supports DBA judgement; it does **not** guarantee that SQL is safe.
 
 ## Download and run
 
-Get the ZIP and its matching `.sha256` file from the [v0.10.1 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.10.1). Verify the checksum before running the application.
+Get the ZIP and its matching `.sha256` file from the [v0.11.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). Verify the checksum before running the application.
 
 **Windows x64**
 
-1. Download `MySQL-DBA-Validator-v0.10.1-windows-x64.zip` and its checksum file.
+1. Download `MySQL-DBA-Validator-v0.11.0-windows-x64.zip` and its checksum file.
 2. In PowerShell, verify the ZIP:
    ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.10.1-windows-x64.zip -Algorithm SHA256
+   Get-FileHash .\MySQL-DBA-Validator-v0.11.0-windows-x64.zip -Algorithm SHA256
    ```
    Compare the result with the SHA-256 value in the release.
 3. Extract the ZIP and run `MySQL-DBA-Validator.exe`. Your browser opens `http://127.0.0.1:8420`. No installer or Python is needed.
@@ -52,7 +52,7 @@ For approved company targets, run `MySQL-DBA-Validator Console.exe` instead; it 
 
 **macOS (Apple Silicon only)**
 
-Download `MySQL-DBA-Validator-v0.10.1-macos-arm64-unsigned.zip`, verify it with its checksum file, then follow the opening instructions in the [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.10.1). The app is not notarized.
+Download `MySQL-DBA-Validator-v0.11.0-macos-arm64-unsigned.zip`, verify it with its checksum file, then follow the opening instructions in the [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). The app is not notarized.
 
 **Updates:** the app can check GitHub for a newer release at startup and show a dismissible notice. On Windows, **Update** downloads the new release ZIP and verifies it (size, SHA-256 digest from GitHub, archive contents); you then close the app, extract the ZIP and open the new folder. It never installs or runs anything itself. On macOS the notice links to the release file for your browser to download. v0.7.0 and v0.8.0 show the notice with a link to the release page only: install the newer version by hand once (saved targets, the `.env` file and the theme are kept), and from then on the Windows **Update** and the macOS **Download** link work as above. GitHub receives your IP address and the installed version; no SQL, login or connection details are sent. Set `MDV_UPDATE_CHECK=off` to disable the check. Details: [SECURITY.md](SECURITY.md#security-model-in-brief).
 
