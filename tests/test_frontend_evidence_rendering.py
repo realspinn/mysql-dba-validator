@@ -24,7 +24,7 @@ from fastapi.encoders import jsonable_encoder
 
 import backend.db as backend_db
 from tests import test_connector_remote_evidence as remote
-from tests.frontend_page import page_source
+from tests.frontend_page import FRONTEND_DIR, built_page
 from tests.test_local_evidence_credentials import DECOY, FakeMySQL, explain_row, mysql_error, post
 
 CHROME_CANDIDATES = (
@@ -117,13 +117,16 @@ def stop_browser(process: subprocess.Popen) -> None:
             os.killpg(process.pid, sig)
         except ProcessLookupError:  # the whole group is already gone
             break
-        except PermissionError:
+        except PermissionError as refused:
             # macOS answers EPERM, not ESRCH, while the group still exists but has no member
             # it can signal (XNU killpg1 skips zombies), e.g. helpers that exited but are not
-            # yet reaped. The browser is ours: while it runs it can be signalled, so EPERM
-            # then is a real failure.
-            if process.poll() is None:
-                raise
+            # yet reaped, or a browser that is exiting on its own after the dump and cannot
+            # be reaped yet. It gets the same few seconds as after SIGTERM; a browser that
+            # still runs after them could have been signalled, so EPERM then is a real failure.
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                raise refused from None
             break
         try:
             process.wait(timeout=5)
@@ -229,118 +232,164 @@ def build_fixtures() -> dict:
     }
 
 
+# Drives the built page in Chrome: the page's own fetch answers /api/validate with each
+# fixture in turn (nothing else is reachable), then the harness types the SQL, presses
+# Review SQL, opens every statement and reads the review and the dashboard back.
 HARNESS = """
 <script>
-const FIXTURES = %s;
-const OUT = {};
-const overviewText = () => document.getElementById('overview').textContent;
-const EMPTY_OVERVIEW = overviewText();
-for (const [name, data] of Object.entries(FIXTURES)) {
-  renderResults(data);
-  const root = document.getElementById('results');
-  const cells = root.querySelectorAll('.summary-cell');
-  OUT[name] = {
-    mode: cells[2].querySelector('strong').textContent,
-    batchConfidence: cells[3].querySelector('strong').textContent,
-    summary: root.querySelector('.evidence-summary').textContent,
-    assessment: [...root.querySelectorAll('.assessment .assess-row')].map(row => row.textContent),
-    assessmentBeforeCards: (() => { const a = root.querySelector('.assessment'); const c = root.querySelector('article.statement');
-      return !!a && !!c && !!(a.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); })(),
-    overview: overviewText(),
-    findingLinks: [...document.querySelectorAll('#overview .ov-finding a')].map(a => a.getAttribute('href')),
-    cardIds: [...root.querySelectorAll('article.statement')].map(card => card.id),
-    indexRows: [...root.querySelectorAll('.stmt-index tbody tr')].map(row => [...row.cells].map(cell => cell.textContent)),
-    indexLinks: [...root.querySelectorAll('.stmt-index a')].map(a => a.getAttribute('href')),
-    composition: {
-      band: document.querySelectorAll('#overview .ov-band > .ov-tile').length,
-      tableRows: document.querySelectorAll('#overview table.ov-table tbody tr').length,
-      oldTilesOrCards: document.querySelectorAll('#overview .ov-kpis, #overview .ov-card, #overview .onboard').length,
-    },
-    statements: [...root.querySelectorAll('article.statement')].map(card => ({
-      headline: card.querySelector('.evidence-headline').textContent,
-      evidence: [...card.querySelectorAll('.layer.evidence p')].map(p => p.textContent),
-      metadata: [...card.querySelectorAll('.layer.metadata p')].map(p => p.textContent),
-      planGrids: card.querySelectorAll('.layer.evidence .metric-grid').length,
-      scope: (card.querySelector('.row-scope') || {}).textContent || null,
-      warning: (card.querySelector('.analysis-warning') || {}).textContent || null,
-      confidence: card.querySelector('.metric.confidence b').textContent,
-      why: [...card.querySelector('.layer.final ul.plain-list').children].map(li => li.textContent),
-      optimization: (() => { const box = card.querySelector('details.optimization');
-        const look = node => node ? (s => [s.fontWeight, s.color, s.fontSize])(getComputedStyle(node)) : null;
-        return box ? { summary: box.querySelector('summary').textContent, open: box.open,
-                       headings: [...box.querySelectorAll('.subheading')].map(h => h.textContent),
-                       caveatLabels: [...box.querySelectorAll('.caveats-label')].map(p => p.textContent),
-                       caveatLists: box.querySelectorAll('.caveats-label + ul.caveats').length,
-                       caveatLook: look(box.querySelector('ul.caveats li')),
-                       actionLook: look([...box.querySelectorAll('p')].find(p => p.textContent.startsWith('Suggested action'))),
-                       text: box.textContent } : null; })(),
-      text: card.textContent,
-    })),
-    aiAdvisor: [...root.querySelectorAll('.ai-teaser')].map(box => ({
-      label: box.getAttribute('aria-label'),
-      title: box.querySelector('.ai-teaser-title').textContent,
-      badge: box.querySelector('.ai-badge').textContent,
-      text: box.querySelector('.ai-teaser-text').textContent,
-      privacy: box.querySelector('.ai-privacy').textContent,
-      marks: [...box.querySelectorAll('svg')].map(svg => svg.getAttribute('aria-hidden')),
-      external: box.querySelectorAll('img, image, use, link, iframe, [src], [href]').length,
-      // The only control is the close button.
-      controls: box.querySelectorAll('a, button:not(.close-x), input, select, textarea, form, [onclick], [tabindex]').length,
-      close: [...box.querySelectorAll('button.close-x')].map(b => [b.type, b.getAttribute('aria-label'), b.textContent.trim()]),
-      inCard: !!box.closest('article.statement'),
-      afterCards: (() => { const cards = root.querySelectorAll('article.statement');
-        return !!(cards[cards.length - 1].compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING); })(),
-    })),
-  };
+window.__FIXTURES = %s;
+window.__served = 0;
+window.__hold = null;
+window.fetch = (url, options) => {
+  const json = (status, body) => Promise.resolve(new Response(JSON.stringify(body),
+    { status, headers: { 'Content-Type': 'application/json' } }));
+  const path = String(url);
+  if (path === '/api/validate') {
+    if (window.__hold) return window.__hold.then(() => json(400, { message: 'Validation failed: example' }));
+    window.__served += 1;
+    return json(200, window.__next);
+  }
+  if (path === '/api/update-status') return json(200, { state: 'up_to_date' });
+  if (path === '/api/heartbeat') return Promise.resolve(new Response(null, { status: 204 }));
+  return Promise.reject(new TypeError('blocked in the harness: ' + path));
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const until = async (test, label) => { for (let i = 0; i < 400; i++) { const v = test(); if (v) return v; await sleep(25); }
+  throw new Error('timed out: ' + label); };
+const $ = s => document.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+const nav = async name => { $$('.nav-item').find(b => b.textContent === name).click(); await sleep(60); };
+const typeSql = text => { const ta = $('#sqlInput');
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true })); };
+const look = node => node ? (s => [s.fontWeight, s.color, s.fontSize])(getComputedStyle(node)) : null;
+const rowsAfter = (block, heading) => { const h = $$('h4', block).find(x => x.textContent === heading);
+  const next = h && h.nextElementSibling; if (!next) return [];
+  return next.tagName === 'UL' ? $$('li', next).map(li => li.textContent) : [next.textContent]; };
+
+async function run() {
+  await until(() => $('.sidebar'), 'app');
+  const OUT = {};
+  const overview = () => $('.dashboard').textContent;
+  const EMPTY = overview();
+  let k = 0;
+  for (const [name, data] of Object.entries(window.__FIXTURES)) {
+    await nav('SQL review');
+    k += 1;
+    typeSql('-- fixture ' + name);
+    window.__next = data;
+    $$('button').find(b => b.textContent === 'Review SQL').click();
+    await until(() => window.__served === k && $('.verdict') && !$('.result-loading'), name);
+    await sleep(30);
+    for (const row of $$('.statement-row')) if (row.getAttribute('aria-expanded') !== 'true') row.click();
+    await sleep(60);
+    const view = {
+      mode: $('.verdict-side .mode').textContent,
+      batchConfidence: $('.verdict-side .confidence').textContent,
+      summary: $('.evidence-summary').textContent,
+      assessment: $$('.assess .assess-row').map(row => row.textContent),
+      assessmentBeforeCards: !!($('.assess').compareDocumentPosition($('.statements')) & Node.DOCUMENT_POSITION_FOLLOWING),
+      cardIds: $$('li.statement').map(li => li.id),
+      rowControls: $$('.statement-row').map(b => b.getAttribute('aria-controls')),
+      indexRows: $$('.statement-row').map(b => ['#' + b.querySelector('.num').textContent,
+        b.querySelector('.stmt-what .mono').textContent,
+        b.querySelector('.pill').textContent + ' ' + b.querySelector('.stmt-score').textContent,
+        b.querySelector('.stmt-conf').textContent, b.querySelector('.stmt-key').textContent]),
+      aiMentions: (document.body.textContent.match(/\\bAI\\b/g) || []).length,
+      statements: $$('li.statement').map(card => {
+        const final = card.querySelector('.detail-block.final');
+        const box = card.querySelector('details.optimization');
+        return {
+          headline: card.querySelector('.evidence-headline').textContent,
+          evidence: $$('.detail-block.evidence p', card).map(p => p.textContent),
+          metadata: $$('.detail-block.metadata p', card).map(p => p.textContent),
+          planGrids: $$('.plan-fields', card).length,
+          scope: (card.querySelector('.row-scope') || {}).textContent || null,
+          warning: (card.querySelector('.detail-inner > .warning-line') || {}).textContent || null,
+          confidence: card.querySelector('.detail-metrics div:nth-child(2) dd').textContent,
+          why: rowsAfter(final, 'Why'),
+          optimization: box ? { summary: box.querySelector('summary').textContent, open: box.open,
+            headings: $$('.advice h4', box).map(h => h.textContent),
+            caveatLabels: $$('.caveats-label', box).map(p => p.textContent),
+            caveatLists: $$('.caveats-label + ul', box).length,
+            caveatLook: look(box.querySelector('.caveats-label + ul li')),
+            actionLook: look($$('p', box).find(p => p.textContent.startsWith('Suggested action'))),
+            text: box.textContent } : null,
+          text: card.textContent,
+        };
+      }),
+    };
+    await nav('Dashboard');
+    view.overview = overview();
+    view.findingLinks = $$('.dashboard table a').map(a => a.getAttribute('href'));
+    view.composition = { band: $$('.tiles > .tile').length, tableRows: $$('.dash-card table tbody tr').length,
+      oldTilesOrCards: $$('.ov-kpis, .ov-card, .onboard').length };
+    OUT[name] = view;
+  }
+  // A finding on the dashboard opens its statement in the review, focused.
+  const href = $('.dashboard table a').getAttribute('href');
+  $('.dashboard table a').click();
+  await until(() => $('.workspace'), 'review after link');
+  const focused = await until(() => document.activeElement && document.activeElement.closest('li.statement.open'),
+    'statement focused');
+  const FOCUS = { id: focused ? focused.id : null, href, open: focused ? focused.classList.contains('open') : false };
+  // Running and failed states.
+  let release;
+  window.__hold = new Promise(r => { release = r; });
+  typeSql('-- running');
+  $$('button').find(b => b.textContent === 'Review SQL').click();
+  await sleep(60);
+  await nav('Dashboard');
+  const RUNNING = overview();
+  release();
+  await until(() => overview().includes('Failed'), 'failed');
+  OUT.__states = { empty: EMPTY, running: RUNNING, failed: overview(), focus: FOCUS };
+  const out = document.createElement('pre');
+  out.id = 'render-out';
+  out.textContent = JSON.stringify(OUT);
+  document.body.append(out);
 }
-// The AI Advisor teaser in each theme: text colours and the surface they sit on.
-renderResults(FIXTURES.optimization);
-const AI_THEMES = {};
-for (const theme of ['light', 'dark']) {
-  document.documentElement.setAttribute('data-theme', theme);
-  const box = document.querySelector('.ai-teaser');
-  const colour = selector => getComputedStyle(box.querySelector(selector)).color;
-  AI_THEMES[theme] = {
-    surface: getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
-    title: colour('.ai-teaser-title'), badge: colour('.ai-badge'), text: colour('.ai-teaser-text'),
-    privacy: colour('.ai-privacy'), mark: getComputedStyle(box.querySelector('.ai-mark')).backgroundImage,
-    titleSize: getComputedStyle(box.querySelector('.ai-teaser-title')).fontSize,
-  };
-}
-document.documentElement.removeAttribute('data-theme');
-// Closing the teaser: gone at once and for later results on this page, with nothing stored.
-const storageBefore = [localStorage.length, sessionStorage.length, document.cookie];
-const teaserCount = () => document.querySelectorAll('#results .ai-teaser').length;
-const AI_CLOSE = { before: teaserCount() };
-showView('review');  // the teaser is on the SQL review view; hidden elements take no focus
-const closeButton = document.querySelector('#results .ai-teaser .close-x');
-closeButton.focus();
-closeButton.click();
-AI_CLOSE.afterClick = teaserCount();
-// Focus stays near where it was (the last Optimization summary), not back at the top.
-AI_CLOSE.focusAfterClick = document.activeElement
-  === [...document.querySelectorAll('#results details.optimization summary')].pop();
-renderResults(FIXTURES.optimization);
-AI_CLOSE.afterNextResult = teaserCount();
-AI_CLOSE.storageUnchanged = JSON.stringify([localStorage.length, sessionStorage.length, document.cookie])
-  === JSON.stringify(storageBefore);
-aiTeaserClosed = false;  // as after a reload: nothing remembers it
-renderResults(FIXTURES.optimization);
-AI_CLOSE.afterReload = teaserCount();
-renderResults(FIXTURES.batch16);
-document.querySelectorAll('.stmt-index a')[9].click();
-const BATCH_FOCUS = document.activeElement.id;
-renderLoading();
-const RUNNING_OVERVIEW = overviewText();
-renderError('Validation failed: example');
-OUT.__states = { empty: EMPTY_OVERVIEW, running: RUNNING_OVERVIEW, failed: overviewText(), batchFocus: BATCH_FOCUS,
-                 aiThemes: AI_THEMES, aiClose: AI_CLOSE };
-const out = document.createElement('pre');
-out.id = 'render-out';
-out.textContent = JSON.stringify(OUT);
-document.body.append(out);
+run().catch(error => { const out = document.createElement('pre'); out.id = 'render-error';
+  out.textContent = String(error && error.stack || error); document.body.append(out); });
 </script>
-</body>"""
+"""
+
+ASSET_TYPES = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".html": "text/html"}
+
+
+def serve(harness_html: str, pages: dict[str, str] | None = None):
+    """A loopback server for the harness page (and any other test pages) and the built
+    page's files (module scripts do not load from file://). Its port is server.server_port."""
+    pages = {"/harness.html": harness_html, **(pages or {})}
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            path = self.path.split("?")[0]
+            if path in pages:
+                body, kind = pages[path].encode("utf-8"), "text/html"
+            elif path.startswith("/static/") and ".." not in path:
+                file = FRONTEND_DIR / path.removeprefix("/static/")
+                if not file.is_file():
+                    self.send_error(404)
+                    return
+                body, kind = file.read_bytes(), ASSET_TYPES.get(file.suffix, "application/octet-stream")
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 @pytest.fixture(scope="module")
@@ -349,14 +398,20 @@ def rendered(tmp_path_factory):
     if chrome is None:
         pytest.skip("Chrome is not installed")
     fixtures = build_fixtures()
-    page = page_source("index.html")
     payload = json.dumps(fixtures).replace("</", "<\\/")
+    # The harness runs before the page's module, so the page's fetch is the harness's.
+    harness = built_page("index.html").replace("</head>", HARNESS % payload + "</head>", 1)
     work = tmp_path_factory.mktemp("render")
-    harness = work / "harness.html"
-    harness.write_text(page.replace("</body>", HARNESS % payload, 1), encoding="utf-8")
-    document, stderr, code = dump_dom(
-        [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-         f"--user-data-dir={work / 'profile'}", "--dump-dom", harness.as_uri()], work)
+    server = serve(harness)
+    try:
+        document, stderr, code = dump_dom(
+            [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             f"--user-data-dir={work / 'profile'}", "--virtual-time-budget=600000", "--dump-dom",
+             f"http://127.0.0.1:{server.server_port}/harness.html"], work)
+    finally:
+        server.shutdown()
+    failure = re.search(r'<pre id="render-error">(.*?)</pre>', document, re.S)
+    assert not failure, html.unescape(failure.group(1))
     match = re.search(r'<pre id="render-out">(.*?)</pre>', document, re.S)
     assert match, f"page did not render (exit {code}): {stderr[-500:]}"
     return fixtures, json.loads(html.unescape(match.group(1)))
@@ -623,66 +678,13 @@ def test_optimization_advice_is_a_collapsed_advisory_section(rendered):
             assert "Optimization" not in "".join(view["assessment"]) + view["overview"], name
 
 
-def test_the_ai_advisor_is_a_label_for_a_future_feature(rendered):
+def test_no_ai_feature_is_advertised(rendered):
+    """The previous page showed an "AI Advisor, coming soon" teaser. The validator makes no
+    AI-assisted decision and offers none, so the result says nothing about AI."""
     _, out = rendered
     for name, view in out.items():
-        if name == "__states":
-            continue
-        assert len(view["aiAdvisor"]) == 1, name
-        note = view["aiAdvisor"][0]
-        assert (note["label"], note["title"], note["badge"]) == (
-            "AI Advisor, coming soon", "AI Advisor", "COMING SOON"), name
-        assert note["text"] == ("Deeper SQL explanations and intelligent optimization suggestions, "
-                                "with optional AI assistance in a future version.")
-        assert note["privacy"] == "No SQL is sent to an AI service."
-        # Decorative inline marks only (the third is the close icon): nothing loaded, below the
-        # statements, and no control but an accessible close button.
-        assert note["marks"] == ["true", "true", "true"] and note["external"] == 0, name
-        assert note["controls"] == 0 and note["inCard"] is False and note["afterCards"] is True, name
-        assert note["close"] == [["button", "Dismiss AI Advisor teaser", ""]], name
-
-
-def test_closing_the_ai_advisor_lasts_until_the_page_is_reloaded(rendered):
-    _, out = rendered
-    assert out["__states"]["aiClose"] == {"before": 1, "afterClick": 0, "focusAfterClick": True,
-                                          "afterNextResult": 0, "storageUnchanged": True, "afterReload": 1}
-    # In memory only: the dismissal code never touches browser storage or cookies.
-    page = page_source("index.html")
-    start = page.index("let aiTeaserClosed")
-    code = page[start:page.index("\n}\n", page.index("function aiAdvisorNote(", start))]
-    for persistent in ("localStorage", "sessionStorage", "cookie", "indexedDB"):
-        assert persistent not in code, persistent
-
-
-def contrast(foreground: str, background: str) -> float:
-    """WCAG contrast ratio of two colours given as rgb(...) or #rrggbb."""
-    def channels(colour):
-        colour = colour.strip()
-        if colour.startswith("#"):
-            return [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
-        return [int(float(part)) for part in re.findall(r"[\d.]+", colour)[:3]]
-
-    def luminance(colour):
-        linear = [(c / 255) / 12.92 if c / 255 <= 0.03928 else ((c / 255 + 0.055) / 1.055) ** 2.4
-                  for c in channels(colour)]
-        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-    lighter, darker = sorted((luminance(foreground), luminance(background)), reverse=True)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def test_the_ai_advisor_reads_well_in_light_and_dark_themes(rendered):
-    _, out = rendered
-    themes = out["__states"]["aiThemes"]
-    assert themes["light"]["surface"] != themes["dark"]["surface"]
-    for theme, look in themes.items():
-        for part in ("title", "badge", "text", "privacy"):
-            assert contrast(look[part], look["surface"]) >= 4.5, (theme, part)
-        assert look["mark"].startswith("linear-gradient"), theme
-        # Secondary to the risk assessment: no larger than a statement heading.
-        assert look["titleSize"] == "14px", theme
-    for part in ("title", "badge", "text", "privacy", "mark"):
-        assert themes["light"][part] != themes["dark"][part], part
+        if name != "__states":
+            assert view["aiMentions"] == 0, name
 
 
 def test_multi_row_plan_is_shown_without_a_first_row_summary(rendered):
@@ -751,7 +753,7 @@ def test_sixteen_statements_each_get_a_row_a_card_and_a_working_link(rendered):
     data, view = fixtures["batch16"], out["batch16"]
     assert data["statement_count"] == 16
     assert view["cardIds"] == [f"statement-{n}" for n in range(1, 17)]
-    assert view["indexLinks"] == [f"#statement-{n}" for n in range(1, 17)]
+    assert view["rowControls"] == [f"statement-detail-{n}" for n in range(1, 17)]
     rows = view["indexRows"]
     assert len(rows) == 16
     for n, (row, statement) in enumerate(zip(rows, data["statements"]), 1):
@@ -763,8 +765,9 @@ def test_sixteen_statements_each_get_a_row_a_card_and_a_working_link(rendered):
     # The unrestricted DELETE (statement 11) is the batch's highest risk and is visible as such.
     assert data["overall_score"] == data["statements"][10]["score"] == 100
     assert rows[10][2].startswith("CRITICAL")
-    # Clicking the 10th row opens and focuses statement 10's card.
-    assert out["__states"]["batchFocus"] == "statement-10"
+    # A dashboard finding opens and focuses its statement (the last fixture's top finding).
+    focus = out["__states"]["focus"]
+    assert focus["href"] == "#" + focus["id"] and focus["open"] is True
     # Identical per-statement lines are merged, not repeated sixteen times.
     plan_row = next(row for row in view["assessment"] if row.startswith("Execution plan"))
     assert plan_row.count("Not collected: plans are not requested for UPDATE or DELETE.") == 1
@@ -791,9 +794,10 @@ def test_statements_table_says_why_a_statement_was_not_analysed(rendered):
         assert f"Statement {n}: the SQL could only be read partly." not in limits
 
 
-def test_a_single_statement_has_no_statements_table(rendered):
+def test_a_single_statement_is_shown_open(rendered):
     _, out = rendered
-    assert out["local_select_plan"]["indexRows"] == []
+    view = out["local_select_plan"]
+    assert len(view["indexRows"]) == 1 and view["statements"][0]["evidence"]
 
 
 def test_overview_states_are_derived_only_from_page_state(rendered):
@@ -812,7 +816,7 @@ def test_overview_shows_the_response_and_links_findings_to_statements(rendered):
     for name, data in fixtures.items():
         view = out[name]
         overview = view["overview"]
-        assert f"{data['overall_risk_level']} · {data['overall_score']} / 100" in overview, name
+        assert f"{data['overall_risk_level']} {data['overall_score']} / 100" in overview, name
         assert f"Confidence{data['overall_confidence']}" in overview, name
         assert f"Statements{data['statement_count']}" in overview, name
         assert "not a safety rating" in overview, name
@@ -979,6 +983,20 @@ def test_stop_browser_accepts_eperm_once_the_browser_has_exited(monkeypatch):
     browser.returncode = 0
     _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
     assert browser.signals == []
+
+
+def test_stop_browser_accepts_eperm_while_the_browser_is_exiting(monkeypatch):
+    # Seen on the macOS runner: refused while Chrome was exiting after the dump, which
+    # poll() did not report yet; it was reaped within the wait.
+    browser = _Browser(exits_after=None)
+
+    def exits_while_waited(timeout=None):
+        browser.returncode = 0
+        return 0
+
+    browser.wait = exits_while_waited
+    _stop_with(monkeypatch, browser, [PermissionError(1, "Operation not permitted")])
+    assert browser.signals == [] and browser.returncode == 0
 
 
 def test_stop_browser_reports_eperm_while_the_browser_still_runs(monkeypatch):

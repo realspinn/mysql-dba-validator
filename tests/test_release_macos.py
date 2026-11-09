@@ -25,6 +25,7 @@ import yaml
 
 from release import audit_macos, build_macos, build_windows
 from release import launcher
+from release.frontend_files import packaged_frontend_files
 
 ROOT = Path(launcher.PROJECT_ROOT)
 MACHO = bytes.fromhex("cffaedfe") + b"\x00" * 60  # 64-bit Mach-O header magic (little endian)
@@ -432,10 +433,7 @@ def _audit_bundle(tmp_path: Path, version: str = VERSION) -> Path:
         "MacOS/MySQL-DBA-Validator": MACHO,
         "MacOS/MySQL-DBA-Validator Console": MACHO,
         "Frameworks/lib-dynload/_ssl.so": MACHO,
-        "Resources/frontend/index.html": (ROOT / "frontend" / "index.html").read_bytes(),
-        "Resources/frontend/assets/css/validator.css": (ROOT / "frontend" / "assets" / "css" / "validator.css").read_bytes(),
-        "Resources/frontend/assets/js/validator.js": (ROOT / "frontend" / "assets" / "js" / "validator.js").read_bytes(),
-        "Resources/frontend/assets/favicon.svg": (ROOT / "frontend" / "assets" / "favicon.svg").read_bytes(),
+        **{f"Resources/frontend/{path}": source.read_bytes() for source, path in packaged_frontend_files(ROOT)},
         "Resources/mysql-dba-validator.icns": b"icns",
     }.items():
         (contents / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -490,7 +488,7 @@ def test_macos_audit_rejects_signing_material_secrets_files_and_source(tmp_path,
 def test_macos_audit_checks_structure_version_and_page(tmp_path, embedded):
     app = _audit_bundle(tmp_path, version="1.0.0")
     (app / "Contents" / "MacOS" / "extra-tool").write_bytes(MACHO)
-    (app / "Contents" / "Resources" / "frontend" / "index.html").write_text("<html>changed</html>", encoding="utf-8")
+    (app / "Contents" / "Resources" / "frontend" / "app" / "index.html").write_text("<html>changed</html>", encoding="utf-8")
     (app / "Contents" / "MacOS" / "MySQL-DBA-Validator Console").write_bytes(b"#!/bin/sh\n")
     findings, _ = audit_macos.audit(app, VERSION, tmp_path / "no.env", [])
     text = "\n".join(findings)

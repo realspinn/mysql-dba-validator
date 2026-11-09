@@ -1,0 +1,11 @@
+/* The workspace's styles, in cascade order: tokens, base, ambient light, controls,
+   the shell, then each view. The homepage shares the first four (home/home.css). */
+@import "./tokens.css";
+@import "./base.css";
+@import "./ambient.css";
+@import "./controls.css";
+@import "./shell.css";
+@import "./review-input.css";
+@import "./review-result.css";
+@import "./dashboard.css";
+@import "./diagnostics.css";

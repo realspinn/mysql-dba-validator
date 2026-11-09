@@ -1,11 +1,14 @@
 # PyInstaller spec for the Windows portable ("onedir") build.
 # Run through release/build_windows.py, which sets MDV_VERSION_FILE.
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent
+sys.path.insert(0, str(ROOT))
+from release.frontend_files import packaged_frontend_files  # noqa: E402
 
 # uvicorn picks its loop/protocol implementations by import string, and sqlglot
 # loads dialect modules lazily, so static analysis alone misses them.
@@ -19,11 +22,9 @@ a = Analysis(
     [str(ROOT / "release" / "launcher.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    # Only the served page, its stylesheet, script and favicon.
-    datas=[(str(ROOT / "frontend" / "index.html"), "frontend"),
-           (str(ROOT / "frontend" / "assets" / "css" / "validator.css"), "frontend/assets/css"),
-           (str(ROOT / "frontend" / "assets" / "js" / "validator.js"), "frontend/assets/js"),
-           (str(ROOT / "frontend" / "assets" / "favicon.svg"), "frontend/assets")],
+    # Only the validator page ("index.html", built in frontend/app/), the script and
+    # stylesheet it loads, and the favicon (release/frontend_files.py). Not the homepage.
+    datas=[(str(source), str(Path("frontend", path).parent)) for source, path in packaged_frontend_files(ROOT)],
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],

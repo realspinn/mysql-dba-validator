@@ -16,8 +16,9 @@ MySQL-DBA-Validator-v<version>-windows-x64/
   README.txt                user instructions (from release/README-WINDOWS.txt)
   LICENSE.txt               if the repository has a LICENSE
   _internal/                Python runtime and dependencies, plus the web page:
-    frontend/index.html     the served page
-    frontend/assets/        favicon.svg, css/validator.css and js/validator.js
+    frontend/app/index.html the served page (built from web/, committed)
+    frontend/app/assets/    its hashed script and stylesheet (not the homepage's)
+    frontend/assets/        favicon.svg
                             (the README logo mark is not shipped)
 ```
 

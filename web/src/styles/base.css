@@ -1,0 +1,15 @@
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 400 14px/1.5 var(--font);
+	-webkit-font-smoothing: antialiased;
+	font-feature-settings: "tnum" 0;
+}
+
+.mono { font-family: var(--mono); font-variant-ligatures: none; }
+.muted { color: var(--text-3); }

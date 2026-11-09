@@ -62,12 +62,11 @@ APP_NAME = "MySQL DBA Validator.app"
 MAIN_EXE = "MySQL-DBA-Validator"
 CONSOLE_EXE = "MySQL-DBA-Validator Console"
 EXECUTABLES = (f"Contents/MacOS/{MAIN_EXE}", f"Contents/MacOS/{CONSOLE_EXE}")
-FRONTEND_FILES = {
-    "Contents/Resources/frontend/index.html": ROOT / "frontend" / "index.html",
-    "Contents/Resources/frontend/assets/css/validator.css": ROOT / "frontend" / "assets" / "css" / "validator.css",
-    "Contents/Resources/frontend/assets/js/validator.js": ROOT / "frontend" / "assets" / "js" / "validator.js",
-    "Contents/Resources/frontend/assets/favicon.svg": ROOT / "frontend" / "assets" / "favicon.svg",
-}
+from release.frontend_files import packaged_frontend_files  # noqa: E402
+
+# The validator page, its hashed script and stylesheet, and the favicon, byte for byte
+# as built in the source tree.
+FRONTEND_FILES = {f"Contents/Resources/frontend/{path}": source for source, path in packaged_frontend_files(ROOT)}
 DMG_ALLOWED_TOP_LEVEL = {APP_NAME, "README.txt", "LICENSE.txt", "Applications"}
 # Volume metadata that macOS itself may create on a mounted disk image; nothing else
 # at the top level is skipped, hidden or not.

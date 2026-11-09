@@ -1,0 +1,35 @@
+/* ------------------------------------------------------------------ ambient light
+   Three soft radial glows at the top of the app, blended where they overlap and
+   faded into the background by a mask. Two drift very slowly using transform only;
+   paused by the sidebar control or by reduced motion. Decorative, never data. */
+.ambient {
+	position: fixed;
+	inset: 0 0 auto 0;
+	height: 560px;
+	pointer-events: none;
+	z-index: 0;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .55) 45%, transparent 100%);
+	mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .55) 45%, transparent 100%);
+}
+
+.glow {
+	position: absolute;
+	top: -320px;
+	width: 900px;
+	height: 620px;
+	border-radius: 50%;
+}
+
+.glow-a { left: -6%; background: radial-gradient(closest-side, var(--glow-a), transparent); }
+.glow-b { left: 32%; top: -380px; width: 1000px; background: radial-gradient(closest-side, var(--glow-b), transparent); }
+.glow-c { right: -10%; background: radial-gradient(closest-side, var(--glow-c), transparent); }
+
+@media (prefers-reduced-motion: no-preference) {
+	.glow-a { animation: drift-a 38s ease-in-out infinite alternate; }
+	.glow-c { animation: drift-c 46s ease-in-out infinite alternate; }
+	.ambient-paused .glow { animation-play-state: paused; }
+}
+
+@keyframes drift-a { to { transform: translate3d(14%, 30px, 0) scale(1.06); } }
+@keyframes drift-c { to { transform: translate3d(-12%, 40px, 0) scale(.94); } }

@@ -10,19 +10,19 @@
 		content="Review MySQL scripts before they run: a risk score for each statement, how confident that assessment is, and the checks a DBA should make first." />
 	<link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg" />
 	<script>
-		// Theme before first paint, so a saved choice never flashes the other theme.
-		// The only value stored is one of three words under 'mdv-home-theme'.
+		// The theme before first paint, so a saved choice never flashes the other one. The
+		// only value read is one of three words under 'mdv-home-theme'.
 		(function () {
-			try {
-				var theme = localStorage.getItem('mdv-home-theme');
-				if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
-			} catch (_) { }
+			var t = 'system';
+			try { t = localStorage.getItem('mdv-home-theme') || 'system'; } catch (_) { }
+			var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+			document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
 		})();
 	</script>
-	<link rel="stylesheet" href="/static/assets/css/home.css" />
 </head>
 
 <body>
+	<div class="ambient ambient-home" aria-hidden="true"><span class="glow glow-a"></span><span class="glow glow-b"></span><span class="glow glow-c"></span></div>
 	<a class="skip" href="#main">Skip to content</a>
 
 	<header>
@@ -343,7 +343,7 @@
 	<!-- Decorative: an original rendered fish (frontend/assets/fish-swim.webp), not the MySQL dolphin. -->
 	<div class="fish" aria-hidden="true"><i></i></div>
 
-	<script src="/static/assets/js/home.js"></script>
+	<script type="module" src="/src/home/home.ts"></script>
 </body>
 
 </html>

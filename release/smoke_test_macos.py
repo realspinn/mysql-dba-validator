@@ -202,13 +202,20 @@ def main() -> int:
               f"MySQL DBA Validator {version}" in out and str(data) in out and str(registry) in out, out[:1500])
         check("console reports company TLS CA not configured", "NOT CONFIGURED" in out)
         status, headers, body = request("GET", PAGE + "/")
-        check("page served", status == 200 and b"targetSelect" in body, status)
+        check("page served", status == 200 and b'<div id="root"></div>' in body, status)
         check("page has security headers", "default-src 'self'" in headers.get("content-security-policy", ""))
-        for path, kind in (("/static/assets/css/validator.css", "text/css"),
-                           ("/static/assets/js/validator.js", "text/javascript")):
-            status, headers, _ = request("GET", PAGE + path)
-            check(f"page file {path} served as {kind}",
+        # The page's own hashed script and stylesheet, as it links them; the script is the
+        # validator (its target list offers Local and company targets).
+        linked = re.findall(rb'(?:src|href)="(/static/app/assets/[\w.-]+\.(?:js|css))[^"]*"', body)
+        check("page links its built script and stylesheet",
+              sorted(p.rsplit(b".", 1)[1] for p in linked) == [b"css", b"js"], linked)
+        for path in linked:
+            kind = "text/javascript" if path.endswith(b".js") else "text/css"
+            status, headers, asset = request("GET", PAGE + path.decode())
+            check(f"page file {path.decode()} served as {kind}",
                   status == 200 and headers.get("content-type", "").startswith(kind), status)
+            if kind == "text/javascript":
+                check("page script is the validator", b"Local (this machine)" in asset)
         status, _, body = request("GET", PAGE + "/api/health")
         health = as_json(body) or {}
         check("API health ok and reports the release version",

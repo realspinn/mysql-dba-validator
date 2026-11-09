@@ -71,3 +71,4 @@ AGENTS.md
 # Release builds (build/ and dist/ above) and their checksums are published as
 # GitHub Release assets, never committed.
 *.sha256
+

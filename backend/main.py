@@ -131,7 +131,9 @@ PUBLIC_ROUTES = frozenset({
     ("GET", "/api/health"),
     ("POST", "/api/validate"),
 })
-PUBLIC_STATIC_PREFIX = "/static/assets/"
+# Images (frontend/assets/) and the built pages' hashed scripts and styles
+# (frontend/app/assets/). The built pages themselves are served only at / and /demo.
+PUBLIC_STATIC_PREFIXES = ("/static/assets/", "/static/app/assets/")
 # Largest legitimate /api/validate body: MAX_SQL_BYTES of SQL, where JSON can write one
 # byte as up to six (a control character becomes a \u00XX escape), plus room for the key.
 PUBLIC_MAX_BODY_BYTES = 6 * MAX_SQL_BYTES + 16 * 1024
@@ -141,7 +143,7 @@ def public_route_allowed(method: str, path: str) -> bool:
     if (method, path) in PUBLIC_ROUTES:
         return True
     # Only the assets folder, and no "..", "//" or backslash that could leave it.
-    return (method == "GET" and path.startswith(PUBLIC_STATIC_PREFIX)
+    return (method == "GET" and path.startswith(PUBLIC_STATIC_PREFIXES)
             and posixpath.normpath(path) == path and "\\" not in path)
 
 
@@ -256,6 +258,9 @@ async def add_security_headers(request: Request, call_next):
 FRONTEND_DIR = (
     Path(__file__).resolve().parent.parent / "frontend"
 )
+# The pages, built from web/ by Vite (npm run build) and committed: index.html (the
+# validator) and home.html (the homepage). Serving them needs no Node.
+PAGES_DIR = FRONTEND_DIR / "app"
 
 
 class TargetClass(str, Enum):
@@ -864,22 +869,22 @@ def homepage_preview_enabled() -> bool:
     to expose publicly. The downloaded app never sets it (and does not bundle
     home.html), so "/" stays the validator there.
     """
-    return os.environ.get(HOMEPAGE_PREVIEW_ENV) == "1" and (FRONTEND_DIR / "home.html").is_file()
+    return os.environ.get(HOMEPAGE_PREVIEW_ENV) == "1" and (PAGES_DIR / "home.html").is_file()
 
 
-# Each release's page asks for its own stylesheet and script (".../validator.js?v=0.10.1"),
+# Each release's page asks for its own stylesheet and script (".../index-1a2b3c.js?v=0.10.1"),
 # and the page itself is revalidated on every load. Without both, a browser reused the
 # previous release's files after an update (the asset URLs did not change and nothing
-# said not to cache them), so the new page ran the old script.
-ASSET_LINK = re.compile(r'((?:href|src)="/static/assets/[\w/.-]+\.(?:css|js))"')
+# said not to cache them), so the new page ran the old script. The built file names
+# also carry a content hash; the version tag stays as well.
+ASSET_LINK = re.compile(r'((?:href|src)="/static/(?:app/)?assets/[\w/.-]+\.(?:css|js))"')
 PAGE_HEADERS = {"Cache-Control": "no-cache"}
 
 
 def frontend_page(name: str) -> str:
-    """A page from frontend/, with its stylesheet and script links tagged with APP_VERSION.
-
-    Nothing else changes, line endings included."""
-    with open(FRONTEND_DIR / name, encoding="utf-8", newline="") as file:
+    """A built page from frontend/app/, with its stylesheet and script links tagged with
+    APP_VERSION. Nothing else changes, line endings included."""
+    with open(PAGES_DIR / name, encoding="utf-8", newline="") as file:
         page = file.read()
     return ASSET_LINK.sub(rf'\1?v={APP_VERSION}"', page)
 
@@ -898,7 +903,7 @@ def public_demo_page() -> str:
     page = frontend_page("index.html")
     marked = page.replace('<html lang="en">', '<html lang="en" data-public-demo>', 1)
     if marked == page:
-        raise RuntimeError("frontend/index.html has no <html lang=\"en\"> tag to mark")
+        raise RuntimeError("frontend/app/index.html has no <html lang=\"en\"> tag to mark")
     return marked
 
 

@@ -36,8 +36,14 @@ ROOT = Path(__file__).resolve().parent.parent
 EXE_NAME = "MySQL-DBA-Validator.exe"  # windowed app
 CONSOLE_EXE_NAME = "MySQL-DBA-Validator Console.exe"  # console app with the connector
 EXE_NAMES = (EXE_NAME, CONSOLE_EXE_NAME)
-REQUIRED = (*EXE_NAMES, "_internal/frontend/index.html", "_internal/frontend/assets/css/validator.css",
-            "_internal/frontend/assets/js/validator.js")
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from release.frontend_files import packaged_frontend_files  # noqa: E402
+
+# The validator page and the hashed script and stylesheet it loads (as built in the
+# source tree), and no homepage.
+REQUIRED = (*EXE_NAMES, *(f"_internal/frontend/{path}" for _, path in packaged_frontend_files(ROOT)))
+NOT_SHIPPED = ("_internal/frontend/app/home.html",)
 
 FORBIDDEN_NAME_PATTERNS = [
     (re.compile(r"(^|/)\.env(\..*)?$", re.I), ".env file"),
@@ -196,6 +202,9 @@ def audit(target: Path, env_file: Path, forbid: list[str]) -> tuple[list[str], d
     for required in REQUIRED:
         if required not in seen:
             findings.append(f"required file missing: {required}")
+    for unwanted in NOT_SHIPPED:
+        if unwanted in seen:
+            findings.append(f"file not meant for the app shipped: {unwanted}")
     stats["top_level"] = sorted(stats["top_level"])
     stats["secret_values_checked"] = len(secrets)
     return findings, stats

@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app as public_app
-from tests.frontend_page import page_source
+from tests.frontend_page import all_source, function_body, source
 from connector import launcher
 from connector.policy import CompanyTarget
 from connector.server import (
@@ -408,9 +408,13 @@ def test_no_origin_is_trusted_by_default():
 
 def test_temporary_tunnel_origin_is_not_in_production_code():
     root = Path(__file__).resolve().parent.parent
-    for relative in ("connector/server.py", "connector/launcher.py", "frontend/index.html",
-                     "frontend/assets/js/validator.js", "backend/main.py"):
+    for relative in ("connector/server.py", "connector/launcher.py", "frontend/app/index.html",
+                     "backend/main.py"):
         assert "trycloudflare" not in (root / relative).read_text(encoding="utf-8"), relative
+    # The page's source and the built bundle the browser runs.
+    assert "trycloudflare" not in all_source()
+    for bundle in (root / "frontend" / "app" / "assets").iterdir():
+        assert "trycloudflare" not in bundle.read_text(encoding="utf-8"), bundle.name
 
 
 @pytest.mark.parametrize(
@@ -479,8 +483,7 @@ def test_cors_preflight_only_allows_configured_origin(client):
 
 
 def test_served_page_does_not_set_origin_header_itself():
-    html = page_source("index.html")
-    assert re.search(r"['\"]Origin['\"]\s*:", html) is None
+    assert re.search(r"['\"]?Origin['\"]?\s*:", all_source()) is None
 
 
 # ---------------------------------------------------------------- launcher
@@ -570,51 +573,34 @@ def test_public_api_still_refuses_company_credentials():
     assert SECRET_PASSWORD not in response.text
 
 
-def _function_body(source, name):
-    match = re.search(r"(?:async\s+)?function\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{", source)
-    assert match, name
-    depth = 0
-    for index in range(match.end() - 1, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[match.end():index]
-    raise AssertionError(name)
-
-
 def test_remote_browser_flow_never_falls_back_to_public_api():
-    html = page_source("index.html")
-    # B2: host/port matching (findApprovedRemoteTarget) was replaced by target_id selection.
-    for name in ("connectorRequest", "pairConnector", "unpairConnector", "ensureConnectorSession",
-                 "loadApprovedTargets", "selectTarget", "selectedRemoteTarget", "discoverRemote",
-                 "discoveryMatches", "remoteLogin", "validateRemote"):
-        body = _function_body(html, name)
-        assert "/api/" not in body, name
-        assert "validateLocal" not in body, name
+    connector, connection = source("api/connector.ts"), source("features/connection/useConnection.ts")
+    for name in ("connectorRequest", "pair", "unpair", "approvedTargets", "requestTarget", "confirmTarget",
+                 "discoverRemote", "validateRemote", "remoteSnapshot"):
+        body = function_body(connector, name)
+        assert "/api/" not in body and "validateLocal" not in body, name
+    for name in ("requireSession", "withTarget", "loadTargets", "selectTarget", "pair", "unpair"):
+        body = function_body(connection, name)
+        assert "/api/" not in body and "validateLocal" not in body, name
     # connectorRequest refuses any URL outside the connector and re-throws on failure.
-    request_body = _function_body(html, "connectorRequest")
-    assert "indexOf(CONNECTOR_URL + '/') !== 0" in request_body
-    assert "throw wrapped" in request_body
-    # Connector failures surface as errors in validateSql; the catch block never retries.
-    validate = _function_body(html, "validateSql")
-    catch_block = validate[validate.index("catch (error)"):]
-    assert "validateLocal" not in catch_block and "requestJson" not in catch_block
-    assert "/api/" not in catch_block
+    request = function_body(connector, "connectorRequest")
+    assert "if (!url.startsWith(CONNECTOR_URL + '/')) throw" in request
+    assert "throw new RequestError(friendly ?? error.message, error.status, error.code);" in request
+    # A failed company review is shown as a failure; nothing retries it elsewhere.
+    start = function_body(source("features/review/useReview.ts"), "start")
+    catch_block = start[start.index("catch (error)"):]
+    assert "validateLocal" not in catch_block and "/api/" not in catch_block
 
 
 def test_pairing_code_and_session_are_never_persisted_or_put_in_urls():
-    html = page_source("index.html")
+    page = all_source()
     for forbidden in ("sessionStorage", "document.cookie", "indexedDB",
                       "URLSearchParams", "location.search", "location.hash", "window.__"):
-        assert forbidden not in html, forbidden
-    # localStorage holds only the appearance preference and update version numbers
-    # (see test_frontend_served_page).
-    uses = re.findall(r"localStorage\.(getItem|setItem|removeItem)\('(mdv-theme|mdv-update-dismissed|mdv-update-pending)'",
-                      html)
-    assert html.count("localStorage") == len(uses)
-    pair = _function_body(html, "pairConnector")
-    assert "pairingCode.value = ''" in pair  # code is cleared from the input immediately
-    assert "body: JSON.stringify({ pairing_token: code })" in pair  # sent in the body, not the URL
-    assert 'id="pairingCode" type="password"' in html
+        assert forbidden not in page, forbidden
+    # Storage only through shared/storage.ts; the connection never imports it.
+    assert "storage" not in source("features/connection/useConnection.ts")
+    assert "storage" not in source("features/connection/ConnectorPanel.tsx")
+    panel = source("features/connection/ConnectorPanel.tsx")
+    assert "setPairingCode(''); // the code is used once and not kept" in panel  # cleared at once
+    assert 'type="password" value={pairingCode}' in panel
+    assert "connectorRequest('/pair', 'POST', null, { pairing_token: code })" in source("api/connector.ts")  # body, not URL

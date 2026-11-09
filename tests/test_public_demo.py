@@ -4,8 +4,9 @@ Contract:
 - the setting is read once at startup: "1" turns it on, unset or "0" leaves the local
   application unchanged, anything else (or a public demo without MDV_ALLOWED_HOSTS, or
   with CORS_ALLOW_ORIGINS) stops the server from starting;
-- only GET /, GET /demo, GET /api/health, POST /api/validate and GET /static/assets/*
-  are served; every other route is 404 before route code runs;
+- only GET /, GET /demo, GET /api/health, POST /api/validate, GET /static/assets/* (images)
+  and GET /static/app/assets/* (the built pages' scripts and styles) are served; every
+  other route, including the built pages' own addresses, is 404 before route code runs;
 - /api/validate accepts the SQL text alone: any connection field, even empty or null,
   is refused with 403 before the target is classified, so no DNS lookup, socket or
   MySQL connection happens; unknown or nested fields are 422 without echoing values;
@@ -107,7 +108,8 @@ def test_an_unsafe_public_configuration_stops_the_server_from_starting(monkeypat
 def test_unset_or_zero_is_the_local_application(monkeypatch, restore_local, value):
     _reload(monkeypatch, MDV_PUBLIC_DEMO=value)
     local = TestClient(backend_main.app, base_url="http://127.0.0.1:8420")
-    assert 'id="sqlInput"' in local.get("/").text
+    page = local.get("/").text
+    assert '<div id="root"></div>' in page and "data-public-demo" not in page
     assert "http://127.0.0.1:8765" in local.get("/").headers["content-security-policy"]
     assert local.get("/docs").status_code == 200
 
@@ -119,19 +121,22 @@ def test_public_pages_and_assets(public):
     assert home.status_code == 200 and "Understand SQL risk before execution." in home.text
     demo = public.get("/demo")
     assert demo.status_code == 200 and '<html lang="en" data-public-demo>' in demo.text
-    notice = " ".join(demo.text.split())
-    assert ("Online demo: SQL is sent to the hosted server for static analysis. Do not paste "
+    # The page (React) shows the privacy notice whenever the server marks it as the demo.
+    app_source = (backend_main.FRONTEND_DIR.parent / "web" / "src" / "app" / "App.tsx").read_text(encoding="utf-8")
+    notice = " ".join(app_source[app_source.index("{PUBLIC_DEMO && ("):app_source.index("{!PUBLIC_DEMO && <UpdateNotice />}")].split())
+    assert ("<strong>Online demo:</strong> SQL is sent to the hosted server for static analysis. Do not paste "
             "confidential company scripts, credentials or production-sensitive information. Real "
-            "database connections are available only in the downloaded application."
-            ) in notice.replace("<strong>", "").replace("</strong>", "")
+            "database connections are available only in the downloaded application.") in notice
     assert public.get("/static/assets/fish-swim.webp").status_code == 200
-    # Each page's own stylesheet and script are under the allowed assets folder.
-    links = re.findall(r'(?:href|src)="(/static/assets/(?:css|js)/[\w-]+\.(?:css|js))\?v=([\w.]+)"',
+    # Each page's own script and stylesheet are under the allowed built-assets folder.
+    links = re.findall(r'(?:href|src)="(/static/app/assets/[\w.-]+\.(?:css|js))\?v=([\w.]+)"',
                        home.text + demo.text)
-    files = [path for path, _ in links]
-    assert sorted(set(files)) == ["/static/assets/css/home.css", "/static/assets/css/validator.css",
-                                  "/static/assets/js/home.js", "/static/assets/js/validator.js"]
+    files = sorted(set(path for path, _ in links))
+    assert len(files) == 4 and [f.rsplit("/", 1)[1].split("-")[0] for f in files] == ["home", "home", "index", "index"]
     assert {version for _, version in links} == {APP_VERSION}
+    # The built pages themselves are not served at their own addresses.
+    for page in ("/static/app/index.html", "/static/app/home.html"):
+        assert public.get(page).status_code == 404, page
     # Revalidated on every load, so a redeploy is picked up without a hard refresh.
     assert home.headers["cache-control"] == demo.headers["cache-control"] == "no-cache"
     for path, version in links:

@@ -11,7 +11,7 @@ what has been tested see [VERIFICATION.md](VERIFICATION.md).
 ```mermaid
 flowchart LR
     subgraph machine["User's machine: everything binds to 127.0.0.1"]
-        B["Browser<br/>frontend/index.html"]
+        B["Browser<br/>frontend/app/index.html"]
         API["Web app<br/>backend.main:app :8420"]
         S["Static analysis<br/>parser → analyzer → risk_engine"]
         C["Local connector<br/>connector/ :8765<br/>(Console executable only)"]
@@ -31,7 +31,7 @@ flowchart LR
 
 | Component | Code | Role |
 | --- | --- | --- |
-| Page | `frontend/index.html`, `frontend/assets/css/validator.css`, `frontend/assets/js/validator.js` | Single static page (markup, styles, script), no build step. Sends SQL to the web app, or to the connector for company targets. |
+| Page | `web/` (source), built by Vite into `frontend/app/` (committed) | The validator (React + TypeScript) and the homepage (TypeScript + CSS); see [web/README.md](web/README.md). The server serves the built files; nothing at runtime needs Node. Sends SQL to the web app, or to the connector for company targets. |
 | Web app | `backend/main.py` (FastAPI) | Serves the page and `/api/*` on `127.0.0.1:8420`. Runs static analysis and local evidence. |
 | Static analysis | `backend/parser.py`, `analyzer.py`, `risk_engine.py`, `evidence.py`, `recommendations.py`, `models.py` | Turns SQL into facts (SQLGlot, MySQL dialect) and applies explicit rules: score, findings, checklist, confidence. Needs no database. |
 | Local evidence | `backend/db.py`, `db_evidence.py`, `metadata.py` | One read-only connection per validation to loopback MySQL, with the login supplied for that validation. |
