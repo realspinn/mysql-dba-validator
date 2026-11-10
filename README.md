@@ -8,9 +8,15 @@ It supports DBA judgement; it does **not** guarantee that SQL is safe.
 
 **Current release: [v0.11.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0)** · Pre-1.0 · Portable Windows x64 and unsigned macOS Apple Silicon builds.
 
-![Validation results for a batch of four statements: overall risk CRITICAL, score 100 of 100, static analysis, batch confidence LIMITED; the top finding (statement 2, a DELETE with no WHERE clause), execution-plan, filter, limitation and unknown rows; and a table listing each statement with its risk, confidence and key finding](docs/images/validator-batch-review.png)
+![The SQL review screen: four made-up statements in the editor and the result beside them, with overall risk CRITICAL 100/100 from statement 2 (a DELETE with no WHERE clause), confidence LIMITED, static analysis, and the execution plan, filter, limitation and unknown rows](docs/images/validator-sql-review.png)
 
-*Example results from made-up SQL, using static analysis without a database connection.*
+*SQL review: paste the SQL, review it, and read the result next to it.*
+
+![The dashboard for the same review: overall risk, confidence, statement count and review status, a priority findings table, the DBA actions and the evidence list, where table metadata and the execution plan are marked not collected](docs/images/validator-dashboard.png)
+
+*Dashboard: the same review at a glance.*
+
+Both screenshots show made-up SQL reviewed with static analysis only, without a database login.
 
 ## What it does
 
@@ -31,7 +37,7 @@ It supports DBA judgement; it does **not** guarantee that SQL is safe.
 - Optimization advice identifies patterns in SQL text. It cannot see the data, indexes or column types, and does not prove that a suggested change is equivalent or faster.
 - **Live validation is limited.** The v0.8.0 adviser rules and `FROM DUAL` handling have not been checked against a real MySQL server. The Host check is covered by automated tests. Observed performance and lock diagnostics were checked against a disposable MySQL 8.4 server in CI only. Company infrastructure, VPN and company TLS are not verified. See [VERIFICATION.md](VERIFICATION.md).
 - The Windows build is not code-signed. The macOS build is ad hoc signed, not notarized, and has not been tested on a real Mac.
-- The in-app update download (Windows) is covered by automated tests and was run against the real v0.8.0 release from source, but not yet from a packaged build against a newer published release. It never installs anything: you extract the ZIP yourself.
+- The in-app update download (Windows) is covered by automated tests, and a packaged v0.10.1 downloaded and verified the published v0.11.0 release. It never installs anything: you extract the ZIP yourself.
 - The app is designed for one user on one machine; it has no user authentication.
 
 ## Download and run
