@@ -8,9 +8,15 @@ It supports DBA judgement; it does **not** guarantee that SQL is safe.
 
 **Current release: [v0.11.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0)** · Pre-1.0 · Portable Windows x64 and unsigned macOS Apple Silicon builds.
 
-![Validation results for a batch of four statements: overall risk CRITICAL, score 100 of 100, static analysis, batch confidence LIMITED; the top finding (statement 2, a DELETE with no WHERE clause), execution-plan, filter, limitation and unknown rows; and a table listing each statement with its risk, confidence and key finding](docs/images/validator-batch-review.png)
+![The SQL review screen: four made-up statements in the editor and the result beside them, with overall risk CRITICAL 100/100 from statement 2 (a DELETE with no WHERE clause), confidence LIMITED, static analysis, and the execution plan, filter, limitation and unknown rows](docs/images/validator-sql-review.png)
 
-*Example results from made-up SQL, using static analysis without a database connection.*
+*SQL review: paste the SQL, review it, and read the result next to it.*
+
+![The dashboard for the same review: overall risk, confidence, statement count and review status, a priority findings table, the DBA actions and the evidence list, where table metadata and the execution plan are marked not collected](docs/images/validator-dashboard.png)
+
+*Dashboard: the same review at a glance.*
+
+Both screenshots show made-up SQL reviewed with static analysis only, without a database login.
 
 ## What it does
 
