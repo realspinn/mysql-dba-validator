@@ -37,7 +37,7 @@ Both screenshots show made-up SQL reviewed with static analysis only, without a 
 - Optimization advice identifies patterns in SQL text. It cannot see the data, indexes or column types, and does not prove that a suggested change is equivalent or faster.
 - **Live validation is limited.** The v0.8.0 adviser rules and `FROM DUAL` handling have not been checked against a real MySQL server. The Host check is covered by automated tests. Observed performance and lock diagnostics were checked against a disposable MySQL 8.4 server in CI only. Company infrastructure, VPN and company TLS are not verified. See [VERIFICATION.md](VERIFICATION.md).
 - The Windows build is not code-signed. The macOS build is ad hoc signed, not notarized, and has not been tested on a real Mac.
-- The in-app update download (Windows) is covered by automated tests and was run against the real v0.8.0 release from source, but not yet from a packaged build against a newer published release. It never installs anything: you extract the ZIP yourself.
+- The in-app update download (Windows) is covered by automated tests, and a packaged v0.10.1 downloaded and verified the published v0.11.0 release. It never installs anything: you extract the ZIP yourself.
 - The app is designed for one user on one machine; it has no user authentication.
 
 ## Download and run
