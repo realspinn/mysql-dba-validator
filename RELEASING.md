@@ -54,8 +54,12 @@ same, already audited folder as the zip. It is built by Inno Setup from
   connector session). If the validator runs from the install folder, Setup, and the
   uninstaller, stop with a message and change nothing. The windowed app has no window and
   stops 15 minutes after its page closes, so say that in the message and release notes.
+  If Windows will not let Setup read the process list (or the app runs elevated), Setup
+  cannot see it and falls back to Windows refusing to replace a file in use; Setup then
+  stops or asks, and active executables are still never overwritten. Not tested.
 - **Downgrades.** An older setup file does not replace a newer installed version (it
-  stops with a message). The same version can be run again.
+  stops with a message). The same version can be run again. Pre-release suffixes
+  (`-rc1`) are ignored in that comparison, so `0.12.0-rc1` can replace `0.12.0`.
 - **Upgrades** replace the files; a file that a later version no longer ships stays until
   uninstall. The installer never deletes anything it did not install.
 - **Uninstall** removes the files and shortcuts Setup created and the uninstall entry. To
