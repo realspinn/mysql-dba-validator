@@ -30,6 +30,7 @@ import ssl
 import sys
 import threading
 import urllib.request
+from pathlib import Path
 from typing import Any, Optional
 
 from .version import APP_VERSION
@@ -82,13 +83,29 @@ def platform_build(system: Optional[str] = None, machine: Optional[str] = None) 
     return None
 
 
+# Put next to the executables by the Windows installer (release/installer), never in the portable ZIP.
+INSTALLER_MARKER = "installed-by-setup.txt"
+
+
+def installed_edition() -> bool:
+    """True for a build installed with the Windows installer (the marker sits beside the executables).
+
+    Checked by the executable's own folder, not the working directory. The backend child
+    runs the Console executable from the same folder, so both see the same answer.
+    """
+    return bool(getattr(sys, "frozen", False)) and (Path(sys.executable).resolve().parent / INSTALLER_MARKER).is_file()
+
+
 def in_app_download_supported() -> bool:
-    """Only the packaged Windows app downloads an update itself (backend.update_download).
+    """Only the packaged portable Windows app downloads an update itself (backend.update_download).
+    An installed build (installed_edition) never does: it is sent to the release page, where
+    the user downloads the setup file, closes the app and runs it. A ZIP is never offered to it.
 
     Everywhere else the page links to the file and the browser downloads it, so the
     operating system's own checks for downloaded files (Gatekeeper on macOS) apply.
     """
-    return sys.platform == "win32" and bool(getattr(sys, "frozen", False)) and bool(os.environ.get("LOCALAPPDATA"))
+    return (sys.platform == "win32" and bool(getattr(sys, "frozen", False)) and bool(os.environ.get("LOCALAPPDATA"))
+            and not installed_edition())
 
 
 def enabled() -> bool:
@@ -150,7 +167,7 @@ def _check() -> dict:
         return {"state": UP_TO_DATE, "current": APP_VERSION}
     result = {"state": UPDATE_AVAILABLE, "current": APP_VERSION, "version": tag[1:], "url": RELEASE_PAGE + tag}
     global _asset
-    _asset = platform_asset(release, tag[1:])
+    _asset = None if installed_edition() else platform_asset(release, tag[1:])
     if _asset is not None:
         result["download"] = {
             "name": _asset["name"], "size": _asset["size"], "platform": _asset["platform"],

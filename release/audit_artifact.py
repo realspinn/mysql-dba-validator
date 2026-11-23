@@ -54,6 +54,8 @@ FORBIDDEN_NAME_PATTERNS = [
      "development directory"),
     (re.compile(r"(^|/)(test_[^/]*\.py|conftest\.py|pytest\.ini)$", re.I), "test file"),
     (re.compile(r"(^|/)index_legacy\.html$", re.I), "legacy page"),
+    # Only Setup adds this (release/installer); a folder or ZIP holding it would call itself installed.
+    (re.compile(r"(^|/)installed-by-setup\.txt$", re.I), "installer marker (the portable build must not have it)"),
     (re.compile(r"(^|/)(CLAUDE\.md|ARCHITECTURE_DESIGN_V2\.md|requirements\.txt)$", re.I), "source-tree document"),
 ]
 # Public CA bundles shipped by well-known libraries are not secrets.

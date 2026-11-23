@@ -6,6 +6,14 @@ the statement classification, a risk score, confidence, findings and a DBA
 checklist. Python is not required; everything needed is in this folder.
 
 
+Installed with the setup file instead? The same application is in the Start menu
+(MySQL DBA Validator, and MySQL DBA Validator Console (company connector)). It is in
+%LOCALAPPDATA%\Programs\MySQL DBA Validator and uses the same data folder as below.
+To upgrade it, download the newer setup file, close the app and run the file. Uninstall
+it from Windows Settings > Apps; your data (below) is kept. This ZIP is the portable
+edition: nothing is installed and nothing here changes.
+
+
 RUN
 ---
 1. Extract the whole zip to any folder you can write to or read from, for

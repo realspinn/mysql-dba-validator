@@ -707,12 +707,20 @@ def test_windows_build_job_runs_tests_and_build_with_a_read_only_token():
     assert "gh release" not in dumped and "github.token" not in dumped and "secrets." not in dumped
     # Release gates unchanged, in order, and the tested files are what is handed on.
     names = [s.get("name", s.get("uses", "")) for s in build["steps"]]
+    upload_name = next(n for n in names if n.startswith("actions/upload-artifact@"))
     order = ["Tag matches backend/version.py", "Test suite", "Build portable release",
-             "Smoke-test the built artifact", "actions/upload-artifact@v4"]
+             "Smoke-test the built artifact", "Build the installer", "Test the installer (install, upgrade, uninstall)",
+             upload_name]
     assert [names.index(item) for item in order] == sorted(names.index(item) for item in order)
-    upload = build["steps"][names.index("actions/upload-artifact@v4")]
-    assert upload["with"] == {"name": "windows-x64-portable", "path": "dist/*.zip\ndist/*.sha256\n",
+    for step in build["steps"]:  # every action in this job, the upload steps included, is pinned to a commit
+        if "uses" in step:
+            assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", step["uses"]), step["uses"]
+    upload = build["steps"][names.index(upload_name)]
+    assert upload["with"] == {"name": "windows-x64-release", "path": "dist/*.zip\ndist/*.exe\ndist/*.sha256\n",
                               "if-no-files-found": "error"}
+    runs = {s["name"]: s["run"] for s in build["steps"] if "run" in s}
+    assert runs["Build the installer"] == "python release/build_installer.py"
+    assert runs["Test the installer (install, upgrade, uninstall)"].startswith("python release/smoke_test_installer.py ")
 
 
 def test_windows_draft_release_job_only_checks_the_tested_artifact_and_creates_the_draft():
@@ -722,14 +730,14 @@ def test_windows_draft_release_job_only_checks_the_tested_artifact_and_creates_t
     assert job["permissions"] == {"contents": "write"} and "environment" not in job
     download, check = job["steps"]
     assert re.fullmatch(r"actions/download-artifact@[0-9a-f]{40}", download["uses"])
-    assert download["with"]["name"] == "windows-x64-portable"
+    assert download["with"]["name"] == "windows-x64-release"
     assert "secrets." not in yaml.safe_dump(job) and "${{" not in check["run"]  # values come in through env
     commands = "\n".join(line for line in check["run"].splitlines() if not line.lstrip().startswith("#"))
     for forbidden in ("python", "pip ", "checkout", "--clobber", "gh release upload", "eval"):
         assert forbidden not in commands, forbidden
     assert commands.count("gh release create") == 1 and "--draft" in commands
     created = commands.index("gh release create")
-    assert all(commands.index(item) < created for item in ("ls -A", "cmp -s", "shasum -a 256 -c", "unzip -tqq"))
+    assert all(commands.index(item) < created for item in ("ls -A", "cmp -s", "shasum -a 256 -c", "unzip -tqq", 'head -c 2'))
 
 
 WINDOWS_ZIP = "MySQL-DBA-Validator-v9.9.9-windows-x64.zip"
@@ -766,35 +774,70 @@ def _run_draft_release(tmp_path: Path, files: dict[str, bytes]) -> tuple[int, li
     return proc.returncode, calls.read_text().splitlines() if calls.exists() else []
 
 
-@pytest.mark.skipif(_bash() is None, reason="needs bash to run the workflow script")
-def test_windows_draft_release_is_created_from_a_matching_zip_and_checksum(tmp_path):
+WINDOWS_SETUP = "MySQL-DBA-Validator-v9.9.9-windows-x64-setup.exe"
+SETUP_BYTES = b"MZ" + bytes(range(256)) * 8
+
+
+def _good() -> dict[str, bytes]:
     data = _zip_bytes()
-    code, calls = _run_draft_release(tmp_path, {WINDOWS_ZIP: data, WINDOWS_ZIP + ".sha256": _windows_checksum(data)})
+    return {WINDOWS_ZIP: data, WINDOWS_ZIP + ".sha256": _windows_checksum(data),
+            WINDOWS_SETUP: SETUP_BYTES, WINDOWS_SETUP + ".sha256": _windows_checksum(SETUP_BYTES, WINDOWS_SETUP)}
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash to run the workflow script")
+def test_windows_draft_release_is_created_from_the_matching_files(tmp_path):
+    code, calls = _run_draft_release(tmp_path, _good())
     assert code == 0
-    assert calls == [f"release create v9.9.9 {WINDOWS_ZIP} {WINDOWS_ZIP}.sha256 --draft "
-                     "--title MySQL DBA Validator v9.9.9 --notes Windows x64 portable ZIP (no installer). "
-                     "Verify with the .sha256 file. See README for scope and verification status."]
+    assert calls == [f"release create v9.9.9 {WINDOWS_ZIP} {WINDOWS_ZIP}.sha256 {WINDOWS_SETUP} {WINDOWS_SETUP}.sha256 "
+                     "--draft --title MySQL DBA Validator v9.9.9 --notes Windows x64: the setup file (installer, "
+                     "current user, no administrator rights) and the portable ZIP. Both are unsigned: Windows "
+                     "SmartScreen may warn. Verify each with its .sha256 file. See README for scope and "
+                     "verification status."]
+
+
+def _without(name: str) -> dict[str, bytes]:
+    files = _good()
+    del files[name]
+    return files
+
+
+def _changed(**changes: bytes) -> dict[str, bytes]:
+    files = _good()
+    for name, data in changes.items():
+        files[{"zip_sum": WINDOWS_ZIP + ".sha256", "setup_sum": WINDOWS_SETUP + ".sha256", "zip": WINDOWS_ZIP,
+               "setup": WINDOWS_SETUP}[name]] = data
+    return files
 
 
 _DATA = _zip_bytes()
 _OLD_ZIP = WINDOWS_ZIP.replace("9.9.9", "9.9.8")
+_OLD_SETUP = WINDOWS_SETUP.replace("9.9.9", "9.9.8")
+_BAD = {
+    "no-zip-checksum": _without(WINDOWS_ZIP + ".sha256"),
+    "no-zip": _without(WINDOWS_ZIP),
+    "no-setup": _without(WINDOWS_SETUP),
+    "no-setup-checksum": _without(WINDOWS_SETUP + ".sha256"),
+    "extra-file": {**_good(), "other.zip": b"x"},
+    "zip-of-another-version": {**{k: v for k, v in _good().items() if k not in (WINDOWS_ZIP, WINDOWS_ZIP + ".sha256")},
+                               _OLD_ZIP: _DATA, _OLD_ZIP + ".sha256": _windows_checksum(_DATA, _OLD_ZIP)},
+    "setup-of-another-version": {**{k: v for k, v in _good().items() if k not in (WINDOWS_SETUP, WINDOWS_SETUP + ".sha256")},
+                                 _OLD_SETUP: SETUP_BYTES, _OLD_SETUP + ".sha256": _windows_checksum(SETUP_BYTES, _OLD_SETUP)},
+    "crlf-checksum": _changed(zip_sum=_windows_checksum(_DATA, newline="\r\n")),
+    "no-newline": _changed(zip_sum=_windows_checksum(_DATA, newline="")),
+    "uppercase-checksum": _changed(zip_sum=_windows_checksum(_DATA).upper()),
+    "two-lines": _changed(zip_sum=_windows_checksum(_DATA) + _windows_checksum(b"x", "x.zip")),
+    "checksum-of-another-file": _changed(zip_sum=_windows_checksum(_DATA, "other.zip")),
+    "checksum-mismatch": _changed(zip=_DATA + b"x"),
+    "invalid-zip": _changed(zip=b"not a zip", zip_sum=_windows_checksum(b"not a zip")),
+    "setup-checksum-mismatch": _changed(setup=SETUP_BYTES + b"x"),
+    "setup-crlf-checksum": _changed(setup_sum=_windows_checksum(SETUP_BYTES, WINDOWS_SETUP, "\r\n")),
+    "setup-checksum-of-the-zip": _changed(setup_sum=_windows_checksum(SETUP_BYTES, WINDOWS_ZIP)),
+    "setup-is-not-a-program": _changed(setup=b"#!/bin/sh\n", setup_sum=_windows_checksum(b"#!/bin/sh\n", WINDOWS_SETUP)),
+}
 
 
 @pytest.mark.skipif(_bash() is None, reason="needs bash to run the workflow script")
-@pytest.mark.parametrize("files", [
-    {WINDOWS_ZIP: _DATA},
-    {WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA)},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA), "other.zip": b"x"},
-    {_OLD_ZIP: _DATA, _OLD_ZIP + ".sha256": _windows_checksum(_DATA, _OLD_ZIP)},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA, newline="\r\n")},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA, newline="")},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA).upper()},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA) + _windows_checksum(b"x", "x.zip")},
-    {WINDOWS_ZIP: _DATA, WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA, "other.zip")},
-    {WINDOWS_ZIP: _DATA + b"x", WINDOWS_ZIP + ".sha256": _windows_checksum(_DATA)},
-    {WINDOWS_ZIP: b"not a zip", WINDOWS_ZIP + ".sha256": _windows_checksum(b"not a zip")},
-], ids=["no-checksum", "no-zip", "extra-file", "zip-of-another-version", "crlf-checksum", "no-newline",
-        "uppercase-checksum", "two-lines", "checksum-of-another-file", "checksum-mismatch", "invalid-zip"])
+@pytest.mark.parametrize("files", list(_BAD.values()), ids=list(_BAD))
 def test_windows_draft_release_creates_nothing_unless_everything_matches(tmp_path, files):
     code, calls = _run_draft_release(tmp_path, files)
     assert code != 0
@@ -848,4 +891,6 @@ def test_package_check_builds_and_smoke_tests_like_the_release(package_job, rele
     # order (the release job also runs the test suite and its skip check first).
     packaging = [s for s in _release_scripts(release) if s != "check_pytest_skips"]
     assert _release_scripts(package) == packaging
-    assert packaging[-1].startswith("smoke_test_")
+    # Windows: the installer is built and tested from the already smoke-tested folder, last.
+    tail = ["smoke_test_artifact", "build_installer", "smoke_test_installer"] if package_job == "windows" else None
+    assert packaging[-3:] == tail if tail else packaging[-1].startswith("smoke_test_")

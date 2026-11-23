@@ -323,8 +323,10 @@ SHA-256 and archive checks and the Mark of the Web. It never installs or runs
 it: the user extracts the ZIP and opens the new folder, and the new copy
 confirms its version. The running app's files are never replaced, because the
 portable app cannot safely replace itself while running. Elsewhere the page
-links to the release file for the browser to download. Details:
-[SECURITY.md](SECURITY.md).
+links to the release file for the browser to download. A build installed with the
+Windows setup file (it has `installed-by-setup.txt` beside its executables) never
+offers the ZIP or downloads anything: its notice links to the release page, and the
+user downloads and runs the new setup file. Details: [SECURITY.md](SECURITY.md).
 
 ## Packaged application
 

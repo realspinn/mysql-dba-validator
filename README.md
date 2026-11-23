@@ -44,23 +44,30 @@ Both screenshots show made-up SQL reviewed with static analysis only, without a 
 
 Get the ZIP and its matching `.sha256` file from the [v0.11.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). Verify the checksum before running the application.
 
-**Windows x64**
+**Windows x64** has two downloads. Both run the same application, locally in your browser. Python is not needed, and MySQL is optional (static analysis works without it).
 
-1. Download `MySQL-DBA-Validator-v0.11.0-windows-x64.zip` and its checksum file.
-2. In PowerShell, verify the ZIP:
-   ```powershell
-   Get-FileHash .\MySQL-DBA-Validator-v0.11.0-windows-x64.zip -Algorithm SHA256
-   ```
-   Compare the result with the SHA-256 value in the release.
-3. Extract the ZIP and run `MySQL-DBA-Validator.exe`. Your browser opens `http://127.0.0.1:8420`. No installer or Python is needed.
+- **Installer** (`MySQL-DBA-Validator-v<version>-windows-x64-setup.exe`) for a normal Windows installation. It installs for your user only, without administrator rights, into `%LOCALAPPDATA%\Programs\MySQL DBA Validator`, and adds Start menu shortcuts (the application, and the Console edition for company targets) and an optional desktop shortcut. It does not start with Windows or add a service. The installer is not in v0.11.0; it comes with the first release that lists a `-setup.exe` file.
+- **Portable ZIP** (`MySQL-DBA-Validator-v<version>-windows-x64.zip`) if you prefer to extract and run it, or cannot install software.
 
-For approved company targets, run `MySQL-DBA-Validator Console.exe` instead; it provides the local connector's operator console. See [connector/README.md](connector/README.md).
+Verify either file before running it (PowerShell), and compare with the `.sha256` file or the value on the release page:
+
+```powershell
+Get-FileHash .\<file name> -Algorithm SHA256
+```
+
+*Installer:* run the setup file, choose a folder if you want a different one, and finish. Start **MySQL DBA Validator** from the Start menu; your browser opens `http://127.0.0.1:8420`. The app keeps running after you close the page and stops about 15 minutes later (the Console edition stops when you close its window). To upgrade, download the newer setup file, close the app, and run it: it upgrades the same installation. Setup will not close a running copy for you and will not replace a newer version with an older one. To uninstall, use Windows **Settings > Apps > Installed apps**. Uninstalling keeps your data in `%LOCALAPPDATA%\MySQLDBAValidator` (approved targets, your `.env`, trust files, logs); delete that folder yourself if you want it gone.
+
+*Portable ZIP:* extract it and run `MySQL-DBA-Validator.exe`. Your browser opens `http://127.0.0.1:8420`.
+
+For approved company targets, run the Console edition (`MySQL-DBA-Validator Console.exe`, or the **Console (company connector)** Start menu shortcut) instead; it provides the local connector's operator console. Company access still needs the connector's pairing and target approval, unchanged. See [connector/README.md](connector/README.md).
+
+Neither Windows download is code-signed, so Windows SmartScreen may warn about them. That is a limit of these releases, not a sign the file is safe or unsafe: check the checksum, and do not turn off Windows security features to get past it.
 
 **macOS (Apple Silicon only)**
 
 Download `MySQL-DBA-Validator-v0.11.0-macos-arm64-unsigned.zip`, verify it with its checksum file, then follow the opening instructions in the [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). The app is not notarized.
 
-**Updates:** the app can check GitHub for a newer release at startup and show a dismissible notice. On Windows, **Update** downloads the new release ZIP and verifies it (size, SHA-256 digest from GitHub, archive contents); you then close the app, extract the ZIP and open the new folder. It never installs or runs anything itself. On macOS the notice links to the release file for your browser to download. v0.7.0 and v0.8.0 show the notice with a link to the release page only: install the newer version by hand once (saved targets, the `.env` file and the theme are kept), and from then on the Windows **Update** and the macOS **Download** link work as above. GitHub receives your IP address and the installed version; no SQL, login or connection details are sent. Set `MDV_UPDATE_CHECK=off` to disable the check. Details: [SECURITY.md](SECURITY.md#security-model-in-brief).
+**Updates:** the app can check GitHub for a newer release at startup and show a dismissible notice. On Windows, **Update** downloads the new release ZIP and verifies it (size, SHA-256 digest from GitHub, archive contents); you then close the app, extract the ZIP and open the new folder. It never installs or runs anything itself. An installed copy does not offer the ZIP: its notice links to the release page, where you download the setup file. On macOS the notice links to the release file for your browser to download. v0.7.0 and v0.8.0 show the notice with a link to the release page only: install the newer version by hand once (saved targets, the `.env` file and the theme are kept), and from then on the Windows **Update** and the macOS **Download** link work as above. GitHub receives your IP address and the installed version; no SQL, login or connection details are sent. Set `MDV_UPDATE_CHECK=off` to disable the check. Details: [SECURITY.md](SECURITY.md#security-model-in-brief).
 
 ## Quick start
 
