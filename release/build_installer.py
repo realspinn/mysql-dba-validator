@@ -60,27 +60,40 @@ def find_iscc() -> Path:
     sys.exit("Inno Setup compiler not found. Install Inno Setup 6.7.x or set MDV_ISCC to ISCC.exe.")
 
 
+COMPILER_FILES = ("ISCC.exe", "ISCmplr.dll", "ISPP.dll", "Setup.e32", "Compil32.exe")
 COMPILER_REPORT = r"""
-$ErrorActionPreference = 'Continue'
 $exe = Get-Item -LiteralPath $args[0]
-$folder = $exe.DirectoryName
 "file version : $($exe.VersionInfo.FileVersion); company: $($exe.VersionInfo.CompanyName)"
-foreach ($name in 'ISCC.exe', 'ISCmplr.dll', 'ISPP.dll', 'Setup.e32', 'Compil32.exe') {
-  $file = Join-Path $folder $name
-  if (Test-Path -LiteralPath $file) {
-    $s = Get-AuthenticodeSignature -LiteralPath $file
-    "signature    : $name -> $($s.Status); signer: $($s.SignerCertificate.Subject)"
-  }
+foreach ($name in 'ISCC.exe', 'Setup.e32') {
+  $file = Join-Path $exe.DirectoryName $name
+  if (-not (Test-Path -LiteralPath $file)) { continue }
+  try {
+    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate]::CreateFromSignedFile($file)
+    "signed file  : $name -> signer $($cert.Subject)"
+  } catch { "signed file  : $name -> no readable signature ($($_.Exception.Message))" }
 }
 $choco = Get-Command choco -ErrorAction SilentlyContinue
 if ($choco) { "chocolatey   : " + ((& choco list --local-only innosetup --limit-output) -join '; ') }
 """
 
 
+def has_embedded_signature(path: Path) -> bool:
+    """True when the PE file carries an Authenticode signature block (it is not checked here)."""
+    data = path.read_bytes()
+    pe = int.from_bytes(data[0x3C:0x40], "little")
+    magic = int.from_bytes(data[pe + 24:pe + 26], "little")
+    directories = pe + 24 + (112 if magic == 0x20B else 96)
+    address, size = (int.from_bytes(data[directories + 32 + i:directories + 36 + i], "little") for i in (0, 4))
+    return address != 0 and size != 0
+
+
 def record_compiler(iscc: Path) -> None:
     """Print what identifies the compiler used (for the build log). Informational only."""
     print(f"    compiler file : {iscc}")
     print(f"    compiler SHA-256: {sha256(iscc)}")
+    for name in COMPILER_FILES:
+        if (iscc.parent / name).is_file():
+            print(f"    signature block: {name} -> " + ("present" if has_embedded_signature(iscc.parent / name) else "absent"))
     script = Path(tempfile.mkdtemp()) / "compiler-report.ps1"
     script.write_text(COMPILER_REPORT, encoding="utf-8")
     try:
