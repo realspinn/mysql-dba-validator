@@ -523,6 +523,13 @@ def test_single_version_source_used_by_api_and_build():
     assert app.version == APP_VERSION
 
 
+def test_tests_and_the_release_build_use_the_same_sqlglot():
+    pins = [re.search(r"^sqlglot==(\S+)$", (ROOT / name).read_text(encoding="utf-8"), re.M)
+            for name in ("requirements.txt", "release/requirements-build.txt")]
+    assert all(pins), "sqlglot must be pinned exactly in both files"
+    assert pins[0].group(1) == pins[1].group(1)
+
+
 # ----------------------------------------------------------------------------- artifact audit
 
 def test_audit_reads_only_secret_valued_env_keys(tmp_path):
