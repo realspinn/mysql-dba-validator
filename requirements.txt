@@ -2,9 +2,14 @@
 fastapi>=0.104.0,<1.0.0
 uvicorn[standard]>=0.24.0,<1.0.0
 # The execution-plan safety checks rely on sqlglot's tokenizer and SQL regeneration
-# (comment neutralisation, quote doubling, statement splitting). They are tested on
-# 30.17.0 and 30.21.0 (the release pin); tests/test_review_remediation.py checks them.
-sqlglot>=30.17.0,<31.0.0
+# (comment neutralisation, quote doubling, statement splitting), and the optimisation
+# advice on how it reads a JOIN. Pinned to the release build's version
+# (release/requirements-build.txt), so tests and packaged apps run the same parser.
+# From 30.32.0 sqlglot reads a bare "JOIN t" with no condition as a CROSS JOIN, which
+# hides the difference between that and an explicit CROSS JOIN
+# (tests/test_optimization_advice.py). Move the pin, here and in the build file, only
+# after the full suite passes on the new version.
+sqlglot==30.21.0
 python-dotenv>=1.0.0,<2.0.0
 # 1.2.0 is the first release that refuses to continue without TLS when the
 # connector passes its own SSLContext (earlier releases fall back to plaintext if
