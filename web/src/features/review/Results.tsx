@@ -5,7 +5,7 @@ import {
 	analysisModeLabel, CONFIDENCE_TEXT, completionText, evidenceSummaryText, groupedLines, filterLine, keyFinding,
 	reviewModel, riskClass, scanLine, text,
 } from './reviewText';
-import { CopySummary } from './CopySummary';
+import { CopySummary } from './CopySummaryButton';
 import { copySummaryFor } from './copySummary';
 import { StatementList, type FocusRequest } from './StatementList';
 import type { Reviewed, Run } from './useReview';

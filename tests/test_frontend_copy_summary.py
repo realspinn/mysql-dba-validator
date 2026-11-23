@@ -1,4 +1,4 @@
-"""Copy review summary (web/src/features/review/copySummary.ts, CopySummary.tsx).
+"""Copy review summary (web/src/features/review/copySummary.ts, CopySummaryButton.tsx).
 
 Verification level:
 - the text itself and the clipboard helper are tested with Node (web/tests, `npm test`);
@@ -25,7 +25,7 @@ from tests.test_frontend_evidence_rendering import dump_dom, find_chrome, serve
 
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
 SUMMARY = source("features/review/copySummary.ts")
-BUTTON = source("features/review/CopySummary.tsx")
+BUTTON = source("features/review/CopySummaryButton.tsx")
 RESULTS = source("features/review/Results.tsx")
 REVIEW_VIEW = source("features/review/ReviewView.tsx")
 client = TestClient(app, base_url="http://127.0.0.1:8420")
