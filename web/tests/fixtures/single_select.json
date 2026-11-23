@@ -1,0 +1,155 @@
+{
+ "response": {
+  "analysis_mode": "STATIC",
+  "evidence_summary": {
+   "connection": {
+    "reason": "not_configured",
+    "state": "not_attempted"
+   },
+   "metadata": {
+    "not_attempted": 1
+   },
+   "overall": {
+    "static_only": 1
+   },
+   "partial": false,
+   "plan": {
+    "not_attempted": 1
+   }
+  },
+  "overall_confidence": "HIGH",
+  "overall_risk_level": "LOW",
+  "overall_score": 0,
+  "statement_count": 1,
+  "statements": [
+   {
+    "analysis_status": "analysed",
+    "analysis_text_differs": false,
+    "category": "READ",
+    "checklist": [],
+    "columns_in_where": [
+     "id"
+    ],
+    "confidence": "HIGH",
+    "database_evidence": {
+     "access_type": null,
+     "available": false,
+     "database": null,
+     "error": "not_configured",
+     "estimated_rows": null,
+     "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
+     "explain_available": false,
+     "extra": null,
+     "full_table_scan": null,
+     "key": null,
+     "key_length": null,
+     "metadata_status": "unavailable",
+     "possible_keys": [],
+     "status": "not_configured",
+     "tables": []
+    },
+    "evidence": {
+     "connection": {
+      "reason": "not_configured",
+      "state": "not_attempted"
+     },
+     "metadata": {
+      "reason": null,
+      "state": "not_attempted",
+      "tables": []
+     },
+     "overall": "static_only",
+     "plan": {
+      "reason": null,
+      "state": "not_attempted"
+     }
+    },
+    "evidence_factors": [],
+    "factors": [
+     {
+      "label": "Base risk for SELECT",
+      "points": 0
+     }
+    ],
+    "filter_index": {
+     "column": "id",
+     "state": "not_checked",
+     "table": "customers_secret"
+    },
+    "has_limit": false,
+    "has_where": true,
+    "high_estimated_rows_applied": false,
+    "index": 0,
+    "is_full_table_ddl": false,
+    "metadata_factors": [],
+    "metadata_score_adjustment": 0,
+    "metadata_status": "unavailable",
+    "optimization": {
+     "recommendations": [],
+     "status": "none_found"
+    },
+    "parse_error": null,
+    "reasons": [],
+    "risk_level": "LOW",
+    "scope": {
+     "basis": "not_applicable",
+     "columns": [],
+     "factor": null,
+     "index": null,
+     "indirect_effects": null,
+     "source": null,
+     "table": null
+    },
+    "score": 0,
+    "sql": "SELECT id, email FROM customers_secret WHERE id = 7",
+    "statement_type": "SELECT",
+    "static_confidence": "HIGH",
+    "static_risk_level": "LOW",
+    "static_score": 0,
+    "tables": [
+     "customers_secret"
+    ],
+    "v2_assessment": {
+     "checklist": [],
+     "confidence": "HIGH",
+     "dimensions": [
+      {
+       "level": "LOW",
+       "name": "Data Risk",
+       "reason": "Read-only or no data mutation detected."
+      },
+      {
+       "level": "UNKNOWN",
+       "name": "Execution Risk",
+       "reason": "Not assessed: no execution plan or row estimates are available in offline mode."
+      },
+      {
+       "level": "LOW",
+       "name": "Scope Risk",
+       "reason": "Targeting a single table."
+      },
+      {
+       "level": "LOW",
+       "name": "Schema Risk",
+       "reason": "No schema change detected."
+      },
+      {
+       "level": "LOW",
+       "name": "Privilege Risk",
+       "reason": "No privilege changes detected."
+      }
+     ],
+     "evidence_available": [],
+     "evidence_missing": [],
+     "findings": [],
+     "overall_score": 0,
+     "recommendations": [],
+     "risk_level": "LOW"
+    },
+    "where_looks_trivial": false,
+    "where_predicate": "id = 7"
+   }
+  ]
+ },
+ "sql": "SELECT id, email FROM customers_secret WHERE id = 7;"
+}

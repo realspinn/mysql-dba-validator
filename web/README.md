@@ -25,8 +25,14 @@ Node 24 and npm, then:
 cd web
 npm ci            # exactly the versions in package-lock.json
 npx tsc -b        # type check
+npm test          # unit tests in web/tests, with Node's built-in runner (no extra package)
 npx vite build    # writes ../frontend/app/; commit it with the source change
 ```
+
+`npm test` runs the TypeScript source directly (Node 24 strips the types), so a module the
+tests import uses `.ts` in its relative imports (`allowImportingTsExtensions` is on for
+that) and imports other modules as types only. The fixtures in `web/tests/fixtures` are
+real `/api/validate` responses.
 
 For live editing, run the backend from this checkout on 8422 and Vite's dev server:
 
@@ -66,6 +72,10 @@ Rules the tests hold this code to (`tests/test_frontend_*.py`, `test_homepage.py
   database name.
 - A database is used only if it came from discovery for this target, login and session.
 - Messages for stable server codes are fixed text (`api/messages.ts`, `reviewText.ts`).
+- Copy review summary (`features/review/copySummary.ts`) is built from listed fields and
+  known wording only. It never copies the SQL, parser messages, reasons, or table, column,
+  index, database, host or login values, and it is offered only for a current result.
+  `web/tests` and `tests/test_frontend_copy_summary.py` hold it to that.
 - In the online demo the page offers no connection, diagnostics, heartbeat or update
   check; the server refuses them whatever the page does.
 
