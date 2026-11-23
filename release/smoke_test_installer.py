@@ -25,8 +25,6 @@ Not covered: a failure half way through copying files, Windows on Arm, other Win
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
 import re
 import shutil
@@ -56,6 +54,11 @@ check = smoke.check
 
 def hashes(folder: Path) -> dict[str, str]:
     return {p.relative_to(folder).as_posix(): sha256(p) for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
+def user_files(data: Path) -> dict[str, str]:
+    """The user's data, except the backend log, which every start of the app replaces."""
+    return {k: v for k, v in hashes(data).items() if k != "logs/backend.log"}
 
 
 def entry() -> dict | None:
@@ -103,11 +106,12 @@ def seed_user_data(data: Path) -> dict[str, str]:
     """Disposable stand-ins for the user's persistent data (never real credentials)."""
     (data / "trust").mkdir(parents=True)
     (data / "logs").mkdir()
-    (data / "connector-targets.json").write_text(json.dumps({"kind": "test-registry", "targets": []}), encoding="utf-8")
+    # A valid registry with one approved stand-in target, written by the connector's own code.
+    smoke.seed_registry(data / "connector-targets.json")
     (data / ".env").write_text("MYSQL_HOST=127.0.0.1\n# disposable test file\n", encoding="utf-8")
     (data / "trust" / "company-ca.pem").write_text("not a real certificate: test data\n", encoding="utf-8")
     (data / "logs" / "backend.log").write_text("old log\n", encoding="utf-8")
-    return hashes(data)
+    return user_files(data)
 
 
 def stop(app: smoke.App | None) -> None:
@@ -133,7 +137,7 @@ def main() -> int:
     if entry() is not None:
         sys.exit("The validator is already installed for this user; refusing to touch it.")
 
-    work = Path(tempfile.mkdtemp(prefix="mdv installer "))
+    work = Path(tempfile.mkdtemp(prefix="mdv installer ")).resolve()  # long form, as shortcuts store it
     app_dir = work / "Program Folder" / "MySQL DBA Validator"
     data_root = work / "Local App Data"
     data = data_root / "MySQLDBAValidator"
@@ -182,7 +186,7 @@ def main() -> int:
               shortcut(START_MENU / "MySQL DBA Validator Console (company connector).lnk")
               == (str(app_dir / "MySQL-DBA-Validator Console.exe"), os.environ["USERPROFILE"]))
         check("optional desktop shortcut created when chosen", shortcut(DESKTOP) is not None)
-        check("user data untouched by the installation", hashes(data) == user_data)
+        check("user data untouched by the installation", user_files(data) == user_data)
 
         # ---------------------------------------------------------------- run from the installed location
         console = app_dir / "MySQL-DBA-Validator Console.exe"
@@ -227,7 +231,7 @@ def main() -> int:
         new_files = hashes(payload)
         check("every file of the new payload is installed unchanged",
               all(installed.get(k) == v for k, v in new_files.items()) and installed.get(MARKER) is not None)
-        check("user data survived the upgrade", hashes(data) == user_data)
+        check("user data survived the upgrade", user_files(data) == user_data)
         check("the desktop shortcut from the first installation is still there", shortcut(DESKTOP) is not None)
 
         # ---------------------------------------------------------------- downgrade refused
@@ -272,7 +276,7 @@ def main() -> int:
         check("no application file is left in the installation folder", not leftovers, leftovers[:10])
         check("Start menu shortcuts and desktop shortcut removed",
               not (START_MENU / "MySQL DBA Validator.lnk").exists() and not DESKTOP.exists())
-        check("user data preserved by uninstall", hashes(data) == user_data)
+        check("user data preserved by uninstall", user_files(data) == user_data)
     finally:
         stop(app)
         if entry() is not None:  # a failed run must not leave an installation behind
