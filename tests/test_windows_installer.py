@@ -154,6 +154,52 @@ def test_only_the_expected_compiler_series_is_accepted(monkeypatch, tmp_path):
     assert engine == "6.7.1" and setup.is_file()
 
 
+def _fake_signature_check(monkeypatch, tmp_path, code: int, out: str = "signature    : ISCC.exe -> Valid\n"):
+    for name in build_installer.COMPILER_FILES:
+        (tmp_path / name).write_bytes(b"MZ" + bytes(200))
+    seen = []
+
+    def fake_run(command, **kwargs):
+        seen.append(command)
+        return subprocess.CompletedProcess(command, code, stdout=out, stderr="")
+
+    monkeypatch.setattr(build_installer.subprocess, "run", fake_run)
+    return seen
+
+
+def test_the_build_requires_the_compiler_files_to_verify_as_signed_by_the_publisher(monkeypatch, tmp_path):
+    seen = _fake_signature_check(monkeypatch, tmp_path, 0)
+    build_installer.record_compiler(tmp_path / "ISCC.exe")
+    command = seen[0]
+    assert command[command.index("-Publisher") + 1] == "Pyrsys B.V."
+    assert command[command.index("-Names") + 1] == "ISCC.exe,ISCmplr.dll,ISPP.dll"
+    assert "Setup.e32" not in command[command.index("-Names") + 1]  # the unsigned stub copied into every setup
+    # The script itself demands a Valid status and the publisher in the certificate subject.
+    assert "$s.Status -eq 'Valid'" in build_installer.COMPILER_REPORT and 'O=$Publisher' in build_installer.COMPILER_REPORT
+    assert "exit $bad" in build_installer.COMPILER_REPORT
+
+
+def test_a_compiler_that_does_not_verify_stops_the_build(monkeypatch, tmp_path):
+    _fake_signature_check(monkeypatch, tmp_path, 1, "signature    : ISCC.exe -> HashMismatch   <-- NOT ACCEPTED\n")
+    with pytest.raises(SystemExit) as stop:
+        build_installer.record_compiler(tmp_path / "ISCC.exe")
+    assert "Pyrsys B.V." in str(stop.value)
+
+
+@pytest.mark.parametrize("size, expected", [(0, False), (40, True)])
+def test_the_signature_block_reader(tmp_path, size, expected):
+    pe = bytearray(1024)
+    pe[0x3C:0x40] = (128).to_bytes(4, "little")
+    pe[128:132] = b"PE\0\0"
+    pe[128 + 24:128 + 26] = (0x20B).to_bytes(2, "little")  # PE32+
+    directories = 128 + 24 + 112
+    pe[directories + 32:directories + 36] = (512 if size else 0).to_bytes(4, "little")
+    pe[directories + 36:directories + 40] = size.to_bytes(4, "little")
+    path = tmp_path / "x.exe"
+    path.write_bytes(bytes(pe))
+    assert build_installer.has_embedded_signature(path) is expected
+
+
 def test_extra_defines_reach_the_compiler_and_the_release_build_passes_none(monkeypatch, tmp_path):
     (tmp_path / "out").mkdir()
     seen = []

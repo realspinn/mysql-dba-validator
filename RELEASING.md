@@ -54,22 +54,39 @@ same, already audited folder as the zip. It is built by Inno Setup from
   connector session). If the validator runs from the install folder, Setup, and the
   uninstaller, stop with a message and change nothing. The windowed app has no window and
   stops 15 minutes after its page closes, so say that in the message and release notes.
-  If Windows will not let Setup read the process list (or the app runs elevated), Setup
-  cannot see it and falls back to Windows refusing to replace a file in use; Setup then
-  stops or asks, and active executables are still never overwritten. Not tested.
+  If Setup cannot find out whether the validator is running (the Windows process query
+  fails), it stops too, with exit code 7 and nothing changed; the same applies to the
+  uninstaller. The installer test makes that query fail for real and checks the refusal.
 - **Downgrades.** An older setup file does not replace a newer installed version (it
   stops with a message). The same version can be run again. Pre-release suffixes
   (`-rc1`) are ignored in that comparison, so `0.12.0-rc1` can replace `0.12.0`.
-- **Upgrades** replace the files; a file that a later version no longer ships stays until
-  uninstall. The installer never deletes anything it did not install.
+- **Upgrades** replace the files. A file that a later version no longer ships stays in the
+  folder (tested with a file only the older installer had), and the uninstaller removes it
+  with everything else Setup installed, because Setup keeps one uninstall record per AppId.
+  Nothing else is deleted, so no cleanup code is added.
 - **Uninstall** removes the files and shortcuts Setup created and the uninstall entry. To
   remove the data too, delete `%LOCALAPPDATA%\MySQLDBAValidator` by hand (see README).
-- **Compiler.** Inno Setup 6.7.x, as on GitHub's `windows-latest` image (6.7.1 in image
-  20261116.x, from that image's published software list). `build_installer.py` finds
-  `ISCC.exe`, prints its SHA-256 and signature status, and fails if the compiler's own output
-  does not report 6.7.x. Moving to another series is a deliberate edit of
-  `COMPILER_SERIES` and this section. The compiler comes with the runner image; it is not
-  downloaded by the workflow, so its source is the image, not a checksum kept here.
+- **Compiler.** Inno Setup 6.7.x. GitHub's `windows-latest` image installs it from the
+  approved Chocolatey package `innosetup` (6.7.1 in image 20261116.x; the build log prints
+  the package record). `build_installer.py` finds `ISCC.exe` and will not build unless
+  `ISCC.exe`, `ISCmplr.dll` and `ISPP.dll` pass Windows' Authenticode check (`Valid`, which
+  includes the certificate chain) and are signed by `Pyrsys B.V.`, the publisher Inno Setup's
+  download page names for its releases. It also prints the SHA-256 of `ISCC.exe`, requires
+  the compiler's own output to report 6.7.x, and fails otherwise. This ties the compiler to
+  the vendor's signed release and shows its files are unmodified; it does not show the code is
+  free of faults, and no checksum of the compiler is kept in this repository (a hash recorded
+  here would only be what the runner image had). The `Setup.e32` stub is not signed by
+  design (it is copied into every setup program). Moving to another series or publisher is a
+  deliberate edit of `COMPILER_SERIES` / `COMPILER_PUBLISHER` and this section.
+- **Licence.** Inno Setup's licence allows use "for any purpose, including commercial
+  applications". Its commercial licences are described as a request to commercial users
+  (for-profit organisations, or people using it in for-profit work, above a stated revenue
+  threshold), "not strictly required", and the compiler prints "Non-commercial use only"
+  when no licence key is installed. Deploying a setup program built with it does not count as
+  using Inno Setup, and unlicensed setup programs are not marked as such. So the notice does not
+  stop this project being distributed. Whether a licence should be bought is for the
+  maintainer to decide; nothing here buys or enters one
+  (<https://jrsoftware.org/purchase.php>, <https://jrsoftware.org/files/is/license.txt>).
 - **Not signed.** Windows SmartScreen may warn about the setup file as it does about the
   zip's executables. Signing is a separate future change.
 

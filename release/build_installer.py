@@ -61,19 +61,24 @@ def find_iscc() -> Path:
 
 
 COMPILER_FILES = ("ISCC.exe", "ISCmplr.dll", "ISPP.dll", "Setup.e32", "Compil32.exe")
+# Files that must verify (Windows' own Authenticode check, which also checks the certificate
+# chain) and be signed by the publisher named on https://jrsoftware.org/isdl.php.
+# Setup.e32 is a stub copied into every setup program and is not signed.
+SIGNED_COMPILER_FILES = ("ISCC.exe", "ISCmplr.dll", "ISPP.dll")
+COMPILER_PUBLISHER = "Pyrsys B.V."
 COMPILER_REPORT = r"""
-$exe = Get-Item -LiteralPath $args[0]
-"file version : $($exe.VersionInfo.FileVersion); company: $($exe.VersionInfo.CompanyName)"
-foreach ($name in 'ISCC.exe', 'Setup.e32') {
-  $file = Join-Path $exe.DirectoryName $name
-  if (-not (Test-Path -LiteralPath $file)) { continue }
-  try {
-    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate]::CreateFromSignedFile($file)
-    "signed file  : $name -> signer $($cert.Subject)"
-  } catch { "signed file  : $name -> no readable signature ($($_.Exception.Message))" }
+param([string]$Folder, [string]$Publisher, [string]$Names)
+$bad = 0
+foreach ($name in ($Names -split ',')) {
+  $s = Get-AuthenticodeSignature -FilePath (Join-Path $Folder $name)
+  $subject = "$($s.SignerCertificate.Subject)"
+  $ok = ($s.Status -eq 'Valid') -and ($subject -match [regex]::Escape("O=$Publisher"))
+  "signature    : $name -> $($s.Status) ($($s.StatusMessage)); signer: $subject" + $(if ($ok) { '' } else { '   <-- NOT ACCEPTED' })
+  if (-not $ok) { $bad = 1 }
 }
 $choco = Get-Command choco -ErrorAction SilentlyContinue
 if ($choco) { "chocolatey   : " + ((& choco list --local-only innosetup --limit-output) -join '; ') }
+exit $bad
 """
 
 
@@ -88,7 +93,12 @@ def has_embedded_signature(path: Path) -> bool:
 
 
 def record_compiler(iscc: Path) -> None:
-    """Print what identifies the compiler used (for the build log). Informational only."""
+    """Print what identifies the compiler used (for the build log) and require that its main
+    files verify and are signed by the publisher Inno Setup names (the build fails otherwise).
+
+    This ties the compiler on the build machine to the vendor's signed release, not to a
+    checksum kept here. It shows who signed the files and that they are unmodified; it does
+    not show the code is free of faults."""
     print(f"    compiler file : {iscc}")
     print(f"    compiler SHA-256: {sha256(iscc)}")
     for name in COMPILER_FILES:
@@ -97,11 +107,14 @@ def record_compiler(iscc: Path) -> None:
     script = Path(tempfile.mkdtemp()) / "compiler-report.ps1"
     script.write_text(COMPILER_REPORT, encoding="utf-8")
     try:
-        report = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                                 "-File", str(script), str(iscc)], capture_output=True, text=True, timeout=180)
-        print("\n".join("    " + line for line in (report.stdout + report.stderr).strip().splitlines()) or "    (no report)")
+        report = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                                 "-Folder", str(iscc.parent), "-Publisher", COMPILER_PUBLISHER, "-Names", ",".join(SIGNED_COMPILER_FILES)],
+                                capture_output=True, text=True, timeout=180)
     finally:
         shutil.rmtree(script.parent, ignore_errors=True)
+    print("\n".join("    " + line for line in (report.stdout + report.stderr).strip().splitlines()) or "    (no report)")
+    if report.returncode != 0:
+        sys.exit(f"The Inno Setup compiler files did not verify as signed by {COMPILER_PUBLISHER}; not building.")
 
 
 def compile_setup(iscc: Path, payload: Path, out_dir: Path, version: str, *defines: str) -> tuple[Path, str]:
