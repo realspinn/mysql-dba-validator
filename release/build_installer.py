@@ -65,7 +65,7 @@ def record_compiler(iscc: Path) -> None:
     print(f"    compiler SHA-256: {sha256(iscc)}")
     signature = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-         f"$s = Get-AuthenticodeSignature -LiteralPath '{iscc}'; '{{0}}; signer: {{1}}' -f $s.Status, $s.SignerCertificate.Subject"],
+         f'$s = Get-AuthenticodeSignature -LiteralPath "{iscc}"; "$($s.Status); signer: $($s.SignerCertificate.Subject)"'],
         capture_output=True, text=True, timeout=120)
     print("    signature     : " + (signature.stdout.strip() or signature.stderr.strip() or "unknown"))
 

@@ -149,8 +149,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   if ValidatorRunningFrom(ExpandConstant('{app}')) then
-    Result := '{#AppName} is running from this folder, so Setup cannot replace its files.' + #13#10#13#10 + RunningHelp() +
-      #13#10#13#10 + 'Then run Setup again. Nothing has been changed.';
+    Result := '{#AppName} is running from this folder, so Setup cannot replace its files.' + #13#10#13#10 + RunningHelp() + #13#10#13#10 + 'Then run Setup again. Nothing has been changed.';
 end;
 
 function InitializeUninstall(): Boolean;
@@ -158,8 +157,7 @@ begin
   Result := True;
   if ValidatorRunningFrom(ExpandConstant('{app}')) then
   begin
-    SuppressibleMsgBox('{#AppName} is running from this folder, so it cannot be uninstalled now.' + #13#10#13#10 + RunningHelp() +
-      #13#10#13#10 + 'Then run the uninstaller again. Nothing has been changed.', mbCriticalError, MB_OK, IDOK);
+    SuppressibleMsgBox('{#AppName} is running from this folder, so it cannot be uninstalled now.' + #13#10#13#10 + RunningHelp() + #13#10#13#10 + 'Then run the uninstaller again. Nothing has been changed.', mbCriticalError, MB_OK, IDOK);
     Result := False;
   end;
 end;
