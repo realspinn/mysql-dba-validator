@@ -74,7 +74,8 @@ same, already audited folder as the zip. It is built by Inno Setup from
   includes the certificate chain) and are signed by `Pyrsys B.V.`, the publisher Inno Setup's
   download page names for its releases. It also prints the SHA-256 of `ISCC.exe`, requires
   the compiler's own output to report 6.7.x, and fails otherwise. This ties the compiler to
-  the vendor's signed release and shows its files are unmodified; it does not show the code is
+  the vendor's signed release and shows those three files are unmodified (the unsigned `Setup.e32` stub and the
+  compiler's other files are not checked); it does not show the code is
   free of faults, and no checksum of the compiler is kept in this repository (a hash recorded
   here would only be what the runner image had). The `Setup.e32` stub is not signed by
   design (it is copied into every setup program). Moving to another series or publisher is a

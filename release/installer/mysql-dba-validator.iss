@@ -137,6 +137,8 @@ begin
   Running := False;
   Base := AddBackslash(Dir);
   StringChangeEx(Base, '\', '\\', True);
+  // A ' in the path (a profile such as O'Brien) must not end the quoted WQL string.
+  StringChangeEx(Base, '''', '\''', True);
   try
     Locator := CreateOleObject('WbemScripting.SWbemLocator');
     Service := Locator.ConnectServer('.', '{#ProcessNamespace}');

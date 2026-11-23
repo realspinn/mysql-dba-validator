@@ -9,6 +9,7 @@ release-windows.yml) and needs Inno Setup.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -175,7 +176,7 @@ def test_the_build_requires_the_compiler_files_to_verify_as_signed_by_the_publis
     assert command[command.index("-Names") + 1] == "ISCC.exe,ISCmplr.dll,ISPP.dll"
     assert "Setup.e32" not in command[command.index("-Names") + 1]  # the unsigned stub copied into every setup
     # The script itself demands a Valid status and the publisher in the certificate subject.
-    assert "$s.Status -eq 'Valid'" in build_installer.COMPILER_REPORT and 'O=$Publisher' in build_installer.COMPILER_REPORT
+    assert "$s.Status -eq 'Valid'" in build_installer.COMPILER_REPORT and "Test-Publisher $subject $Publisher" in build_installer.COMPILER_REPORT
     assert "exit $bad" in build_installer.COMPILER_REPORT
 
 
@@ -328,3 +329,24 @@ def test_the_audit_refuses_a_portable_folder_that_holds_the_installer_marker(tmp
     (folder / update_check.INSTALLER_MARKER).write_text("x", encoding="utf-8")
     findings, _ = audit_artifact.audit(folder, tmp_path / "no.env", [])
     assert any("installer marker" in finding for finding in findings)
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="needs Windows PowerShell")
+@pytest.mark.parametrize("subject, accepted", [
+    ("CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL", True),
+    ("O=Pyrsys B.V.", True),
+    ("CN=Evil, O=Pyrsys B.V. Evil Ltd, C=GB", False),
+    ('CN=Evil, OU="O=Pyrsys B.V.", O=Evil, C=GB', False),
+    ("CN=Evil, O=Not Pyrsys B.V., C=GB", False),
+    ("CN=Pyrsys B.V., O=Evil", False),
+    ("", False),
+])
+def test_the_compiler_signer_must_be_exactly_the_publisher(tmp_path, subject, accepted):
+    """Runs the script's own Test-Publisher: a subject that only contains the publisher's text is refused."""
+    script = tmp_path / "check.ps1"
+    script.write_text("param([string]$Subject, [string]$Publisher)\n" + build_installer.TEST_PUBLISHER
+                      + "\nif (Test-Publisher $Subject $Publisher) { 'accepted' } else { 'refused' }\n", encoding="utf-8")
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                          "-Subject", subject, "-Publisher", build_installer.COMPILER_PUBLISHER],
+                         capture_output=True, text=True, timeout=60)
+    assert out.stdout.strip() == ("accepted" if accepted else "refused"), out.stderr

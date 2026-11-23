@@ -66,13 +66,21 @@ COMPILER_FILES = ("ISCC.exe", "ISCmplr.dll", "ISPP.dll", "Setup.e32", "Compil32.
 # Setup.e32 is a stub copied into every setup program and is not signed.
 SIGNED_COMPILER_FILES = ("ISCC.exe", "ISCmplr.dll", "ISPP.dll")
 COMPILER_PUBLISHER = "Pyrsys B.V."
+# True only when the certificate subject has an organisation element that is exactly the publisher
+# ("O=Pyrsys B.V." between ", " separators), not a subject that merely contains that text.
+TEST_PUBLISHER = r"""
+function Test-Publisher([string]$Subject, [string]$Publisher) {
+  return $Subject -match ('(^|, )O=' + [regex]::Escape($Publisher) + '(,|$)')
+}
+"""
 COMPILER_REPORT = r"""
 param([string]$Folder, [string]$Publisher, [string]$Names)
+""" + TEST_PUBLISHER + r"""
 $bad = 0
 foreach ($name in ($Names -split ',')) {
   $s = Get-AuthenticodeSignature -FilePath (Join-Path $Folder $name)
   $subject = "$($s.SignerCertificate.Subject)"
-  $ok = ($s.Status -eq 'Valid') -and ($subject -match [regex]::Escape("O=$Publisher"))
+  $ok = ($s.Status -eq 'Valid') -and (Test-Publisher $subject $Publisher)
   "signature    : $name -> $($s.Status) ($($s.StatusMessage)); signer: $subject" + $(if ($ok) { '' } else { '   <-- NOT ACCEPTED' })
   if (-not $ok) { $bad = 1 }
 }
