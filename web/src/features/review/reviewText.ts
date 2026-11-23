@@ -12,8 +12,15 @@ const noDatabase = () => (demo ? 'the online demo does not connect to databases.
 export const riskClass = (level: string | null | undefined) => 'risk-' + (level ?? 'unknown').toLowerCase();
 
 export const text = (value: unknown): string => (value == null || value === '' ? 'n/a' : String(value));
-const fixed = (messages: Readonly<Record<string, string>>, code: string | null | undefined): string | null =>
+export const fixed = (messages: Readonly<Record<string, string>>, code: string | null | undefined): string | null =>
 	code != null && Object.hasOwn(messages, code) ? messages[code] ?? null : null;
+
+// What each overall confidence means, in the validator's words.
+export const CONFIDENCE_TEXT: Record<string, string> = {
+	HIGH: 'Lowest statement confidence. The available evidence supports this assessment.',
+	LIMITED: 'Lowest statement confidence. Some evidence is missing: read the limitations.',
+	LOW: 'Lowest statement confidence. Little evidence supports this assessment.',
+};
 
 export function analysisModeLabel(mode: string | undefined): string {
 	return mode === 'DATABASE_EVIDENCE' ? 'Database evidence'
@@ -252,14 +259,14 @@ export function optimizationSummary(o: Optimization): string {
 	return summary + ' (advisory; does not change the risk score)';
 }
 
-const PLAN_COUNT_LABELS: Record<string, string> = {
+export const PLAN_COUNT_LABELS: Record<string, string> = {
 	collected: 'collected',
 	not_collected_read_only: 'not collected (read-only connection)',
 	not_eligible: 'not eligible',
 	not_supported: 'not applicable',
 	failed: 'could not be collected',
 };
-const METADATA_COUNT_LABELS: Record<string, string> = {
+export const METADATA_COUNT_LABELS: Record<string, string> = {
 	collected: 'collected',
 	failed: 'could not be collected',
 	not_applicable: 'not applicable',
@@ -293,7 +300,7 @@ const NOT_ANALYSED_LABELS: Record<string, string> = {
 	unsupported: 'Not analysed (not supported): ',
 	unreadable: 'Could not be read: ',
 };
-const NOT_ANALYSED_REASONS: Record<string, string> = {
+export const NOT_ANALYSED_REASONS: Record<string, string> = {
 	invalid: 'not valid MySQL',
 	unsupported: 'valid MySQL, but this statement type is not supported',
 	unreadable: 'the validator could not read it',

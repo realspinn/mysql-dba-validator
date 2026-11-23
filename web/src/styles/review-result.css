@@ -77,6 +77,9 @@
 .conf-limited { color: var(--medium); }
 .conf-low { color: var(--high); }
 .conf-high { color: var(--low); }
+.summary-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; }
+.summary-note { color: var(--text-2); font-size: 12.5px; }
+.summary-note-error { color: var(--critical); }
 .verdict-facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .verdict-facts > * { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); font-size: 12px; }
 

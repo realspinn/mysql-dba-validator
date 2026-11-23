@@ -1,0 +1,447 @@
+{
+ "response": {
+  "analysis_mode": "STATIC",
+  "evidence_summary": {
+   "connection": {
+    "reason": "not_configured",
+    "state": "not_attempted"
+   },
+   "metadata": {
+    "not_attempted": 3
+   },
+   "overall": {
+    "static_only": 3
+   },
+   "partial": false,
+   "plan": {
+    "not_attempted": 3
+   }
+  },
+  "overall_confidence": "LOW",
+  "overall_risk_level": "CRITICAL",
+  "overall_score": 100,
+  "statement_count": 3,
+  "statements": [
+   {
+    "analysis_status": "analysed",
+    "analysis_text_differs": false,
+    "category": "READ",
+    "checklist": [
+     "Review each statement independently before execution."
+    ],
+    "columns_in_where": [],
+    "confidence": "HIGH",
+    "database_evidence": {
+     "access_type": null,
+     "available": false,
+     "database": null,
+     "error": "not_configured",
+     "estimated_rows": null,
+     "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
+     "explain_available": false,
+     "extra": null,
+     "full_table_scan": null,
+     "key": null,
+     "key_length": null,
+     "metadata_status": "unavailable",
+     "possible_keys": [],
+     "status": "not_configured",
+     "tables": []
+    },
+    "evidence": {
+     "connection": {
+      "reason": "not_configured",
+      "state": "not_attempted"
+     },
+     "metadata": {
+      "reason": null,
+      "state": "not_attempted",
+      "tables": []
+     },
+     "overall": "static_only",
+     "plan": {
+      "reason": null,
+      "state": "not_attempted"
+     }
+    },
+    "evidence_factors": [],
+    "factors": [
+     {
+      "label": "Base risk for SELECT",
+      "points": 0
+     },
+     {
+      "label": "Part of a multi-statement batch",
+      "points": 10
+     }
+    ],
+    "filter_index": {
+     "state": "no_filter"
+    },
+    "has_limit": false,
+    "has_where": false,
+    "high_estimated_rows_applied": false,
+    "index": 0,
+    "is_full_table_ddl": false,
+    "metadata_factors": [],
+    "metadata_score_adjustment": 0,
+    "metadata_status": "unavailable",
+    "optimization": {
+     "recommendations": [],
+     "status": "none_found"
+    },
+    "parse_error": null,
+    "reasons": [
+     "This statement was pasted alongside 2 other statement(s)."
+    ],
+    "risk_level": "LOW",
+    "scope": {
+     "basis": "not_applicable",
+     "columns": [],
+     "factor": null,
+     "index": null,
+     "indirect_effects": null,
+     "source": null,
+     "table": null
+    },
+    "score": 10,
+    "sql": "SELECT 1 FROM t1",
+    "statement_type": "SELECT",
+    "static_confidence": "HIGH",
+    "static_risk_level": "LOW",
+    "static_score": 10,
+    "tables": [
+     "t1"
+    ],
+    "v2_assessment": {
+     "checklist": [],
+     "confidence": "HIGH",
+     "dimensions": [
+      {
+       "level": "LOW",
+       "name": "Data Risk",
+       "reason": "Read-only or no data mutation detected."
+      },
+      {
+       "level": "UNKNOWN",
+       "name": "Execution Risk",
+       "reason": "Not assessed: no execution plan or row estimates are available in offline mode."
+      },
+      {
+       "level": "LOW",
+       "name": "Scope Risk",
+       "reason": "Targeting a single table."
+      },
+      {
+       "level": "LOW",
+       "name": "Schema Risk",
+       "reason": "No schema change detected."
+      },
+      {
+       "level": "LOW",
+       "name": "Privilege Risk",
+       "reason": "No privilege changes detected."
+      }
+     ],
+     "evidence_available": [],
+     "evidence_missing": [],
+     "findings": [],
+     "overall_score": 10,
+     "recommendations": [],
+     "risk_level": "LOW"
+    },
+    "where_looks_trivial": false,
+    "where_predicate": null
+   },
+   {
+    "analysis_status": "invalid",
+    "analysis_text_differs": false,
+    "category": "OTHER",
+    "checklist": [
+     "Fix the SQL before proceeding.",
+     "Do not execute a statement that the validator could not analyze."
+    ],
+    "columns_in_where": [],
+    "confidence": "LOW",
+    "database_evidence": {
+     "access_type": null,
+     "available": false,
+     "database": null,
+     "error": "not_configured",
+     "estimated_rows": null,
+     "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
+     "explain_available": false,
+     "extra": null,
+     "full_table_scan": null,
+     "key": null,
+     "key_length": null,
+     "metadata_status": "unavailable",
+     "possible_keys": [],
+     "status": "not_configured",
+     "tables": []
+    },
+    "evidence": {
+     "connection": {
+      "reason": "not_configured",
+      "state": "not_attempted"
+     },
+     "metadata": {
+      "reason": null,
+      "state": "not_attempted",
+      "tables": []
+     },
+     "overall": "static_only",
+     "plan": {
+      "reason": null,
+      "state": "not_attempted"
+     }
+    },
+    "evidence_factors": [],
+    "factors": [
+     {
+      "label": "Statement not analysed \u2014 risk not assessed",
+      "points": 100
+     }
+    ],
+    "filter_index": {
+     "state": "not_applicable"
+    },
+    "has_limit": false,
+    "has_where": null,
+    "high_estimated_rows_applied": false,
+    "index": 1,
+    "is_full_table_ddl": false,
+    "metadata_factors": [],
+    "metadata_score_adjustment": 0,
+    "metadata_status": "unavailable",
+    "optimization": {
+     "reason": "The statement was not analysed, so it was not checked for optimization.",
+     "recommendations": [],
+     "status": "not_eligible"
+    },
+    "parse_error": "a MySQL statement cannot begin with \"FROB\"",
+    "reasons": [
+     "Not valid MySQL: a MySQL statement cannot begin with \"FROB\""
+    ],
+    "risk_level": "CRITICAL",
+    "scope": {
+     "basis": "not_applicable",
+     "columns": [],
+     "factor": null,
+     "index": null,
+     "indirect_effects": null,
+     "source": null,
+     "table": null
+    },
+    "score": 100,
+    "sql": "FROB secret_token_xyz FROM nowhere",
+    "statement_type": "UNKNOWN",
+    "static_confidence": "LOW",
+    "static_risk_level": "CRITICAL",
+    "static_score": 100,
+    "tables": [],
+    "v2_assessment": {
+     "checklist": [
+      "Fix the SQL before proceeding."
+     ],
+     "confidence": "LOW",
+     "dimensions": [],
+     "evidence_available": [],
+     "evidence_missing": [],
+     "findings": [
+      {
+       "description": "a MySQL statement cannot begin with \"FROB\"",
+       "severity": "CRITICAL",
+       "title": "Not valid MySQL"
+      }
+     ],
+     "overall_score": 100,
+     "recommendations": [],
+     "risk_level": "CRITICAL"
+    },
+    "where_looks_trivial": false,
+    "where_predicate": null
+   },
+   {
+    "analysis_status": "analysed",
+    "analysis_text_differs": false,
+    "category": "WRITE",
+    "checklist": [
+     "Verify the expected affected-row count before execution.",
+     "Review the candidate rows with a read-only query written for this statement's actual target table and predicate; a count is a point-in-time check, not a guarantee of what the write will change.",
+     "Review the execution plan when database-backed analysis is available.",
+     "Consider transaction boundaries, isolation level and concurrent changes between your check and the write.",
+     "Confirm the expected business impact before execution.",
+     "Confirm backup / point-in-time recovery is available for affected data.",
+     "Review each statement independently before execution.",
+     "Where appropriate, test the DML inside a transaction before committing."
+    ],
+    "columns_in_where": [
+     "a"
+    ],
+    "confidence": "LIMITED",
+    "database_evidence": {
+     "access_type": null,
+     "available": false,
+     "database": null,
+     "error": "not_configured",
+     "estimated_rows": null,
+     "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
+     "explain_available": false,
+     "extra": null,
+     "full_table_scan": null,
+     "key": null,
+     "key_length": null,
+     "metadata_status": "unavailable",
+     "possible_keys": [],
+     "status": "not_configured",
+     "tables": []
+    },
+    "evidence": {
+     "connection": {
+      "reason": "not_configured",
+      "state": "not_attempted"
+     },
+     "metadata": {
+      "reason": null,
+      "state": "not_attempted",
+      "tables": []
+     },
+     "overall": "static_only",
+     "plan": {
+      "reason": null,
+      "state": "not_attempted"
+     }
+    },
+    "evidence_factors": [],
+    "factors": [
+     {
+      "label": "Base risk for DELETE",
+      "points": 20
+     },
+     {
+      "label": "Affected-row count cannot be established from the SQL alone",
+      "points": 5
+     },
+     {
+      "label": "Part of a multi-statement batch",
+      "points": 10
+     }
+    ],
+    "filter_index": {
+     "column": "a",
+     "state": "not_checked",
+     "table": "t2"
+    },
+    "has_limit": false,
+    "has_where": true,
+    "high_estimated_rows_applied": false,
+    "index": 2,
+    "is_full_table_ddl": false,
+    "metadata_factors": [],
+    "metadata_score_adjustment": 0,
+    "metadata_status": "unavailable",
+    "optimization": {
+     "reason": "Optimization advice covers a single SELECT, or a UNION of plain SELECT blocks that removes duplicates.",
+     "recommendations": [],
+     "status": "not_eligible"
+    },
+    "parse_error": null,
+    "reasons": [
+     "Row impact cannot be determined in offline analysis; actual database row counts are not available.",
+     "This statement was pasted alongside 2 other statement(s).",
+     "This is offline/static analysis; actual database metadata, row counts and execution-plan evidence are not available."
+    ],
+    "risk_level": "MEDIUM",
+    "scope": {
+     "basis": "not_established",
+     "columns": [],
+     "factor": null,
+     "index": null,
+     "indirect_effects": "not_checked",
+     "source": null,
+     "table": null
+    },
+    "score": 35,
+    "sql": "DELETE FROM t2 WHERE a = 1",
+    "statement_type": "DELETE",
+    "static_confidence": "LIMITED",
+    "static_risk_level": "MEDIUM",
+    "static_score": 35,
+    "tables": [
+     "t2"
+    ],
+    "v2_assessment": {
+     "checklist": [
+      "Verify the expected affected-row count before execution.",
+      "Review the candidate rows with a read-only query written for this statement's actual target table and predicate; a count is a point-in-time check, not a guarantee of what the write will change.",
+      "Review the execution plan when database-backed analysis is available."
+     ],
+     "confidence": "LIMITED",
+     "dimensions": [
+      {
+       "level": "MEDIUM",
+       "name": "Data Risk",
+       "reason": "Row scope not established from the SQL."
+      },
+      {
+       "level": "UNKNOWN",
+       "name": "Execution Risk",
+       "reason": "Not assessed: no execution plan or row estimates are available in offline mode."
+      },
+      {
+       "level": "LOW",
+       "name": "Scope Risk",
+       "reason": "Targeting a single table."
+      },
+      {
+       "level": "LOW",
+       "name": "Schema Risk",
+       "reason": "No schema change detected."
+      },
+      {
+       "level": "LOW",
+       "name": "Privilege Risk",
+       "reason": "No privilege changes detected."
+      }
+     ],
+     "evidence_available": [],
+     "evidence_missing": [
+      {
+       "name": "affected_row_count",
+       "reason": "No database connection",
+       "suggested_check": "Review the candidate rows with a read-only query you write for this statement's actual target table and predicate. A count is a point-in-time check: concurrent changes can alter what the write later affects, and UPDATE reports changed rows, not matched rows."
+      },
+      {
+       "name": "execution_plan",
+       "reason": "No database connection",
+       "suggested_check": "Run EXPLAIN on the exact statement; EXPLAIN does not run an UPDATE or DELETE. Never use EXPLAIN ANALYZE for a review: it executes the statement."
+      }
+     ],
+     "findings": [
+      {
+       "description": "A WHERE clause can match zero, one, some or all rows. The validator cannot determine how many rows it matches from the SQL alone.",
+       "severity": "MEDIUM",
+       "title": "Affected-row count is unknown"
+      }
+     ],
+     "overall_score": 35,
+     "recommendations": [
+      {
+       "rationale": "No database connection",
+       "text": "Review the candidate rows with a read-only query you write for this statement's actual target table and predicate. A count is a point-in-time check: concurrent changes can alter what the write later affects, and UPDATE reports changed rows, not matched rows."
+      },
+      {
+       "rationale": "No database connection",
+       "text": "Run EXPLAIN on the exact statement; EXPLAIN does not run an UPDATE or DELETE. Never use EXPLAIN ANALYZE for a review: it executes the statement."
+      }
+     ],
+     "risk_level": "MEDIUM"
+    },
+    "where_looks_trivial": false,
+    "where_predicate": "a = 1"
+   }
+  ]
+ },
+ "sql": "SELECT 1 FROM t1; FROB secret_token_xyz FROM nowhere; DELETE FROM t2 WHERE a = 1;"
+}

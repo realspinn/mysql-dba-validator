@@ -1,0 +1,189 @@
+{
+ "response": {
+  "analysis_mode": "STATIC",
+  "evidence_summary": {
+   "connection": {
+    "reason": "not_configured",
+    "state": "not_attempted"
+   },
+   "metadata": {
+    "not_attempted": 1
+   },
+   "overall": {
+    "static_only": 1
+   },
+   "partial": false,
+   "plan": {
+    "not_attempted": 1
+   }
+  },
+  "overall_confidence": "HIGH",
+  "overall_risk_level": "CRITICAL",
+  "overall_score": 100,
+  "statement_count": 1,
+  "statements": [
+   {
+    "analysis_status": "analysed",
+    "analysis_text_differs": false,
+    "category": "WRITE",
+    "checklist": [
+     "Confirm that affecting ALL rows is explicitly intended.",
+     "Estimate the affected-row count before execution.",
+     "Verify backup or point-in-time recovery capability.",
+     "Consider executing in controlled batches if appropriate.",
+     "Consider transaction boundaries, isolation level and concurrent changes between your check and the write.",
+     "Confirm the expected business impact before execution.",
+     "Confirm backup / point-in-time recovery is available for affected data.",
+     "Where appropriate, test the DML inside a transaction before committing."
+    ],
+    "columns_in_where": [],
+    "confidence": "HIGH",
+    "database_evidence": {
+     "access_type": null,
+     "available": false,
+     "database": null,
+     "error": "not_configured",
+     "estimated_rows": null,
+     "estimated_rows_semantics": "optimizer estimate, not exact affected-row count",
+     "explain_available": false,
+     "extra": null,
+     "full_table_scan": null,
+     "key": null,
+     "key_length": null,
+     "metadata_status": "unavailable",
+     "possible_keys": [],
+     "status": "not_configured",
+     "tables": []
+    },
+    "evidence": {
+     "connection": {
+      "reason": "not_configured",
+      "state": "not_attempted"
+     },
+     "metadata": {
+      "reason": null,
+      "state": "not_attempted",
+      "tables": []
+     },
+     "overall": "static_only",
+     "plan": {
+      "reason": null,
+      "state": "not_attempted"
+     }
+    },
+    "evidence_factors": [],
+    "factors": [
+     {
+      "label": "Base risk for UPDATE",
+      "points": 15
+     },
+     {
+      "label": "WHERE clause is always true \u2014 matches every row",
+      "points": 65
+     }
+    ],
+    "filter_index": {
+     "state": "not_assessed"
+    },
+    "has_limit": false,
+    "has_where": true,
+    "high_estimated_rows_applied": false,
+    "index": 0,
+    "is_full_table_ddl": false,
+    "metadata_factors": [],
+    "metadata_score_adjustment": 0,
+    "metadata_status": "unavailable",
+    "optimization": {
+     "reason": "Optimization advice covers a single SELECT, or a UNION of plain SELECT blocks that removes duplicates.",
+     "recommendations": [],
+     "status": "not_eligible"
+    },
+    "parse_error": null,
+    "reasons": [
+     "The WHERE clause (1 = 1) is always true; the operation matches every row, exactly as if it had no WHERE clause.",
+     "This is offline/static analysis; actual database metadata, row counts and execution-plan evidence are not available."
+    ],
+    "risk_level": "CRITICAL",
+    "scope": {
+     "basis": "all_rows",
+     "columns": [],
+     "factor": null,
+     "index": null,
+     "indirect_effects": "not_checked",
+     "source": "sql",
+     "table": "accounts"
+    },
+    "score": 100,
+    "sql": "UPDATE accounts SET balance = 0 WHERE 1 = 1",
+    "statement_type": "UPDATE",
+    "static_confidence": "HIGH",
+    "static_risk_level": "CRITICAL",
+    "static_score": 100,
+    "tables": [
+     "accounts"
+    ],
+    "v2_assessment": {
+     "checklist": [
+      "Confirm that affecting ALL rows is explicitly intended.",
+      "Estimate the affected-row count before execution.",
+      "Verify backup or point-in-time recovery capability."
+     ],
+     "confidence": "HIGH",
+     "dimensions": [
+      {
+       "level": "HIGH",
+       "name": "Data Risk",
+       "reason": "WHERE clause is always true; matches every row."
+      },
+      {
+       "level": "UNKNOWN",
+       "name": "Execution Risk",
+       "reason": "Not assessed: no execution plan or row estimates are available in offline mode."
+      },
+      {
+       "level": "HIGH",
+       "name": "Scope Risk",
+       "reason": "Single-target write without a restricting WHERE may affect all rows."
+      },
+      {
+       "level": "LOW",
+       "name": "Schema Risk",
+       "reason": "No schema change detected."
+      },
+      {
+       "level": "LOW",
+       "name": "Privilege Risk",
+       "reason": "No privilege changes detected."
+      }
+     ],
+     "evidence_available": [],
+     "evidence_missing": [
+      {
+       "name": "affected_row_count",
+       "reason": "No database connection",
+       "suggested_check": "Review the candidate rows with a read-only query you write for this statement's actual target table and predicate. A count is a point-in-time check: concurrent changes can alter what the write later affects, and UPDATE reports changed rows, not matched rows."
+      }
+     ],
+     "findings": [
+      {
+       "description": "The WHERE predicate (1 = 1) is true for every row, so this write matches every row of the target table(s), exactly as with no WHERE clause.",
+       "severity": "HIGH",
+       "title": "WHERE clause is always true \u2014 matches every row"
+      }
+     ],
+     "overall_score": 100,
+     "recommendations": [
+      {
+       "rationale": "No database connection",
+       "text": "Review the candidate rows with a read-only query you write for this statement's actual target table and predicate. A count is a point-in-time check: concurrent changes can alter what the write later affects, and UPDATE reports changed rows, not matched rows."
+      }
+     ],
+     "risk_level": "CRITICAL"
+    },
+    "where_looks_trivial": true,
+    "where_predicate": "1 = 1"
+   }
+  ]
+ },
+ "sql": "UPDATE accounts SET balance = 0 WHERE 1 = 1"
+}

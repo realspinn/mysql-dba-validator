@@ -71,6 +71,9 @@ jobs:
       - name: Type check
         run: npx tsc -b
 
+      - name: Unit tests (Node's built-in runner)
+        run: npm test
+
       - name: Build
         run: npx vite build
 
