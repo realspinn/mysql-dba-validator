@@ -2,17 +2,13 @@
 import type { ReviewResponse } from '../../types/review';
 import { PUBLIC_DEMO } from '../../shared/environment';
 import {
-	analysisModeLabel, completionText, evidenceSummaryText, groupedLines, filterLine, keyFinding,
+	analysisModeLabel, CONFIDENCE_TEXT, completionText, evidenceSummaryText, groupedLines, filterLine, keyFinding,
 	reviewModel, riskClass, scanLine, text,
 } from './reviewText';
+import { CopySummary } from './CopySummary';
+import { copySummaryFor } from './copySummary';
 import { StatementList, type FocusRequest } from './StatementList';
 import type { Reviewed, Run } from './useReview';
-
-const CONFIDENCE_TEXT: Record<string, string> = {
-	HIGH: 'Lowest statement confidence. The available evidence supports this assessment.',
-	LIMITED: 'Lowest statement confidence. Some evidence is missing: read the limitations.',
-	LOW: 'Lowest statement confidence. Little evidence supports this assessment.',
-};
 
 export function Results({ run, reviewed, stale, onRetry, focus }: {
 	run: Run; reviewed: Reviewed | null; stale: boolean; onRetry: () => void; focus: FocusRequest | null;
@@ -28,7 +24,7 @@ export function Results({ run, reviewed, stale, onRetry, focus }: {
 		);
 	}
 	if (!reviewed) return <Initial />;
-	return <Assessment data={reviewed.result} at={reviewed.at} stale={stale} focus={focus} />;
+	return <Assessment data={reviewed.result} at={reviewed.at} stale={stale} focus={focus} summary={copySummaryFor(run, reviewed, stale)} />;
 }
 
 function Initial() {
@@ -58,7 +54,7 @@ function Loading() {
 	);
 }
 
-function Assessment({ data, at, stale, focus }: { data: ReviewResponse; at: Date; stale: boolean; focus: FocusRequest | null }) {
+function Assessment({ data, at, stale, focus, summary }: { data: ReviewResponse; at: Date; stale: boolean; focus: FocusRequest | null; summary: string | null }) {
 	const model = reviewModel(data);
 	const top = model.findings[0];
 	const leader = model.top;
@@ -79,6 +75,7 @@ function Assessment({ data, at, stale, focus }: { data: ReviewResponse; at: Date
 							: {keyFinding(leader.s)}</p>
 					)}
 					<p className="status-line" role="status">{completionText(data)}</p>
+					<CopySummary summary={summary} />
 				</div>
 				<div className="verdict-side">
 					<div>
