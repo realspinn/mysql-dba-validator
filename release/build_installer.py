@@ -109,7 +109,10 @@ def record_compiler(iscc: Path) -> None:
     try:
         report = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
                                  "-Folder", str(iscc.parent), "-Publisher", COMPILER_PUBLISHER, "-Names", ",".join(SIGNED_COMPILER_FILES)],
-                                capture_output=True, text=True, timeout=180)
+                                capture_output=True, text=True, timeout=180,
+                                # Windows PowerShell started from PowerShell 7 (the CI shell) inherits its module
+                                # path and then returns no signature information at all.
+                                env={k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"})
     finally:
         shutil.rmtree(script.parent, ignore_errors=True)
     print("\n".join("    " + line for line in (report.stdout + report.stderr).strip().splitlines()) or "    (no report)")
