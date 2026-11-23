@@ -272,6 +272,8 @@ def main() -> int:
                               stdin=subprocess.DEVNULL).returncode
         gone = wait_until(lambda: entry() is None and not (app_dir / "MySQL-DBA-Validator.exe").exists(), 120)
         check("uninstall completes and removes the uninstall entry and the application files", code == 0 and gone, code)
+        # The uninstaller removes itself after it exits, so give that a moment.
+        wait_until(lambda: not app_dir.exists() or not any(app_dir.rglob("*")), 60)
         leftovers = sorted(hashes(app_dir)) if app_dir.exists() else []
         check("no application file is left in the installation folder", not leftovers, leftovers[:10])
         check("Start menu shortcuts and desktop shortcut removed",
