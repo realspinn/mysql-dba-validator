@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from release.build_windows import APP_DIR_NAME, DIST, RELEASE, read_version, sha256, write_checksum_file  # noqa: E402
+from release.build_windows import APP_DIR_NAME, BUILD, DIST, RELEASE, read_version, sha256, write_checksum_file  # noqa: E402
 
 SCRIPT = RELEASE / "installer" / "mysql-dba-validator.iss"
 COMPILER_SERIES = "6.7"
@@ -101,7 +101,11 @@ def main() -> int:
         sys.exit(f"{payload} not found: run release/build_windows.py first.")
 
     print("\n==> Auditing the payload folder")
-    subprocess.run([sys.executable, str(RELEASE / "audit_artifact.py"), str(payload)], check=True, cwd=str(ROOT))
+    # The audit reads inside the executables with PyInstaller, which only the build venv has.
+    venv_python = BUILD / "venv" / "Scripts" / "python.exe"
+    if not venv_python.is_file():
+        sys.exit(f"{venv_python} not found: run release/build_windows.py first.")
+    subprocess.run([str(venv_python), str(RELEASE / "audit_artifact.py"), str(payload)], check=True, cwd=str(ROOT))
 
     print("\n==> Compiling the installer")
     iscc = find_iscc()
