@@ -16,6 +16,12 @@
 #ifndef OutputDir
   #define OutputDir "."
 #endif
+; The WMI namespace Setup asks which validator processes run. Only release/smoke_test_installer.py
+; overrides it (with a namespace that does not exist) to make the question fail, and checks
+; that Setup then refuses; release builds never do.
+#ifndef ProcessNamespace
+  #define ProcessNamespace "root\CIMV2"
+#endif
 
 ; The application's identity for every installer release. NEVER change it: Setup decides
 ; whether it is upgrading an existing installation by this value (and it names the
@@ -117,24 +123,27 @@ begin
   end;
 end;
 
-// True when a validator started from this folder is running (the windowed app, or the
-// Console app, which is also what the web app's background process runs as). Checked by
-// the full path of the executable, so a portable copy elsewhere is not affected.
-function ValidatorRunningFrom(const Dir: String): Boolean;
+// Asks Windows (WMI) whether a validator started from this folder is running: the windowed
+// app, or the Console app, which is also what the web app's background process runs as.
+// Checked by the full path of the executable, so a portable copy elsewhere is not affected.
+// Returns False when the question could not be answered; Running is then not meaningful and
+// the caller must not treat it as "not running".
+function CheckValidatorRunning(const Dir: String; var Running: Boolean): Boolean;
 var
   Locator, Service, Found: Variant;
   Base: String;
 begin
   Result := False;
+  Running := False;
   Base := AddBackslash(Dir);
   StringChangeEx(Base, '\', '\\', True);
   try
     Locator := CreateOleObject('WbemScripting.SWbemLocator');
-    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    Service := Locator.ConnectServer('.', '{#ProcessNamespace}');
     Found := Service.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE ExecutablePath = ''' + Base + '{#AppExe}'' OR ExecutablePath = ''' + Base + '{#ConsoleExe}''');
-    Result := (not VarIsNull(Found)) and (Found.Count > 0);
+    Running := (not VarIsNull(Found)) and (Found.Count > 0);
+    Result := True;
   except
-    // The process list could not be read: Setup then relies on Windows refusing to replace a file in use.
     Result := False;
   end;
 end;
@@ -145,19 +154,36 @@ begin
     'Setup does not close it for you, because it may hold a company connector session.';
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+// Setup (and the uninstaller) go on only when it is known that no validator runs from the
+// folder. If that cannot be found out, they stop too: replacing or removing the files of a
+// running program is not safe, and Windows would only refuse part of it.
+function StopReason(const Dir: String; const Action: String): String;
+var
+  Running: Boolean;
 begin
   Result := '';
-  if ValidatorRunningFrom(ExpandConstant('{app}')) then
-    Result := '{#AppName} is running from this folder, so Setup cannot replace its files.' + #13#10#13#10 + RunningHelp() + #13#10#13#10 + 'Then run Setup again. Nothing has been changed.';
+  if not CheckValidatorRunning(Dir, Running) then
+    Result := 'Setup could not check whether {#AppName} is running from this folder, so it cannot ' + Action + ' safely.' + #13#10#13#10 +
+      'Close {#AppName} if it is open (' + RunningHelp() + ')' + #13#10#13#10 + 'Then run it again. Nothing has been changed.'
+  else if Running then
+    Result := '{#AppName} is running from this folder, so Setup cannot ' + Action + '.' + #13#10#13#10 + RunningHelp() + #13#10#13#10 +
+      'Then run it again. Nothing has been changed.';
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := StopReason(ExpandConstant('{app}'), 'replace its files');
 end;
 
 function InitializeUninstall(): Boolean;
+var
+  Reason: String;
 begin
   Result := True;
-  if ValidatorRunningFrom(ExpandConstant('{app}')) then
+  Reason := StopReason(ExpandConstant('{app}'), 'remove it');
+  if Reason <> '' then
   begin
-    SuppressibleMsgBox('{#AppName} is running from this folder, so it cannot be uninstalled now.' + #13#10#13#10 + RunningHelp() + #13#10#13#10 + 'Then run the uninstaller again. Nothing has been changed.', mbCriticalError, MB_OK, IDOK);
+    SuppressibleMsgBox(Reason, mbCriticalError, MB_OK, IDOK);
     Result := False;
   end;
 end;

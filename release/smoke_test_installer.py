@@ -212,7 +212,7 @@ def main() -> int:
         before = hashes(app_dir)
         code = run_setup(setup, app_dir, work / "blocked.log")
         found = entry()
-        check("upgrade is refused while the app runs", code != 0, code)
+        check("upgrade is refused while the app runs (exit code 7: preparing to install stopped)", code == 7, code)
         check("a refused upgrade changes nothing and leaves the app running",
               hashes(app_dir) == before and found is not None and found["DisplayVersion"] == OLD_VERSION
               and app.proc.poll() is None and smoke.port_open(8420))
@@ -241,6 +241,22 @@ def main() -> int:
         check("an older installer does not replace the newer installation",
               code != 0 and hashes(app_dir) == before and found is not None and found["DisplayVersion"] == APP_VERSION, (code, found))
 
+        # ---------------------------------------------------------------- what the upgrade left behind
+        check("a file the older version installed and the new one does not ship is left in place by the upgrade "
+              "(Setup deletes only what it removes at uninstall)", (app_dir / "old-fixture-only.txt").is_file())
+
+        # ---------------------------------------------------------------- the process question cannot be answered
+        # Same script and version, but it asks WMI a namespace that does not exist, so the question fails
+        # for real. Setup must then refuse, not take the failure to mean "nothing is running".
+        variant, _ = build_installer.compile_setup(build_installer.find_iscc(), payload, work / "variant setup", APP_VERSION,
+                                                   r"/DProcessNamespace=root\NoSuchNamespaceForTest")
+        before = hashes(app_dir)
+        code = run_setup(variant, app_dir, work / "variant.log")
+        found = entry()
+        check("Setup refuses to continue when it cannot tell whether the app is running, and changes nothing",
+              code != 0 and hashes(app_dir) == before and found is not None and found["DisplayVersion"] == APP_VERSION, (code, found))
+        check("it stops in the preparing-to-install stage (exit code 7), not later", code == 7, code)
+
         # ---------------------------------------------------------------- both executables after the upgrade
         windowed = subprocess.Popen([str(app_dir / "MySQL-DBA-Validator.exe"), "--no-browser"], cwd=str(cwd), env=env,
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -250,7 +266,7 @@ def main() -> int:
             check("installed windowed app starts from the installed folder and serves the page",
                   started and status == 200 and (smoke.as_json(body) or {}).get("version") == APP_VERSION and not smoke.port_open(8765), body[:200])
             blocked = run_setup(setup, app_dir, work / "blocked2.log")
-            check("upgrade is also refused while only the windowed app (and its background process) runs", blocked != 0, blocked)
+            check("upgrade is also refused while only the windowed app (and its background process) runs", blocked == 7, blocked)
         finally:
             windowed.kill()
             windowed.wait(timeout=10)
@@ -276,6 +292,8 @@ def main() -> int:
         wait_until(lambda: not app_dir.exists() or not any(app_dir.rglob("*")), 60)
         leftovers = sorted(hashes(app_dir)) if app_dir.exists() else []
         check("no application file is left in the installation folder", not leftovers, leftovers[:10])
+        check("the file left by the older version is removed by the uninstall, which only removes what Setup installed",
+              not (app_dir / "old-fixture-only.txt").exists())
         check("Start menu shortcuts and desktop shortcut removed",
               not (START_MENU / "MySQL DBA Validator.lnk").exists() and not DESKTOP.exists())
         check("user data preserved by uninstall", user_files(data) == user_data)

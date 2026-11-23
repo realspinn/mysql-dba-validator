@@ -77,6 +77,30 @@ def test_running_applications_are_not_closed_or_restarted_by_setup():
         assert forbidden not in code, forbidden
 
 
+def test_a_failed_process_check_is_a_refusal_never_a_go_ahead():
+    code = _sections()["Code"]
+    check = code[code.index("function CheckValidatorRunning"):code.index("function RunningHelp")]
+    # The question can fail (an exception), and the function then says so: False, not "not running".
+    assert re.search(r"except\s+Result := False;\s+end;", check)
+    assert check.count("Result := True;") == 1 and check.index("Result := True;") > check.index("Found.Count")
+    reason = code[code.index("function StopReason"):code.index("function PrepareToInstall")]
+    # An unanswered question is handled first and gives a stop reason, like a running app.
+    assert reason.index("if not CheckValidatorRunning") < reason.index("else if Running then")
+    assert reason.count("Result := ") == 3 and "could not check whether" in reason and "Nothing has been changed" in reason
+    # Both Setup and the uninstaller stop on any reason; neither calls the check directly.
+    assert "Result := StopReason(" in code[code.index("function PrepareToInstall"):code.index("function InitializeUninstall")]
+    uninstall = code[code.index("function InitializeUninstall"):]
+    assert "StopReason(" in uninstall and "Result := False" in uninstall and "CheckValidatorRunning" not in uninstall
+
+
+def test_the_process_question_is_only_changed_by_the_installer_test():
+    assert '#define ProcessNamespace "root\\CIMV2"' in ISS_FULL
+    assert "ConnectServer('.', '{#ProcessNamespace}')" in ISS
+    scripts = {path: path.read_text(encoding="utf-8") for path in [*(ROOT / "release").glob("*.py"), *(ROOT / ".github" / "workflows").glob("*.yml")]}
+    using = sorted(path.name for path, text in scripts.items() if "ProcessNamespace" in text)
+    assert using == ["smoke_test_installer.py"]
+
+
 def test_it_installs_the_built_folder_and_the_marker_and_has_no_version_of_its_own():
     files = _sections()["Files"]
     assert 'Source: "{#PayloadDir}\\*"; DestDir: "{app}"' in files
@@ -128,6 +152,24 @@ def test_only_the_expected_compiler_series_is_accepted(monkeypatch, tmp_path):
     _fake_compiler(monkeypatch, tmp_path, "Compiler engine version: Inno Setup 6.7.1\n")
     setup, engine = build_installer.compile_setup(Path("ISCC.exe"), tmp_path, tmp_path / "out", "9.9.9")
     assert engine == "6.7.1" and setup.is_file()
+
+
+def test_extra_defines_reach_the_compiler_and_the_release_build_passes_none(monkeypatch, tmp_path):
+    (tmp_path / "out").mkdir()
+    seen = []
+
+    def fake_run(command, **kwargs):
+        seen.append(command)
+        (tmp_path / "out" / build_installer.setup_name("9.9.9")).write_bytes(b"MZ")
+        return subprocess.CompletedProcess(command, 0, stdout="Compiler engine version: Inno Setup 6.7.1\n", stderr="")
+
+    monkeypatch.setattr(build_installer.subprocess, "run", fake_run)
+    build_installer.compile_setup(Path("ISCC.exe"), tmp_path, tmp_path / "out", "9.9.9", "/DSomething=1")
+    assert seen[0][-2:] == ["/DSomething=1", str(build_installer.SCRIPT)]
+    build_installer.compile_setup(Path("ISCC.exe"), tmp_path, tmp_path / "out", "9.9.9")
+    assert seen[1][-1] == str(build_installer.SCRIPT) and not any(a.startswith("/D") and "Something" in a for a in seen[1])
+    main_source = Path(build_installer.__file__).read_text(encoding="utf-8")
+    assert "compile_setup(iscc, payload, DIST, version)" in main_source
 
 
 @pytest.mark.parametrize("banner", ["Compiler engine version: Inno Setup 6.6.1\n", "Compiler engine version: Inno Setup 7.0.0\n",

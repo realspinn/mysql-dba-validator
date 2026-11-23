@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,25 +60,46 @@ def find_iscc() -> Path:
     sys.exit("Inno Setup compiler not found. Install Inno Setup 6.7.x or set MDV_ISCC to ISCC.exe.")
 
 
+COMPILER_REPORT = r"""
+$ErrorActionPreference = 'Continue'
+$exe = Get-Item -LiteralPath $args[0]
+$folder = $exe.DirectoryName
+"file version : $($exe.VersionInfo.FileVersion); company: $($exe.VersionInfo.CompanyName)"
+foreach ($name in 'ISCC.exe', 'ISCmplr.dll', 'ISPP.dll', 'Setup.e32', 'Compil32.exe') {
+  $file = Join-Path $folder $name
+  if (Test-Path -LiteralPath $file) {
+    $s = Get-AuthenticodeSignature -LiteralPath $file
+    "signature    : $name -> $($s.Status); signer: $($s.SignerCertificate.Subject)"
+  }
+}
+$choco = Get-Command choco -ErrorAction SilentlyContinue
+if ($choco) { "chocolatey   : " + ((& choco list --local-only innosetup --limit-output) -join '; ') }
+"""
+
+
 def record_compiler(iscc: Path) -> None:
     """Print what identifies the compiler used (for the build log). Informational only."""
     print(f"    compiler file : {iscc}")
     print(f"    compiler SHA-256: {sha256(iscc)}")
-    signature = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-         f'$s = Get-AuthenticodeSignature -LiteralPath "{iscc}"; "$($s.Status); signer: $($s.SignerCertificate.Subject)"'],
-        capture_output=True, text=True, timeout=120)
-    print("    signature     : " + (signature.stdout.strip() or signature.stderr.strip() or "unknown"))
+    script = Path(tempfile.mkdtemp()) / "compiler-report.ps1"
+    script.write_text(COMPILER_REPORT, encoding="utf-8")
+    try:
+        report = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                 "-File", str(script), str(iscc)], capture_output=True, text=True, timeout=180)
+        print("\n".join("    " + line for line in (report.stdout + report.stderr).strip().splitlines()) or "    (no report)")
+    finally:
+        shutil.rmtree(script.parent, ignore_errors=True)
 
 
-def compile_setup(iscc: Path, payload: Path, out_dir: Path, version: str) -> tuple[Path, str]:
+def compile_setup(iscc: Path, payload: Path, out_dir: Path, version: str, *defines: str) -> tuple[Path, str]:
     """Compile the installer for `version` from `payload` into `out_dir`: (setup file, compiler version).
 
     The version is not read from the script, which has none: release/smoke_test_installer.py also
-    uses this to build a clearly older installer for the upgrade test."""
+    uses this to build a clearly older installer for the upgrade test, and a variant whose process
+    check fails (extra /D defines)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     command = [str(iscc), f"/DAppVersion={version}", f"/DAppVersionInfo={numeric_version(version)}",
-               f"/DPayloadDir={payload}", f"/DOutputDir={out_dir}", str(SCRIPT)]
+               f"/DPayloadDir={payload}", f"/DOutputDir={out_dir}", *defines, str(SCRIPT)]
     print("    $ " + " ".join(command), flush=True)
     done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(done.stdout + done.stderr, flush=True)
