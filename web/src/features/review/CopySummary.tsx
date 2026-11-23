@@ -13,13 +13,20 @@ const MESSAGES = {
 export function CopySummary({ summary }: { summary: string | null }) {
 	const [note, setNote] = useState<keyof typeof MESSAGES | null>(null);
 	const timer = useRef(0);
-	// A new or stale result is not what the last message was about.
-	useEffect(() => { setNote(null); }, [summary]);
-	useEffect(() => () => window.clearTimeout(timer.current), []);
+	// The summary this component shows now, or null once it is replaced, stale or gone. A
+	// clipboard write is asynchronous: when it finishes, its message is shown only if the
+	// result it copied is still the current one.
+	const current = useRef<string | null>(null);
+	useEffect(() => {
+		current.current = summary;
+		setNote(null);
+		return () => { current.current = null; window.clearTimeout(timer.current); };
+	}, [summary]);
 
 	const copy = async () => {
 		if (summary === null) return;
 		const ok = await writeToClipboard(navigator.clipboard, summary);
+		if (current.current !== summary) return;
 		setNote(ok ? 'copied' : 'failed');
 		window.clearTimeout(timer.current);
 		timer.current = window.setTimeout(() => setNote(null), 5000);

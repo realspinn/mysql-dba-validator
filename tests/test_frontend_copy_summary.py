@@ -85,46 +85,111 @@ def test_every_backend_factor_label_is_known_wording_to_the_summary():
             assert part.strip() in SUMMARY, part
 
 
-def test_backend_checklist_lines_are_fixed_text_or_a_statement_type():
-    """The summary copies checklist lines as the backend wrote them. That is safe only
-    while none of them carries submitted text, so any new kind of line must be reviewed."""
-    allowed_expressions = {
-        "first_check",  # a fixed pair per analysis status (NOT_ANALYSED_WORDING)
-        "checklist", "list(dict.fromkeys(checklist))", "_deduplicate(checklist)",
-        "_deduplicate(['Do not run EXPLAIN ANALYZE on a statement you would not run on its own.'] + report.checklist)",
-        "CANDIDATE_ROWS_CHECK",
-    }
-    allowed_fstrings = {
-        "Review the explained {} as if it will be run on its own.",  # a statement type keyword
-    }
-    found = []
-    for name, tree in _backend_trees():
-        constants = {t.targets[0].id for t in ast.walk(tree) if isinstance(t, ast.Assign) and len(t.targets) == 1
-                     and isinstance(t.targets[0], ast.Name) and isinstance(t.value, ast.Constant)}
-        for node in ast.walk(tree):
-            items = []
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("append", "extend")
-                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "checklist"):
-                items = node.args[0].elts if isinstance(node.args[0], (ast.List, ast.Tuple)) else [node.args[0]]
-            elif isinstance(node, ast.keyword) and node.arg == "checklist":
-                items = node.value.elts if isinstance(node.value, (ast.List, ast.Tuple)) else [node.value]
-            for item in items:
-                if isinstance(item, ast.Constant) or (isinstance(item, ast.Name) and item.id in constants):
-                    continue
-                if isinstance(item, ast.BinOp) and isinstance(item.left, ast.Constant) and isinstance(item.right, ast.Constant):
-                    continue
-                if isinstance(item, ast.JoinedStr) and _skeleton(item) in allowed_fstrings:
-                    continue
-                if ast.unparse(item) in allowed_expressions:
-                    continue
-                found.append(f"{name}:{item.lineno}: {ast.unparse(item)}")
-    assert not found, found
+# What may feed a checklist without being a literal: variables and calls that only pass
+# on lines built elsewhere from the same literals (each source is itself scanned), and the
+# one line that names a statement type.
+PASS_THROUGH = {
+    "first_check", "checklist", "list(report.checklist)", "list(dict.fromkeys(checklist))", "_deduplicate(checklist)",
+    "_deduplicate(['Do not run EXPLAIN ANALYZE on a statement you would not run on its own.'] + report.checklist)",
+    "field(default_factory=list)",
+}
+TYPED_LINES = {"Review the explained {} as if it will be run on its own."}
 
 
-def test_not_analysed_wording_is_fixed_text():
-    from backend.analyzer import NOT_ANALYSED_WORDING
+def _checklist_sources(source_text: str, known: dict[str, str]) -> tuple[set[str], list[str]]:
+    """(literal lines, expressions that are neither literals nor allowed) that can reach a checklist.
 
-    assert all(isinstance(title, str) and isinstance(check, str) for title, check in NOT_ANALYSED_WORDING.values())
+    Looks at checklist.append/extend, any assignment to a name `checklist`, and checklist=...
+    keywords. A name is a literal only if a module-level constant (here or in `known`) says so:
+    a value stored in a variable first is not safe merely because of that."""
+    tree = ast.parse(source_text)
+    constants = dict(known)
+    constants.update({t.targets[0].id: t.value.value for t in tree.body if isinstance(t, ast.Assign) and len(t.targets) == 1
+                      and isinstance(t.targets[0], ast.Name) and isinstance(t.value, ast.Constant) and isinstance(t.value.value, str)})
+    literals: set[str] = set()
+    dynamic: list[str] = []
+
+    def take(node: ast.expr) -> None:
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            for item in node.elts:
+                take(item)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            literals.add(node.value)
+        elif isinstance(node, ast.Name) and node.id in constants:
+            literals.add(constants[node.id])
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and all(
+                isinstance(side, ast.Constant) for side in (node.left, node.right)):
+            literals.add(node.left.value + node.right.value)
+        elif isinstance(node, ast.JoinedStr) and _skeleton(node) in TYPED_LINES:
+            pass
+        elif ast.unparse(node) not in PASS_THROUGH:
+            dynamic.append(f"line {node.lineno}: {ast.unparse(node)}")
+
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("append", "extend")
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "checklist"):
+            take(node.args[0])
+        elif isinstance(node, ast.keyword) and node.arg == "checklist":
+            take(node.value)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Name) and t.id == "checklist" for t in targets):
+                take(node.value)
+    return literals, dynamic
+
+
+def _fixed_checks() -> set[str]:
+    start = SUMMARY.index("export const FIXED_CHECKS")
+    body = SUMMARY[start:SUMMARY.index("];", start)]
+    return {json.loads('"' + m.group(2) + '"') if m.group(1) == '"' else m.group(2)
+            for m in re.finditer(r"^\t(['\"])(.*)\1,$", body, re.M)}
+
+
+def _backend_constants() -> dict[str, str]:
+    values = {}
+    for _, tree in _backend_trees():
+        for t in tree.body:
+            if (isinstance(t, ast.Assign) and len(t.targets) == 1 and isinstance(t.targets[0], ast.Name)
+                    and isinstance(t.value, (ast.Constant, ast.BinOp))):
+                try:
+                    value = ast.literal_eval(t.value) if isinstance(t.value, ast.Constant) else eval(compile(ast.Expression(t.value), "c", "eval"), {})
+                except Exception:
+                    continue
+                if isinstance(value, str):
+                    values[t.targets[0].id] = value
+    return values
+
+
+def test_every_backend_checklist_line_is_known_wording_to_the_summary():
+    """The summary copies only the lines listed in FIXED_CHECKS. This keeps that list complete
+    and the backend's checklists free of lines built from submitted text."""
+    from backend.parser import NOT_ANALYSED_WORDING
+
+    known = _backend_constants()
+    literals, dynamic = set(), []
+    for name, _ in _backend_trees():
+        found, other = _checklist_sources((BACKEND / name).read_text(encoding="utf-8"), known)
+        literals |= found
+        dynamic += [f"{name} {line}" for line in other]
+    literals |= {check for _, check in NOT_ANALYSED_WORDING.values()}
+    assert not dynamic, dynamic
+    fixed = _fixed_checks()
+    assert len(fixed) >= 44
+    assert literals <= fixed, sorted(literals - fixed)
+
+
+def test_the_checklist_scan_catches_a_sensitive_value_stored_in_a_variable_first():
+    table = "orders_private"
+    for code in (f'checklist = []\nline = f"Back up {{table}} first"\nchecklist.append(line)\n',
+                 'checklist: list[str] = [f"Check {table}"]\n',
+                 'checklist = [f"Check {table}"]\n',
+                 'checklist = list(report.checklist) + [f"Check {table}"]\n',
+                 'checklist.extend([facts.where_predicate_summary])\n',
+                 'text = "Back up " + table\nchecklist.append(text)\n'):
+        _, dynamic = _checklist_sources(code, {})
+        assert dynamic, code
+    literals, dynamic = _checklist_sources('FIXED = "Do it."\nchecklist = [FIXED, "Also."]\n', {})
+    assert literals == {"Do it.", "Also."} and not dynamic
 
 
 def test_the_summary_leaves_out_the_fields_that_can_repeat_the_sql_or_name_the_database():
@@ -162,10 +227,13 @@ def test_stale_detection_is_unchanged_and_gates_the_button():
 HARNESS = """
 <script>
 window.__FIXTURES = %s;
-const clip = { texts: [], mode: 'ok' };
+const clip = { texts: [], mode: 'ok', held: [] };
+// mode 'hold': the write stays pending until the harness settles it (clip.held).
 Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
-  writeText: text => clip.mode === 'ok' ? (clip.texts.push(text), Promise.resolve())
-    : Promise.reject(new DOMException('denied', 'NotAllowedError')) } });
+  writeText: text => {
+    if (clip.mode === 'hold') return new Promise((resolve, reject) => clip.held.push({ text, resolve, reject }));
+    return clip.mode === 'ok' ? (clip.texts.push(text), Promise.resolve())
+      : Promise.reject(new DOMException('denied', 'NotAllowedError')); } } });
 window.__hold = null;
 window.fetch = (url) => {
   const json = (status, body) => Promise.resolve(new Response(JSON.stringify(body),
@@ -219,6 +287,59 @@ async function run() {
   OUT.stale.textsAfterClick = clip.texts.length;
   await review(window.__FIXTURES.single);
   OUT.again = { disabled: copyButton().disabled, stale: !!$('.stale') };
+  // A clipboard write that is still pending when the result changes must not report on it.
+  const settle = (index, ok = true) => { const w = clip.held[index]; if (ok) { clip.texts.push(w.text); w.resolve(); } else w.reject(new DOMException('denied', 'NotAllowedError')); };
+  const forget = () => { clip.held = []; };
+  clip.mode = 'hold';
+  copyButton().click();
+  await sleep(30);
+  OUT.heldCurrent = { before: note() };
+  settle(0);
+  await until(() => note() === 'Summary copied.', 'held write, result still current');
+  OUT.heldCurrent.after = note();
+  forget();
+  await sleep(30);
+  // 1. the SQL changes while the write is pending
+  copyButton().click();
+  await sleep(30);
+  typeSql('SELECT 5');
+  await sleep(60);
+  settle(0);
+  await sleep(120);
+  OUT.heldThenEdited = { note: note(), disabled: copyButton().disabled, stale: !!$('.stale') };
+  forget();
+  // 2. a newer review replaces the result while a write for the older one is pending
+  await review(window.__FIXTURES.batch);
+  copyButton().click();
+  await sleep(30);
+  typeSql('SELECT 6');
+  await sleep(40);
+  await review(window.__FIXTURES.single);
+  settle(0);
+  await sleep(120);
+  OUT.heldThenReplaced = { note: note(), disabled: copyButton().disabled };
+  forget();
+  // 3. a refused write for a result that is no longer current shows no error either
+  copyButton().click();
+  await sleep(30);
+  typeSql('SELECT 7');
+  await sleep(60);
+  settle(0, false);
+  await sleep(120);
+  OUT.refusedAfterEdit = { note: note() };
+  forget();
+  // 4. the result view goes away while the write is pending
+  await review(window.__FIXTURES.batch);
+  copyButton().click();
+  await sleep(30);
+  $$('.nav-item').find(b => b.textContent === 'Dashboard').click();
+  await sleep(60);
+  settle(0);
+  await sleep(120);
+  $$('.nav-item').find(b => b.textContent === 'SQL review').click();
+  await until(() => copyButton(), 'review view again');
+  OUT.heldThenLeft = { note: note(), disabled: copyButton().disabled };
+  clip.mode = 'ok';
   let release;
   window.__hold = new Promise(r => { release = r; });
   typeSql('SELECT 3');
@@ -305,3 +426,28 @@ def test_no_copy_button_while_a_review_runs_or_after_it_fails(page):
 def test_the_sql_copy_button_is_still_there(page):
     _, out = page
     assert out["copied"]["sqlCopyButtonStillThere"] is True
+
+
+def test_a_completed_write_for_the_current_result_shows_its_confirmation(page):
+    _, out = page
+    assert out["heldCurrent"] == {"before": "", "after": "Summary copied."}
+
+
+def test_a_write_that_finishes_after_the_sql_changed_shows_nothing(page):
+    _, out = page
+    assert out["heldThenEdited"] == {"note": "", "disabled": True, "stale": True}
+
+
+def test_a_write_that_finishes_after_a_newer_review_replaced_the_result_shows_nothing(page):
+    _, out = page
+    assert out["heldThenReplaced"] == {"note": "", "disabled": False}
+
+
+def test_a_refused_write_for_an_older_result_shows_no_error(page):
+    _, out = page
+    assert out["refusedAfterEdit"] == {"note": ""}
+
+
+def test_a_write_that_finishes_after_the_result_view_was_left_shows_nothing_when_it_returns(page):
+    _, out = page
+    assert out["heldThenLeft"] == {"note": "", "disabled": False}

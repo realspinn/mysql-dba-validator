@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { copySummaryFor, reviewSummaryText, writeToClipboard } from '../src/features/review/copySummary.ts';
+import { FIXED_CHECKS, approvedCheck, copySummaryFor, reviewSummaryText, writeToClipboard } from '../src/features/review/copySummary.ts';
 
 const load = name => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), 'utf8'));
 const clone = value => structuredClone(value);
@@ -283,4 +283,68 @@ test('a refused copy, a missing Clipboard API or a throwing one reports failure'
 	assert.equal(await writeToClipboard({ writeText: () => { throw new Error('sync failure'); } }, 's'), false);
 	assert.equal(await writeToClipboard(undefined, 's'), false);
 	assert.equal(await writeToClipboard({}, 's'), false);
+});
+
+// ------------------------------------------------------------------ statements that were not analysed
+
+const onlyNotAnalysed = () => {
+	const r = clone(NOT_ANALYSED.response);
+	r.statements = [r.statements[1]];
+	r.statement_count = 1;
+	return r;
+};
+
+test('a review of only an unanalysed statement says it is incomplete, never that no rule raised the score', () => {
+	const text = reviewSummaryText(onlyNotAnalysed());
+	assert.ok(text.includes('- Incomplete: 1 of 1 statement was not analysed, so its risk was not assessed and no findings are listed for it. Review it by hand.'));
+	assert.ok(!text.includes('No rule raised the score'));
+	assert.ok(text.includes('Status: Review incomplete.'));
+	assert.ok(text.includes('1. UNKNOWN: not analysed (not valid MySQL). The validator did not assess its risk.'));
+	assertNoSql(text, NOT_ANALYSED.sql);
+});
+
+test('a batch with analysed and unanalysed statements keeps the findings and is not presented as fully assessed', () => {
+	const text = reviewSummaryText(NOT_ANALYSED.response);
+	assert.ok(text.includes('- Statement 3 (MEDIUM): Base risk for DELETE (+20)'), 'the analysed statements keep their findings');
+	assert.ok(text.includes('- Incomplete: 1 of 3 statements were not analysed, so its risk was not assessed and no findings are listed for it.'));
+	assert.ok(text.includes('Status: Review incomplete. 1 of 3 statements were not analysed'));
+	assert.ok(!text.includes('Status: Review complete.'));
+});
+
+test('a fully analysed review with no scoring rule keeps its existing wording', () => {
+	const text = reviewSummaryText(SINGLE.response);
+	assert.ok(text.includes('- No rule raised the score. This does not mean the SQL is safe.'));
+	assert.ok(!text.includes('Incomplete:'));
+});
+
+// ------------------------------------------------------------------ checklist wording
+
+test('only known checklist wording is copied: identifiers, SQL and extended wording are counted, not printed', () => {
+	const r = clone(SINGLE.response);
+	r.statements[0].checklist = [
+		'Fix the SQL before proceeding.',
+		'Confirm the backup of table customers_secret before the write.',
+		'Review the explained SELECT secret_col FROM t as if it will be run on its own.',
+		'Review the explained DELETE as if it will be run on its own.',
+		'Fix the SQL before proceeding. password=hunter2',
+		{ text: 'Check DELETE FROM orders_private WHERE id = 7' },
+		'  Fix the SQL before proceeding.',
+	];
+	const text = reviewSummaryText(r);
+	const checks = text.slice(text.indexOf('DBA checks before execution'), text.indexOf('\nNote'));
+	assert.ok(checks.includes('- Fix the SQL before proceeding.\n'));
+	assert.ok(checks.includes('- Review the explained DELETE as if it will be run on its own.'), 'a statement type is allowed');
+	assert.ok(checks.includes('- 5 check(s) whose wording is not copied: see the validator'));
+	for (const value of ['customers_secret', 'secret_col', 'hunter2', 'orders_private', 'DELETE FROM']) assert.ok(!text.includes(value), value);
+});
+
+test('every check the formatter can copy is one of the listed fixed lines', () => {
+	assert.ok(FIXED_CHECKS.length >= 44 && new Set(FIXED_CHECKS).size === FIXED_CHECKS.length);
+	for (const fixture of [SINGLE, BATCH, NOT_ANALYSED, UPDATE_ALL]) {
+		const text = reviewSummaryText(fixture.response);
+		const checks = text.slice(text.indexOf('DBA checks before execution'), text.indexOf('\nNote')).split('\n').filter(l => l.startsWith('- '));
+		assert.ok(checks.length > 0);
+		for (const line of checks) assert.ok(approvedCheck(line.slice(2)) || /whose wording is not copied|more in the validator|No review actions/.test(line), line);
+		assert.ok(!/not copied/.test(text.slice(text.indexOf('DBA checks'))), 'real backend checklists are all known wording');
+	}
 });

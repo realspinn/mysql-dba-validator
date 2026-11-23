@@ -5,14 +5,14 @@
 // name their database: the SQL, parser messages (parse_error), the reasons (they can
 // quote the WHERE clause), table, column, index and database names, and any login or
 // connection detail. A finding or a checklist line is copied only when it is known
-// wording (see FIXED_FACTORS); anything else is counted, not printed.
+// wording (FIXED_FACTORS, FIXED_CHECKS); anything else is counted, not printed.
 // Pure functions with no DOM, so tests run them directly (web/tests).
 import type { Factor, ReviewResponse, Statement } from '../../types/review';
 import type { Reviewed, Run } from './useReview';
 import {
 	CONFIDENCE_TEXT, METADATA_COUNT_LABELS, NOT_ANALYSED_REASONS, PLAN_COUNT_LABELS, allFactors, analysisModeLabel,
 	completionText, evidenceHeadline, evidenceOf, evidenceStatusMessage, evidenceSummaryText, factorText, fixed,
-	reviewModel,
+	notAnalysedCount, reviewModel,
 } from './reviewText.ts';
 
 const LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -66,6 +66,63 @@ export function approvedFactor(s: Statement, factor: Factor): string | null {
 	}
 	return label;
 }
+
+// The DBA check lines the backend can produce (risk_engine, analyzer, evidence_scoring and the
+// not-analysed wording in parser). A line that is not here is not copied, whatever it says.
+// tests/test_frontend_copy_summary.py reads every checklist source in the backend and fails
+// if one is missing here.
+export const FIXED_CHECKS: readonly string[] = [
+	'Check the SQL before proceeding; the validator could not read it.',
+	'Check the transaction this SELECT runs in and how long it holds its row locks.',
+	'Check what each called function does before running this SELECT.',
+	'Confirm backup / point-in-time recovery is available for affected data.',
+	'Confirm no application code or downstream job depends on the column.',
+	'Confirm no application code or downstream job still depends on the column.',
+	'Confirm that affecting ALL rows is explicitly intended.',
+	'Confirm the change is explicitly approved.',
+	'Confirm the expected business impact before execution.',
+	'Confirm the expected number of rows being inserted.',
+	'Confirm the maintenance/change window is appropriate.',
+	'Confirm the read is intended at this volume; a selective, indexed filter narrows it. Consider the load before running it on a busy server.',
+	'Confirm the target table and column mapping.',
+	'Confirm this privilege change matches an approved access-control request.',
+	'Confirm this schema change has been reviewed against the migration/change process.',
+	'Consider executing in controlled batches if appropriate.',
+	'Consider transaction boundaries, isolation level and concurrent changes between your check and the write.',
+	'Do not execute a statement that the validator could not analyze.',
+	'Do not execute until the DBA has independently reviewed the operation.',
+	'Do not run EXPLAIN ANALYZE on a statement you would not run on its own.',
+	'Do not run this EXPLAIN ANALYZE until the statement it explains has been reviewed.',
+	'Estimate the affected-row count before execution.',
+	'Fix the SQL before proceeding.',
+	'Identify which tables and objects the procedure may modify.',
+	'Inspect the stored procedure definition before execution.',
+	'Review each statement independently before execution.',
+	'Review potential locking and application-impact concerns for the ALTER statement.',
+	'Review potential locking and application-impact concerns.',
+	'Review the EXPLAIN estimate and verify the expected business impact.',
+	'Review the EXPLAIN plan and confirm the access path is intended.',
+	'Review the affected table size before execution.',
+	"Review the candidate rows with a read-only query written for this statement's actual target table and predicate; a count is a point-in-time check, not a guarantee of what the write will change.",
+	'Review the execution plan before execution.',
+	'Review the execution plan when database-backed analysis is available.',
+	'Review the explained statement as if it will be run on its own.',
+	"Review the procedure's transaction and error-handling behavior.",
+	'Review this statement manually; the validator did not assess its risk.',
+	'Verify a recent backup or point-in-time recovery capability exists.',
+	'Verify backup or point-in-time recovery capability.',
+	'Verify duplicate-key and constraint behavior.',
+	'Verify that the WHERE predicate actually narrows the target rows.',
+	'Verify the exact object being removed.',
+	'Verify the expected affected-row count before execution.',
+	'Where appropriate, test the DML inside a transaction before committing.',
+];
+// The one check that names a statement type (a keyword, or UNKNOWN).
+export const CHECK_PATTERNS: readonly RegExp[] = [
+	new RegExp('^Review the explained ' + TYPE + ' as if it will be run on its own\\.$'),
+];
+
+export const approvedCheck = (line: string) => FIXED_CHECKS.includes(line) || CHECK_PATTERNS.some(pattern => pattern.test(line));
 
 interface Finding { n: number; level: string; points: number; text: string }
 
@@ -126,7 +183,6 @@ function limitations(data: ReviewResponse): string[] {
 	return lines;
 }
 
-const MAX_CHECK_LENGTH = 400;
 const MAX_CHECKS = 15;
 
 // The review as plain text.
@@ -151,12 +207,18 @@ export function reviewSummaryText(data: ReviewResponse): string {
 	}
 
 	const { shown, unshown } = findingsOf(statements);
+	const notAnalysed = notAnalysedCount(data);
+	// Statements that were not analysed carry no findings: say the list is incomplete, never
+	// that no rule raised the score.
+	const incomplete = notAnalysed ? ['- Incomplete: ' + notAnalysed + ' of ' + statements.length
+		+ (statements.length === 1 ? ' statement was' : ' statements were') + ' not analysed, so its risk was not assessed and no findings are listed for '
+		+ (notAnalysed === 1 ? 'it' : 'them') + '. Review ' + (notAnalysed === 1 ? 'it' : 'them') + ' by hand.'] : [];
 	section('Key findings', shown.length
 		? [...shown.slice(0, 5).map(f => '- Statement ' + f.n + ' (' + f.level + '): ' + f.text + ' (+' + f.points + ')'),
 			...(shown.length > 5 ? ['- ' + (shown.length - 5) + ' more in the validator'] : []),
-			...(unshown ? ['- ' + unshown + ' finding(s) whose wording is not copied: see the validator'] : [])]
-		: [unshown ? '- ' + unshown + ' finding(s) whose wording is not copied: see the validator'
-			: '- No rule raised the score. This does not mean the SQL is safe.']);
+			...(unshown ? ['- ' + unshown + ' finding(s) whose wording is not copied: see the validator'] : []), ...incomplete]
+		: unshown ? ['- ' + unshown + ' finding(s) whose wording is not copied: see the validator', ...incomplete]
+			: incomplete.length ? incomplete : ['- No rule raised the score. This does not mean the SQL is safe.']);
 
 	section('Statements, in the order submitted', statements.length ? statements.flatMap((s, index) => {
 		const head = (index + 1) + '. ' + typeName(s.statement_type)
@@ -186,9 +248,12 @@ export function reviewSummaryText(data: ReviewResponse): string {
 	const limits = limitations(data);
 	section('Limitations and unknowns', [...limits.map(l => '- ' + l), ...model.unknowns.map(([term, detail]) => '- ' + term + ': ' + detail)]);
 
-	const checks = model.actions.map(a => a.text).filter(t => t.length > 0 && t.length <= MAX_CHECK_LENGTH && !/[\r\n]/.test(t));
-	section('DBA checks before execution', checks.length
-		? [...checks.slice(0, MAX_CHECKS).map(c => '- ' + c), ...(checks.length > MAX_CHECKS ? ['- ' + (checks.length - MAX_CHECKS) + ' more in the validator'] : [])]
+	const lines = model.actions.map(a => a.text);
+	const checks = lines.filter(approvedCheck);
+	const omitted = lines.length - checks.length;
+	section('DBA checks before execution', checks.length || omitted
+		? [...checks.slice(0, MAX_CHECKS).map(c => '- ' + c), ...(checks.length > MAX_CHECKS ? ['- ' + (checks.length - MAX_CHECKS) + ' more in the validator'] : []),
+			...(omitted ? ['- ' + omitted + ' check(s) whose wording is not copied: see the validator'] : [])]
 		: ['- No review actions reported.']);
 
 	section('Note', ['This assessment is not approval to execute the SQL and not proof that it is safe. The validator never executes SQL. A DBA must make the decision.',
