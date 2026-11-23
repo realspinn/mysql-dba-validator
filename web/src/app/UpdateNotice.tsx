@@ -5,7 +5,7 @@ import { postUpdate } from '../api/local';
 import type { Json } from '../api/http';
 import { Icon } from '../shared/Icon';
 import {
-	confirmUpdated, downloadOffer, megabytes, readDismissed, RELEASE_PAGE, saveDismissed, savePending,
+	confirmUpdated, downloadOffer, megabytes, noFileDetail, readDismissed, RELEASE_PAGE, saveDismissed, savePending,
 	UPDATE_VERSION, type Offer,
 } from './updates';
 
@@ -43,7 +43,7 @@ export function UpdateNotice() {
 	const showOffer = useCallback((o: Offer, note = '') => {
 		const d = o.download;
 		const detail = d ? d.platform + ' · ' + megabytes(d.size) + (d.inApp ? '' : ' · downloaded by your browser')
-			: 'Download it from the release notes page.';
+			: noFileDetail(o.installed);
 		setStage({ stage: 'available', title: 'Update available', progress: 0, detail: note || detail,
 			text: 'MySQL DBA Validator ' + o.version + (o.current ? ' · you have ' + o.current : '') });
 		setHidden(false);
@@ -114,14 +114,14 @@ export function UpdateNotice() {
 			if (!active || !data) return;
 			const current = typeof data.current === 'string' && UPDATE_VERSION.test(data.current) ? data.current : '';
 			if (confirmUpdated(current)) {
-				setOffer({ version: current, current, download: null });
+				setOffer({ version: current, current, download: null, installed: false });
 				setStage({ stage: 'updated', title: 'Update complete', text: 'MySQL DBA Validator ' + current + ' is running.', detail: '', progress: 1 });
 				setHidden(false);
 				return;
 			}
 			const version = data.state === 'update_available' && typeof data.version === 'string' && UPDATE_VERSION.test(data.version) ? data.version : '';
 			if (!version || data.url !== RELEASE_PAGE + version || version === dismissedHere.current || version === readDismissed()) return;
-			const o: Offer = { version, current, download: downloadOffer(data.download, version) };
+			const o: Offer = { version, current, download: downloadOffer(data.download, version), installed: data.installed === true };
 			offerRef.current = o;
 			setOffer(o);
 			showOffer(o);

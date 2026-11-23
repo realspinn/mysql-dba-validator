@@ -48,7 +48,8 @@ same, already audited folder as the zip. It is built by Inno Setup from
   passes `APP_VERSION` from `backend/version.py`.
 - **Installed or portable.** Setup adds `installed-by-setup.txt` next to the executables.
   `backend/update_check.py` finds it beside `sys.executable` (not the working directory),
-  and an installed copy is then sent to the release page and offered no zip. The audit
+  and an installed copy is then sent to the release page and offered no zip; its update
+  notice says to download the Windows setup file, close the app and run it. The audit
   refuses a portable folder that holds the file.
 - **Running copies.** Setup does not close or restart the application (it may hold a
   connector session). If the validator runs from the install folder, Setup, and the

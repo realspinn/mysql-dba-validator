@@ -305,6 +305,7 @@ def test_an_installed_build_is_sent_to_the_release_page_and_offered_no_zip(monke
     body = _status(monkeypatch)
     assert body["state"] == "update_available" and body["url"] == update_check.RELEASE_PAGE + f"v{VERSION}"
     assert "download" not in body and NAME not in str(body)
+    assert body["installed"] is True  # the page then tells the user to download the setup file
     assert update_check.checked_asset() is None
     refused = client.post("/api/update-download", headers=OWN_PAGE)
     assert refused.status_code == 409 and refused.json() == {"error": "update_download_unavailable"}
@@ -315,6 +316,7 @@ def test_the_portable_build_is_offered_its_zip_as_before(monkeypatch, tmp_path):
     monkeypatch.setattr(update_check, "platform_build", lambda *a: update_check.WINDOWS)
     body = _status(monkeypatch)
     assert body["download"]["name"] == NAME and body["download"]["in_app"] is True
+    assert "installed" not in body
     assert update_check.checked_asset()["name"] == NAME
 
 

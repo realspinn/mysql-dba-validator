@@ -168,6 +168,8 @@ def _check() -> dict:
     result = {"state": UPDATE_AVAILABLE, "current": APP_VERSION, "version": tag[1:], "url": RELEASE_PAGE + tag}
     global _asset
     _asset = None if installed_edition() else platform_asset(release, tag[1:])
+    if installed_edition():
+        result["installed"] = True  # the page then says to download the setup file
     if _asset is not None:
         result["download"] = {
             "name": _asset["name"], "size": _asset["size"], "platform": _asset["platform"],
