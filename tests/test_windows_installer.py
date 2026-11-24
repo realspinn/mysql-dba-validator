@@ -331,7 +331,10 @@ def test_the_audit_refuses_a_portable_folder_that_holds_the_installer_marker(tmp
     assert any("installer marker" in finding for finding in findings)
 
 
-@pytest.mark.skipif(shutil.which("powershell") is None, reason="needs Windows PowerShell")
+_POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")  # the runner images of all three systems have pwsh
+
+
+@pytest.mark.skipif(_POWERSHELL is None, reason="needs PowerShell")
 @pytest.mark.parametrize("subject, accepted", [
     ("CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL", True),
     ("O=Pyrsys B.V.", True),
@@ -346,7 +349,7 @@ def test_the_compiler_signer_must_be_exactly_the_publisher(tmp_path, subject, ac
     script = tmp_path / "check.ps1"
     script.write_text("param([string]$Subject, [string]$Publisher)\n" + build_installer.TEST_PUBLISHER
                       + "\nif (Test-Publisher $Subject $Publisher) { 'accepted' } else { 'refused' }\n", encoding="utf-8")
-    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+    out = subprocess.run([_POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
                           "-Subject", subject, "-Publisher", build_installer.COMPILER_PUBLISHER],
                          capture_output=True, text=True, timeout=60)
     assert out.stdout.strip() == ("accepted" if accepted else "refused"), out.stderr
