@@ -6,7 +6,7 @@ MySQL DBA Validator helps DBAs review MySQL SQL from tickets before it is run. P
 
 It supports DBA judgement; it does **not** guarantee that SQL is safe.
 
-**Current release: [v0.11.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0)** · Pre-1.0 · Portable Windows x64 and unsigned macOS Apple Silicon builds.
+**Current release: [v0.12.0](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.12.0)** · Pre-1.0 · Windows x64 installer and portable ZIP, and unsigned macOS Apple Silicon builds.
 
 ![The SQL review screen: four made-up statements in the editor and the result beside them, with overall risk CRITICAL 100/100 from statement 2 (a DELETE with no WHERE clause), confidence LIMITED, static analysis, and the execution plan, filter, limitation and unknown rows](docs/images/validator-sql-review.png)
 
@@ -42,7 +42,7 @@ Both screenshots show made-up SQL reviewed with static analysis only, without a 
 
 ## Download and run
 
-Get the ZIP and its matching `.sha256` file from the [v0.11.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). Verify the checksum before running the application.
+Get the ZIP and its matching `.sha256` file from the [v0.12.0 release page](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.12.0). Verify the checksum before running the application.
 
 **Windows x64** has two downloads. Both run the same application, locally in your browser. Python is not needed, and MySQL is optional (static analysis works without it).
 
@@ -65,7 +65,7 @@ Neither Windows download is code-signed, so Windows SmartScreen may warn about t
 
 **macOS (Apple Silicon only)**
 
-Download `MySQL-DBA-Validator-v0.11.0-macos-arm64-unsigned.zip`, verify it with its checksum file, then follow the opening instructions in the [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.11.0). The app is not notarized.
+Download `MySQL-DBA-Validator-v0.12.0-macos-arm64-unsigned.zip`, verify it with its checksum file, then follow the opening instructions in the [release notes](https://github.com/realspinn/mysql-dba-validator/releases/tag/v0.12.0). The app is not notarized.
 
 **Updates:** the app can check GitHub for a newer release at startup and show a dismissible notice. On Windows, **Update** downloads the new release ZIP and verifies it (size, SHA-256 digest from GitHub, archive contents); you then close the app, extract the ZIP and open the new folder. It never installs or runs anything itself. An installed copy does not offer the ZIP: its notice links to the release page, where you download the setup file. On macOS the notice links to the release file for your browser to download. v0.7.0 and v0.8.0 show the notice with a link to the release page only: install the newer version by hand once (saved targets, the `.env` file and the theme are kept), and from then on the Windows **Update** and the macOS **Download** link work as above. GitHub receives your IP address and the installed version; no SQL, login or connection details are sent. Set `MDV_UPDATE_CHECK=off` to disable the check. Details: [SECURITY.md](SECURITY.md#security-model-in-brief).
 
