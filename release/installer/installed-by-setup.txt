@@ -1,0 +1,4 @@
+This file is put here by the MySQL DBA Validator setup program. Its presence tells the
+application that it was installed with Setup, not extracted from the portable ZIP, so it
+points to the setup file (not the ZIP) when a newer release exists. It holds no settings
+and the application never writes to this folder. Do not delete it.

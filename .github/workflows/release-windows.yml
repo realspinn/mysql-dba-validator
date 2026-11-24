@@ -1,8 +1,10 @@
 name: Windows portable release
 
 # Builds MySQL-DBA-Validator-v<version>-windows-x64.zip, smoke-tests the built
-# artifact, and (for v* tags) attaches it to a DRAFT GitHub Release. A maintainer
-# reviews and publishes the draft by hand.
+# artifact, builds the installer (MySQL-DBA-Validator-v<version>-windows-x64-setup.exe)
+# from that same audited folder and installs, upgrades and uninstalls it on the runner,
+# and (for v* tags) attaches both files and their checksums to a DRAFT GitHub Release.
+# A maintainer reviews and publishes the draft by hand. Nothing here signs anything.
 #
 # windows-x64 installs dependencies, runs the tests and builds with a read-only
 # token. Only draft-release can write releases: it checks out nothing, runs no
@@ -57,11 +59,20 @@ jobs:
       - name: Smoke-test the built artifact
         run: python release/smoke_test_artifact.py (Get-ChildItem dist/*.zip).FullName
 
-      - uses: actions/upload-artifact@v4
+      # Inno Setup 6.7.x comes with the runner image; the build records its version, hash
+      # and signature, and fails on any other series (release/build_installer.py).
+      - name: Build the installer
+        run: python release/build_installer.py
+
+      - name: Test the installer (install, upgrade, uninstall)
+        run: python release/smoke_test_installer.py (Get-ChildItem dist/*-setup.exe).FullName
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: windows-x64-portable
+          name: windows-x64-release
           path: |
             dist/*.zip
+            dist/*.exe
             dist/*.sha256
           if-no-files-found: error
 
@@ -88,7 +99,7 @@ jobs:
 
       - name: Upload failure manifest
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: FAILED-build-manifest
           path: diagnostics/
@@ -96,7 +107,7 @@ jobs:
           retention-days: 7
 
   draft-release:
-    # Runs only after windows-x64 passed (tests, build, audit, smoke test), on exactly
+    # Runs only after windows-x64 passed (tests, build, audit, smoke test, installer test), on exactly
     # its artifact. The downloaded files are data: they are checked, never run, and
     # every name used comes from the tag.
     needs: windows-x64
@@ -107,7 +118,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          name: windows-x64-portable
+          name: windows-x64-release
           path: windows-release
 
       - name: Check the zip and its checksum, then create the draft release
@@ -118,16 +129,21 @@ jobs:
         run: |
           set -euo pipefail
           zip="MySQL-DBA-Validator-${TAG}-windows-x64.zip"
+          setup="MySQL-DBA-Validator-${TAG}-windows-x64-setup.exe"
           cd windows-release
-          # Exactly this tag's zip and its checksum: nothing missing, nothing extra.
-          test "$(ls -A | LC_ALL=C sort)" = "$(printf '%s\n' "$zip" "$zip.sha256")"
-          test -f "$zip"
-          test ! -L "$zip"
-          test -f "$zip.sha256"
-          test ! -L "$zip.sha256"
-          # Byte for byte "<64 lowercase hex>  <zip name>\n": one line, LF only, this zip's hash.
-          printf '%s  %s\n' "$(shasum -a 256 "$zip" | cut -d ' ' -f 1)" "$zip" | cmp -s - "$zip.sha256"
-          shasum -a 256 -c "$zip.sha256"
+          # Exactly this tag's two files and their checksums: nothing missing, nothing extra.
+          test "$(ls -A | LC_ALL=C sort)" = "$(printf '%s\n' "$setup" "$setup.sha256" "$zip" "$zip.sha256" | LC_ALL=C sort)"
+          for file in "$zip" "$zip.sha256" "$setup" "$setup.sha256"; do
+            test -f "$file"
+            test ! -L "$file"
+          done
+          # Each checksum is byte for byte "<64 lowercase hex>  <file name>\n": one line, LF only, that file's hash.
+          for file in "$zip" "$setup"; do
+            printf '%s  %s\n' "$(shasum -a 256 "$file" | cut -d ' ' -f 1)" "$file" | cmp -s - "$file.sha256"
+            shasum -a 256 -c "$file.sha256"
+          done
           unzip -tqq "$zip"
+          # A Windows program: starts with "MZ".
+          test "$(head -c 2 "$setup")" = "MZ"
           # Never creates a draft over an existing release; no asset is replaced.
-          gh release create "$TAG" "$zip" "$zip.sha256" --draft --title "MySQL DBA Validator $TAG" --notes "Windows x64 portable ZIP (no installer). Verify with the .sha256 file. See README for scope and verification status."
+          gh release create "$TAG" "$zip" "$zip.sha256" "$setup" "$setup.sha256" --draft --title "MySQL DBA Validator $TAG" --notes "Windows x64: the setup file (installer, current user, no administrator rights) and the portable ZIP. Both are unsigned: Windows SmartScreen may warn. Verify each with its .sha256 file. See README for scope and verification status."

@@ -1,6 +1,6 @@
 name: Package check
 
-# Builds the real Windows portable zip and the unsigned macOS app for every pull
+# Builds the real Windows portable zip and installer and the unsigned macOS app for every pull
 # request to main, with the same scripts the release workflows use, and starts the
 # packaged executables with the existing smoke tests. A change that passes the
 # Python tests but breaks the packaged app fails here, before a release tag.
@@ -44,6 +44,12 @@ jobs:
 
       - name: Smoke-test the built artifact
         run: python release/smoke_test_artifact.py (Get-ChildItem dist/*.zip).FullName
+
+      - name: Build the installer
+        run: python release/build_installer.py
+
+      - name: Test the installer (install, upgrade, uninstall)
+        run: python release/smoke_test_installer.py (Get-ChildItem dist/*-setup.exe).FullName
 
   macos:
     name: Package (macos-arm64-unsigned)

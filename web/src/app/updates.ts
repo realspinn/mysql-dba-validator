@@ -3,7 +3,7 @@
 // newer version whose link is the official release page. Only version numbers are
 // stored: the one dismissed with "Later", and the one being installed (so the new copy
 // can confirm it is running).
-import { readStored, removeStored, writeStored } from '../shared/storage';
+import { readStored, removeStored, writeStored } from '../shared/storage.ts';
 
 export const UPDATE_VERSION = /^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$/;
 export const RELEASE_PAGE = 'https://github.com/realspinn/mysql-dba-validator/releases/tag/v';
@@ -23,7 +23,13 @@ export const saveDismissed = (version: string) => saveVersion(DISMISSED, version
 export const savePending = (version: string) => saveVersion(PENDING, version);
 
 export interface DownloadOffer { name: string; url: string; size: number; platform: string; inApp: boolean }
-export interface Offer { version: string; current: string; download: DownloadOffer | null }
+export interface Offer { version: string; current: string; download: DownloadOffer | null; installed: boolean }
+
+// What the notice says when the page has no file to offer. A copy installed with Setup is
+// updated with the setup file, not with a zip.
+export const noFileDetail = (installed: boolean) => installed
+	? 'Download the Windows setup file from the release notes page, close the app, then run it.'
+	: 'Download it from the release notes page.';
 
 // Only the official file for this exact version and a known build.
 export function downloadOffer(download: unknown, version: string): DownloadOffer | null {

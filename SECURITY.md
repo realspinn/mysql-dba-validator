@@ -154,6 +154,11 @@ How the components and request flows fit together is described in
   the update check and are not served by the public demo. On macOS, and when
   running from source, the notice links to the release file and the browser
   downloads it, so Gatekeeper checks it as any download.
+  A build installed with the Windows setup file never downloads in the app and is
+  offered no ZIP: its notice links to the official release page, and the user
+  downloads and runs the setup file, closing the app first. Setup is not run by the
+  app, installs for the current user only, and the setup file is not code signed (a
+  SHA-256 shows which file it is, not who built it).
 
 ## Known limitations
 
